@@ -8,29 +8,31 @@
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#ffffff;color:#222222;overflow:hidden}
+
     /* telas */
-    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
+    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:18px}
 
     /* -------- INICIO/BOAS-VINDAS: CARD BEM MAIOR -------- */
-    #enterFs{display:flex;align-items:center;justify-content:center; padding: 20px; }
+    #enterFs{display:flex;align-items:center;justify-content:center;padding:24px}
     #enterFs .card, #welcome { 
-      width: 96%;
-      max-width: 1000px;           /* grande para telas maiores */
-      padding: 44px;               /* mais espaço interno */
+      width: 98%;
+      max-width: 1100px;          /* aumentado bastante */
+      padding: 48px;              /* mais espaço interno */
       border-radius: 18px;
-      background: rgba(255,255,255,0.98);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.08);
+      background: rgba(255,255,255,0.995);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.08);
       text-align:center;
       border: 1px solid rgba(0,0,0,0.06);
     }
 
-    /* logo: tenta logo1.png e cai para logo.png se não houver */
-    .logo{max-width:320px;margin-bottom:22px;border-radius:10px;display:block;margin-left:auto;margin-right:auto}
-    #enterFs h1, #welcome h1 { font-size: 34px; margin-bottom: 14px; color:#222222; }
-    #enterFs p, #welcome p { font-size: 20px; color:#444; margin-bottom:20px }
+    /* logo: tenta /public/logo1.png e cai para /public/logo.png se não houver */
+    .logo{height:120px; width:auto; margin-bottom:26px; border-radius:10px; display:block; margin-left:auto; margin-right:auto; object-fit:contain;}
+    #enterFs h1, #welcome h1 { font-size: 44px; line-height:1.05; margin-bottom: 14px; color:#222222; }
+    #enterFs p, #welcome p { font-size: 20px; color:#444; margin-bottom:22px; max-width:920px; margin-left:auto; margin-right:auto; }
 
-    #enterFsBtn{padding:20px 34px;border-radius:12px;border:none;background:#b07e09;color:#fff;font-weight:800;cursor:pointer;font-size:24px;margin:10px auto;width:92%;max-width:520px;display:block}
-    #startBtn{padding:18px 30px;border-radius:12px;border:none;background:#b07e09;color:#fff;font-weight:800;cursor:pointer;font-size:22px;margin-top:12px;width:92%;max-width:480px;display:block}
+    /* botões bem grandes para toque fácil */
+    #enterFsBtn{padding:22px 36px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:900;cursor:pointer;font-size:26px;margin:12px auto;width:90%;max-width:560px;display:block}
+    #startBtn{padding:20px 32px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:900;cursor:pointer;font-size:24px;margin-top:18px;width:90%;max-width:520px;display:block}
 
     /* vídeo e canvas (por baixo da UI) */
     #videoWrap{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:0}
@@ -38,7 +40,7 @@
     #canvasEl{display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:1}
 
     /* progress */
-    #progress{position:fixed;top:20px;left:50%;transform:translateX(-50%);text-align:center;font-size:20px;font-weight:700;z-index:220;color:#222;background:rgba(255,255,255,0.95);padding:8px 14px;border-radius:10px;display:none}
+    #progress{position:fixed;top:18px;left:50%;transform:translateX(-50%);text-align:center;font-size:20px;font-weight:700;z-index:220;color:#222;background:rgba(255,255,255,0.95);padding:10px 16px;border-radius:12px;display:none}
 
     /* -------- CONTAGEM - OVERLAY FULLSCREEN -------- */
     #countdownOverlay{
@@ -47,59 +49,64 @@
       display:none; /* só durante countdown */
       align-items:center;
       justify-content:center;
-      z-index:300;
-      background: rgba(0,0,0,0.85); /* bloqueia totalmente o vídeo por baixo */
+      z-index:350;
+      background: rgba(0,0,0,0.88); /* bloqueia totalmente o vídeo por baixo */
     }
     #countdownText {
       color: #ffffff;
-      font-size: 140px;
+      font-size: 160px;
       font-weight:900;
       text-align:center;
       line-height:1;
-      -webkit-text-stroke: 0.5px rgba(0,0,0,0.25);
-      padding: 10px 18px;
-    }
-    @media (max-width:480px){
-      #countdownText { font-size: 86px; }
-      #enterFs h1, #welcome h1 { font-size: 28px; }
-      #enterFsBtn{font-size:20px;padding:16px 20px}
+      -webkit-text-stroke: 0.6px rgba(0,0,0,0.30);
+      padding: 8px 18px;
     }
 
-    /* -------- PREVIEW: manter mesmo crop que vídeo -------- */
-    #previewScreen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:400;background:rgba(0,0,0,0.88)}
+    /* PREVIEW: manter mesmo crop que vídeo */
+    #previewScreen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:420;background:rgba(0,0,0,0.92)}
     #previewInner{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
-    #previewImage{max-width:100%;max-height:100%;object-fit:cover;border-radius:4px}
+    #previewImage{max-width:100%;max-height:100%;object-fit:cover;border-radius:6px}
 
-    .preview-controls{position:absolute;bottom:28px;left:0;right:0;display:flex;justify-content:center;gap:12px;z-index:410}
-    .btn { padding:12px 18px;border-radius:10px;border:none;font-weight:700;cursor:pointer }
-    .btn--brand{background:#b07e09;color:#fff}
-    .btn--light{background:#fff;color:#222;border:1px solid rgba(0,0,0,0.06)}
+    .preview-controls{position:absolute;bottom:28px;left:0;right:0;display:flex;justify-content:center;gap:16px;z-index:430}
+    .btn { padding:14px 20px;border-radius:12px;border:none;font-weight:800;cursor:pointer }
+    .btn--brand{background:#b07e09;color:#fff;font-size:18px}
+    .btn--light{background:#fff;color:#222;border:1px solid rgba(0,0,0,0.06);font-size:18px}
 
-    /* thank screen / outras */
-    #thankScreen .card{max-width:720px}
+    /* thank screen */
+    #thankScreen .card{max-width:920px}
 
     /* debug */
-    #debugInfo {position:fixed;bottom:10px;left:10px;font-size:12px;color:#666;background:rgba(255,255,255,0.95);padding:6px;border-radius:6px;z-index:500;border:1px solid rgba(0,0,0,0.06)}
+    #debugInfo {position:fixed;bottom:12px;left:12px;font-size:12px;color:#666;background:rgba(255,255,255,0.95);padding:6px;border-radius:6px;z-index:500;border:1px solid rgba(0,0,0,0.06)}
+
+    /* Responsivo: em phones manter tudo grande mas adaptável */
+    @media (max-width: 480px){
+      .logo{height:96px}
+      #enterFs h1, #welcome h1 { font-size: 28px; }
+      #enterFs p, #welcome p { font-size: 16px; }
+      #enterFsBtn{font-size:20px;padding:16px 24px}
+      #countdownText { font-size: 86px; }
+      .btn--brand, .btn--light { font-size:16px; padding:12px 16px; }
+    }
   </style>
 </head>
 <body>
   <!-- INICIAR TELA (maior) -->
   <div id="enterFs" class="screen visible">
     <div class="card">
-      <!-- tenta logo1.png primeiro; se falhar, usa logo.png -->
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.onerror=null; this.src='logo.png'">
+      <!-- carrega logo1.png da pasta public (caminho absoluto); se falhar, usa /public/logo.png -->
+      <img src="/public/logo1.png" alt="Logo" class="logo" onerror="this.onerror=null; this.src='/public/logo.png'">
       <h1>📸 Cabine Fotográfica</h1>
-      <p style="max-width:820px;margin:0 auto 18px">Para melhor experiência, entre em tela cheia e clique em iniciar sessão. Use o botão abaixo para começar.</p>
+      <p>Para melhor experiência, entre em tela cheia e clique em iniciar sessão. Use o botão abaixo para começar.</p>
       <button id="enterFsBtn">🎬 Entrar em Tela Cheia</button>
     </div>
   </div>
 
-  <!-- WELCOME maior -->
+  <!-- WELCOME (card grande) -->
   <div id="welcomeScreen" class="screen hidden">
     <div id="welcome" class="card">
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.onerror=null; this.src='logo.png'">
+      <img src="/public/logo1.png" alt="Logo" class="logo" onerror="this.onerror=null; this.src='/public/logo.png'">
       <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
-      <p style="max-width:820px;margin:0 auto 18px">Clique abaixo para iniciar a sessão de fotos. Toque o botão para começar a captura.</p>
+      <p>Clique abaixo para iniciar a sessão de fotos. Toque o botão para começar a captura.</p>
       <button id="startBtn">🎬 Iniciar Sessão de Fotos</button>
     </div>
   </div>
@@ -130,7 +137,7 @@
 
   <div id="thankScreen" class="screen hidden">
     <div class="card">
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.onerror=null; this.src='logo.png'">
+      <img src="/public/logo1.png" alt="Logo" class="logo" onerror="this.onerror=null; this.src='/public/logo.png'">
       <h1>✨ Obrigado por utilizar a cabine!</h1>
       <p>Aguarde o operador encerrar a sessão.</p>
     </div>
@@ -144,7 +151,7 @@
 
   <script>
     // servidor/socket (mantive sua URL)
-    const SERVER_URL = "https://festadodavi.onrender.com";
+    const SERVER_URL = "https://agoraequeeuquerover-production.up.railway.app";
     const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true, reconnectionAttempts:5, reconnectionDelay:1000, timeout:20000, forceNew:false, withCredentials:true });
 
     // elementos
@@ -175,7 +182,7 @@
     setInterval(()=>{ debugEl.textContent = `Sessão: ${session || 'none'} | Socket: ${socket.connected ? '🟢' : '🔴'}` }, 1000);
 
     function showScreen(screenElement){
-      // esconder telas (exceto videoWrap que fica atrás)
+      // esconder telas (exceto videoWrap)
       [enterFs, welcomeScreen, previewScreen, thankScreen].forEach(s => {
         if(!s) return;
         s.classList.add('hidden');
@@ -193,7 +200,7 @@
 
     function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-    // startCamera com fallback para compatibilidade (corrige muitos Android)
+    // startCamera com fallback (melhora compatibilidade Android)
     async function startCamera(){
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "user" } }, audio:false });
@@ -246,7 +253,7 @@
         await sleep(1000);
       }
 
-      // hide overlay just before capture to avoid black frame (still keeps consistent framing)
+      // hide overlay just before capture to avoid a black frame
       countdownOverlay.style.display = 'none';
 
       // capture
@@ -261,7 +268,6 @@
     }
 
     function showPhotoPreview(photoData){
-      // ajusta preview para mesma dimensão do video antes de mostrar para evitar jump
       previewImage.src = photoData;
       fitPreviewToVideo();
       previewScreen.style.display = 'flex';
@@ -283,7 +289,6 @@
     function stopCamera(){ if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} videoEl.style.display='none'; canvasEl.style.display='none'; }
 
     refazerBtn.addEventListener('click',async()=>{
-      // remove preview and continue sequence
       previewScreen.style.display = 'none';
       previewScreen.classList.add('hidden');
       showScreen(null);
@@ -301,7 +306,7 @@
       await runCaptureSequence();
     });
 
-    // envio de fotos (mantive a lógica original, sem socket.connect() forçado)
+    // envio de fotos (mantive a lógica original)
     function sendPhotosToServer(){
       if(session && photos.length>0){
         const sendPhotosWithRetry=(attempt=1,maxAttempts=5)=>{
@@ -309,7 +314,6 @@
             socket.emit('photos_from_cell',{photos,attempt,totalAttempts:maxAttempts});
             if(attempt<maxAttempts){ setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),1500); }
           } else if(attempt<maxAttempts){
-            // espera reconexão automática do socket
             setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),2000);
           }
         };
