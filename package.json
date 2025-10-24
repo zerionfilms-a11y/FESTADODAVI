@@ -1,0 +1,30 @@
+{
+  "name": "cabine-photobooth",
+  "version": "1.0.0",
+  "description": "Cabine fotográfica com controle remoto via celular e servidor Node.js + Socket.IO",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "photo-booth",
+    "socket.io",
+    "express",
+    "camera",
+    "remote-control",
+    "webapp"
+  ],
+  "author": "teu_nome_aqui",
+  "license": "MIT"
+}
