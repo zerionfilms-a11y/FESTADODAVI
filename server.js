@@ -11,7 +11,7 @@ const app = express();
 app.use((req, res, next) => {
   const allowedOrigins = [
     'https://agoraequeeuquerover.vercel.app',
-    'https://agoraequeeuquerover-production.up.railway.app',
+    'https://festadodavi.onrender.com/',
     'http://localhost:3000',
     'http://localhost:10000'
   ];
