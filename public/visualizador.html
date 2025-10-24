@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Visualizador de Fotos - Suas Fotos 📸</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body { 
+      margin: 0; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      background: linear-gradient(135deg, #1a1a2e, #16213e);
+      color: white; 
+      padding: 15px;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      font-size: 16px;
+    }
+    
+    .session-info { 
+      background: rgba(255,255,255,0.1); 
+      padding: 20px; 
+      border-radius: 20px; 
+      margin-bottom: 20px; 
+      text-align: center;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.2);
+      width: 100%;
+      max-width: 500px;
+    }
+    
+    .session-info h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+      color: #fff;
+    }
+    
+    .session-info p {
+      font-size: 16px;
+      margin: 5px 0;
+    }
+    
+    .expiry-info {
+      background: rgba(255,193,7,0.2);
+      padding: 12px;
+      border-radius: 12px;
+      margin: 15px 0;
+      border: 1px solid rgba(255,193,7,0.3);
+      font-size: 14px;
+      text-align: center;
+    }
+    
+    .download-all-btn { 
+      padding: 18px 25px; 
+      background: linear-gradient(135deg, #007bff, #0056b3); 
+      color: white; 
+      border: none; 
+      border-radius: 12px; 
+      cursor: pointer; 
+      font-size: 18px; 
+      font-weight: bold; 
+      margin-bottom: 20px;
+      width: 100%;
+      max-width: 500px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    }
+    
+    .gallery { 
+      display: flex; 
+      flex-direction: column;
+      align-items: center;
+      gap: 25px;
+      width: 100%;
+      max-width: 500px;
+    }
+    
+    .photo-container { 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      background: rgba(255,255,255,0.1);
+      padding: 20px;
+      border-radius: 20px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.2);
+      width: 100%;
+    }
+    
+    .stories-container {
+      background: linear-gradient(135deg, #833AB4, #C13584, #E1306C, #FD1D1D);
+      padding: 25px;
+      border-radius: 25px;
+      margin-bottom: 30px;
+    }
+    
+    .stories-title {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 15px;
+      text-align: center;
+      color: white;
+    }
+    
+    img { 
+      width: 100%;
+      max-width: 300px;
+      height: auto;
+      border-radius: 15px; 
+      border: 3px solid rgba(255,255,255,0.3);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      margin-bottom: 15px;
+    }
+    
+    .download-btn { 
+      padding: 15px 20px; 
+      background: linear-gradient(135deg, #28a745, #20c997); 
+      color: white; 
+      border: none; 
+      border-radius: 10px; 
+      cursor: pointer; 
+      font-size: 16px; 
+      font-weight: bold;
+      width: 100%;
+      max-width: 300px;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.2);
+    }
+    
+    .instagram-btn {
+      background: linear-gradient(135deg, #405DE6, #5851DB, #833AB4, #C13584, #E1306C, #FD1D1D);
+      color: white;
+      padding: 18px 25px;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 18px;
+      font-weight: bold;
+      width: 100%;
+      max-width: 300px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    
+    .instagram-btn img {
+      width: 28px;
+      height: 28px;
+      border: none;
+      box-shadow: none;
+      margin: 0;
+      border-radius: 0;
+    }
+    
+    .loading {
+      font-size: 20px;
+      text-align: center;
+      margin: 40px 0;
+      color: #ccc;
+    }
+    
+    .no-photos {
+      font-size: 18px;
+      text-align: center;
+      margin: 40px 0;
+      color: #ccc;
+      padding: 20px;
+    }
+    
+    @media (max-width: 480px) {
+      body {
+        padding: 10px;
+      }
+      
+      .session-info {
+        padding: 15px;
+        margin-bottom: 15px;
+      }
+      
+      .session-info h1 {
+        font-size: 24px;
+      }
+      
+      .download-all-btn, .instagram-btn {
+        padding: 16px 20px;
+        font-size: 16px;
+      }
+      
+      .photo-container {
+        padding: 15px;
+      }
+      
+      img {
+        max-width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="session-info">
+    <h1>📸 Suas Fotos</h1>
+    <p><strong>Sessão:</strong> <span id="viewerIdDisplay">—</span></p>
+    <div class="expiry-info">
+      ⏰ Estas fotos ficarão disponíveis por 7 dias
+    </div>
+  </div>
+
+  <button id="downloadAllBtn" class="download-all-btn" style="display:none;">
+    📥 Download Todas as Fotos
+  </button>
+
+  <div id="gallery" class="gallery">
+    <div class="loading">🔄 Carregando suas fotos...</div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const viewerId = params.get("viewerId");
+    const gallery = document.getElementById("gallery");
+    const downloadAllBtn = document.getElementById("downloadAllBtn");
+    const viewerIdDisplay = document.getElementById("viewerIdDisplay");
+    
+    const socket = io("https://agoraequeeuquerover-production.up.railway.app");
+
+    // Mostrar viewerId atual
+    if (viewerId) {
+      viewerIdDisplay.textContent = viewerId;
+      
+      // Conectar ao visualizador
+      socket.emit("join_viewer", { viewerId });
+    } else {
+      gallery.innerHTML = "<div class='no-photos'>❌ ID do visualizador não encontrado na URL.</div>";
+    }
+
+    let currentPhotos = [];
+    let currentStoriesMontage = null;
+
+    // Receber dados do visualizador
+    socket.on("viewer_photos_ready", (data) => {
+      console.log('📸 Dados recebidos no visualizador:', data);
+      
+      if (!data || !data.photos || !Array.isArray(data.photos)) {
+        gallery.innerHTML = "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
+        return;
+      }
+      
+      currentPhotos = data.photos;
+      currentStoriesMontage = data.storiesMontage;
+      
+      renderGallery(currentPhotos, currentStoriesMontage);
+      
+      if (currentPhotos.length > 0) {
+        downloadAllBtn.style.display = 'block';
+      }
+    });
+
+    function renderGallery(photos, storiesMontage) {
+      gallery.innerHTML = '';
+      
+      // Adicionar a moldura do stories se existir
+      if (storiesMontage) {
+        const storiesContainer = document.createElement("div");
+        storiesContainer.className = "photo-container stories-container";
+
+        const storiesTitle = document.createElement("div");
+        storiesTitle.className = "stories-title";
+        storiesTitle.innerHTML = "📱 Pronto para o Instagram";
+        storiesContainer.appendChild(storiesTitle);
+
+        const storiesImg = document.createElement("img");
+        storiesImg.src = storiesMontage;
+        storiesImg.alt = "Pronto para o Instagram";
+        storiesImg.loading = "lazy";
+
+        const instagramBtn = document.createElement("button");
+        instagramBtn.className = "instagram-btn";
+        instagramBtn.innerHTML = `
+          <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png" alt="Instagram">
+          Baixar Pronto pro Instagram
+        `;
+        instagramBtn.onclick = function() {
+          downloadImage(storiesMontage, `pronto-instagram-${viewerId}.jpg`);
+        };
+
+        storiesContainer.appendChild(storiesImg);
+        storiesContainer.appendChild(instagramBtn);
+        gallery.appendChild(storiesContainer);
+      }
+      
+      // Adicionar as fotos individuais
+      photos.forEach((photoData, index) => {
+        const container = document.createElement("div");
+        container.className = "photo-container";
+
+        const img = document.createElement("img");
+        img.src = photoData;
+        img.alt = `Foto ${index + 1}`;
+        img.loading = "lazy";
+
+        const downloadBtn = document.createElement("button");
+        downloadBtn.className = "download-btn";
+        downloadBtn.textContent = `📥 Download Foto ${index + 1}`;
+        downloadBtn.onclick = function() {
+          downloadImage(photoData, `foto-${index + 1}.jpg`);
+        };
+
+        container.appendChild(img);
+        container.appendChild(downloadBtn);
+        gallery.appendChild(container);
+      });
+    }
+
+    // Download de todas as fotos
+    downloadAllBtn.addEventListener('click', () => {
+      if (currentPhotos.length === 0) return;
+      
+      currentPhotos.forEach((photoData, index) => {
+        setTimeout(() => {
+          downloadImage(photoData, `foto-${index + 1}.jpg`);
+        }, index * 300);
+      });
+      
+      alert('📥 Download de todas as fotos iniciado!');
+    });
+
+    // Função para forçar download
+    function downloadImage(dataUrl, filename) {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // Mostrar mensagem se não conectar
+    setTimeout(() => {
+      if (currentPhotos.length === 0 && viewerId) {
+        gallery.innerHTML = "<div class='no-photos'>❌ Não foi possível carregar as fotos. Verifique o ID da sessão.</div>";
+      }
+    }, 5000);
+  </script>
+</body>
+</html>
