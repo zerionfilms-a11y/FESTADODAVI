@@ -2,165 +2,84 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Cabine Fotográfica — Celular</title>
+  <title>Cabine Fotográfica — Celular (Virtual Webcam)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#ffffff;color:#222222;overflow:hidden}
-
-    /* telas (cards) sempre acima do vídeo */
     .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:18px;z-index:800}
-
-    /* CARD INÍCIO: grande, legível e alinhado ao centro */
-    .card {
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      width: 96%;
-      max-width: 1100px;
-      padding: 48px;
-      border-radius: 18px;
-      background: #ffffff; /* opaco para não mostrar vídeo por baixo */
-      box-shadow: 0 18px 50px rgba(0,0,0,0.08);
-      text-align:center;
-      border: 1px solid rgba(0,0,0,0.06);
-    }
-
-    /* logo: tenta caminhos comuns */
-    .logo{height:120px; width:auto; margin-bottom:26px; border-radius:10px; display:block; object-fit:contain;}
-    h1 { font-size: 40px; line-height:1.05; margin-bottom: 12px; color:#222222; text-align:center; }
-    p.lead { font-size: 20px; color:#444; margin-bottom:22px; max-width:920px; text-align:center; }
-
-    /* botões grandes para toque e centralizados */
-    .btn-primary { padding:22px 36px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:900;cursor:pointer;font-size:26px;display:block;margin:12px auto;width:90%;max-width:560px; }
-    .btn-start { padding:20px 32px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:900;cursor:pointer;font-size:24px;margin-top:18px;display:block;margin-left:auto;margin-right:auto;width:90%;max-width:520px; }
-
-    /* vídeo: escondido por padrão para não mostrar preto por baixo */
-    #videoWrap{position:fixed;top:0;left:0;right:0;bottom:0;display:none;align-items:center;justify-content:center;background:#000;z-index:100}
-    #videoEl{width:100%;height:100%;object-fit:cover;display:none;transform:scaleX(-1);z-index:101}
-    #canvasEl{display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:102}
-
-    /* progresso (UI) */
-    #progress{position:fixed;top:18px;left:50%;transform:translateX(-50%);text-align:center;font-size:18px;font-weight:700;z-index:810;color:#222;background:rgba(255,255,255,0.95);padding:10px 14px;border-radius:10px;display:none}
-
-    /* CONTAGEM: sem fundo escuro; número grande e legível */
-    #countdownOverlay{
-      position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:900;pointer-events:none;
-      /* sem background - transparente */
-    }
-    #countdownText{
-      color:#ffffff;
-      font-size:140px;
-      font-weight:900;
-      text-align:center;
-      line-height:1;
-      text-shadow: 0 6px 24px rgba(0,0,0,0.55); /* sombra para legibilidade sobre o vídeo */
-      padding:8px 16px;
-      pointer-events:none;
-    }
-
-    /* PREVIEW (também acima do vídeo) */
-    #previewScreen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:920}
-    #previewInner{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
-    #previewImage{max-width:100%;max-height:100%;object-fit:cover;border-radius:6px}
+    .card{display:flex;flex-direction:column;align-items:center;justify-content:center;width:96%;max-width:720px;padding:28px;border-radius:12px;background:#fff;border:1px solid rgba(0,0,0,0.06)}
+    .logo{height:96px;margin-bottom:18px}
+    h1{font-size:26px;margin-bottom:8px}
+    p{font-size:16px;color:#444;margin-bottom:12px;text-align:center}
+    .btn{padding:14px 20px;border-radius:10px;border:none;font-weight:700;cursor:pointer}
+    .btn--brand{background:#b07e09;color:#fff}
+    .btn--light{background:#fff;color:#222;border:1px solid rgba(0,0,0,0.06)}
+    #videoEl{display:none;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+    #remoteImg{width:100%;max-width:720px;height:auto;border-radius:8px;border:1px solid rgba(0,0,0,0.06);display:none;background:#000;object-fit:cover}
+    #countdownOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:900;pointer-events:none;}
+    #countdownText{color:#ffffff;font-size:140px;font-weight:900;text-shadow:0 6px 24px rgba(0,0,0,0.55)}
+    #previewScreen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:920;background:rgba(0,0,0,0.88)}
+    #previewImage{max-width:100%;max-height:100%;object-fit:contain;border-radius:6px}
     .preview-controls{position:absolute;bottom:28px;left:0;right:0;display:flex;justify-content:center;gap:16px;z-index:930}
-    .btn { padding:14px 20px;border-radius:12px;border:none;font-weight:800;cursor:pointer }
-    .btn--brand{background:#b07e09;color:#fff;font-size:18px}
-    .btn--light{background:#fff;color:#222;border:1px solid rgba(0,0,0,0.06);font-size:18px}
-
-    /* thank screen */
-    #thankScreen .card{max-width:920px}
-
-    /* debug */
-    #debugInfo {position:fixed;bottom:12px;left:12px;font-size:12px;color:#666;background:rgba(255,255,255,0.95);padding:6px;border-radius:6px;z-index:850;border:1px solid rgba(0,0,0,0.06)}
-
-    /* responsivo */
-    @media (max-width:480px){
-      .logo{height:84px}
-      h1{font-size:26px}
-      p.lead{font-size:16px}
-      .btn-primary{font-size:18px;padding:14px 20px}
-      #countdownText{font-size:86px}
-    }
+    #debugInfo{position:fixed;bottom:10px;left:10px;font-size:12px;color:#666;background:rgba(255,255,255,0.95);padding:6px;border-radius:6px;z-index:950;border:1px solid rgba(0,0,0,0.06)}
   </style>
 </head>
 <body>
-  <!-- TELA DE INÍCIO (visível por padrão) -->
-  <div id="enterFs" class="screen">
-    <div class="card" role="region" aria-label="Iniciar Sessão">
-      <!-- tenta caminhos: /public/logo1.png -> /public/logo.png -> /logo1.png -> /logo.png -->
-      <img src="/public/logo1.png" alt="Logo" class="logo"
-           onerror="if(this.src!='/public/logo.png'){ this.src='/public/logo.png'; this.onerror=function(){ if(this.src!='/logo1.png'){ this.src='/logo1.png'; this.onerror=function(){ this.src='/logo.png'; } } } }">
+  <div id="enterScreen" class="screen">
+    <div class="card">
+      <img src="/public/logo1.png" class="logo" alt="Logo" onerror="this.onerror=null;this.src='/public/logo.png'">
       <h1>📸 Cabine Fotográfica</h1>
-      <p class="lead">Para melhor experiência, entre em tela cheia e clique em iniciar sessão. Use o botão abaixo para começar.</p>
-      <button id="enterFsBtn" class="btn-primary" aria-label="Entrar em tela cheia">🎬 Entrar em Tela Cheia</button>
+      <p>Entre em tela cheia e clique para iniciar sessão. Se o operador estiver transmitindo webcam, você verá a imagem durante a contagem.</p>
+      <button id="enterFsBtn" class="btn btn--brand">🎬 Entrar em Tela Cheia</button>
+      <button id="startBtn" class="btn btn--brand" style="margin-top:10px">🎬 Iniciar Sessão de Fotos</button>
     </div>
   </div>
 
-  <!-- WELCOME (escondido inicialmente) -->
-  <div id="welcomeScreen" class="screen hidden" style="display:none">
-    <div class="card" role="region" aria-label="Bem-vindo">
-      <img src="/public/logo1.png" alt="Logo" class="logo"
-           onerror="if(this.src!='/public/logo.png'){ this.src='/public/logo.png'; this.onerror=function(){ if(this.src!='/logo1.png'){ this.src='/logo1.png'; this.onerror=function(){ this.src='/logo.png'; } } } }">
-      <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
-      <p class="lead">Clique abaixo para iniciar a sessão de fotos.</p>
-      <button id="startBtn" class="btn-start" aria-label="Iniciar sessão">🎬 Iniciar Sessão de Fotos</button>
-    </div>
-  </div>
-
-  <!-- VIDEO: escondido até a câmera iniciar -->
-  <div id="videoWrap" aria-hidden="true">
+  <!-- camada de vídeo remoto / local -->
+  <div id="videoLayer" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:100">
     <video id="videoEl" autoplay playsinline muted></video>
-    <canvas id="canvasEl"></canvas>
+    <img id="remoteImg" src="" alt="Stream do Operador">
   </div>
 
-  <div id="progress" aria-hidden="true"></div>
-
-  <!-- contagem (transparente, só o número) -->
   <div id="countdownOverlay" aria-hidden="true">
     <div id="countdownText">3</div>
   </div>
 
-  <!-- preview (em cima do vídeo) -->
-  <div id="previewScreen" class="hidden" aria-hidden="true" style="display:none">
-    <div id="previewInner">
-      <img id="previewImage" src="" alt="Preview da foto">
-    </div>
+  <div id="previewScreen" style="display:none">
+    <img id="previewImage" src="" alt="Preview">
     <div class="preview-controls">
       <button id="refazerBtn" class="btn btn--light">🔄 Refazer</button>
       <button id="continuarBtn" class="btn btn--brand">✅ Continuar</button>
     </div>
   </div>
 
-  <div id="thankScreen" class="screen hidden" style="display:none">
-    <div class="card" role="region" aria-label="Obrigado">
-      <img src="/public/logo1.png" alt="Logo" class="logo"
-           onerror="if(this.src!='/public/logo.png'){ this.src='/public/logo.png'; this.onerror=function(){ if(this.src!='/logo1.png'){ this.src='/logo1.png'; this.onerror=function(){ this.src='/logo.png'; } } } }">
+  <div id="thankScreen" class="screen" style="display:none">
+    <div class="card">
+      <img src="/public/logo1.png" class="logo" alt="Logo" onerror="this.onerror=null;this.src='/public/logo.png'">
       <h1>✨ Obrigado por utilizar a cabine!</h1>
-      <p class="lead">Aguarde o operador encerrar a sessão.</p>
+      <p>Aguarde o operador encerrar a sessão.</p>
     </div>
   </div>
 
-  <div id="debugInfo" aria-hidden="true"></div>
+  <div id="debugInfo"></div>
 
   <audio id="clack" src="clack.mp3" preload="auto"></audio>
   <audio id="inicio" src="inicio.mp3" preload="auto"></audio>
   <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
   <script>
-    const SERVER_URL = "https://festadodavi.onrender.com";
+    // URL do servidor (mantenha a sua)
+    const SERVER_URL = "https://agoraequeeuquerover-production.up.railway.app";
     const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true, reconnectionAttempts:5, reconnectionDelay:1000, timeout:20000, forceNew:false, withCredentials:true });
 
-    const enterFs = document.getElementById('enterFs');
+    // elements
+    const enterScreen = document.getElementById('enterScreen');
     const enterFsBtn = document.getElementById('enterFsBtn');
-    const welcomeScreen = document.getElementById('welcomeScreen');
     const startBtn = document.getElementById('startBtn');
-    const videoWrap = document.getElementById('videoWrap');
     const videoEl = document.getElementById('videoEl');
-    const canvasEl = document.getElementById('canvasEl');
-    const progressEl = document.getElementById('progress');
+    const remoteImg = document.getElementById('remoteImg');
     const countdownOverlay = document.getElementById('countdownOverlay');
     const countdownText = document.getElementById('countdownText');
     const previewScreen = document.getElementById('previewScreen');
@@ -168,82 +87,88 @@
     const refazerBtn = document.getElementById('refazerBtn');
     const continuarBtn = document.getElementById('continuarBtn');
     const thankScreen = document.getElementById('thankScreen');
-    const clack = document.getElementById('clack');
-    const inicio = document.getElementById('inicio');
-    const fim = document.getElementById('fim');
-    const debugEl = document.getElementById('debugInfo');
+    const debugInfo = document.getElementById('debugInfo');
+    const clack = document.getElementById('clack'), inicio = document.getElementById('inicio'), fim = document.getElementById('fim');
 
     const params = new URLSearchParams(location.search);
     const session = params.get('session');
 
-    let stream = null, photos = [], currentPhotoIndex = 0, currentPhotoData = null;
+    let localStream = null;
+    let usingRemoteStream = false;
+    let lastRemoteFrame = null; // last received frame dataURL
+    let photos = [], currentPhotoIndex = 0, currentPhotoData = null;
 
-    setInterval(()=>{ debugEl.textContent = `Sessão: ${session || 'none'} | Socket: ${socket.connected ? '🟢' : '🔴'}` }, 1000);
+    // show debug
+    setInterval(()=>{ debugInfo.textContent = `Sessão: ${session||'none'} | RemoteStream: ${usingRemoteStream ? 'on' : 'off'} | Fotos: ${photos.length}` }, 800);
 
-    function showScreen(screenElement){
-      // esconder telas (exceto videoWrap)
-      [enterFs, welcomeScreen, previewScreen, thankScreen].forEach(s => {
-        if(!s) return;
-        s.classList.add('hidden');
-        s.style.display = 'none';
-      });
-      // hide overlays
-      countdownOverlay.style.display = 'none';
-      progressEl.style.display = 'none';
-      // show requested
-      if(screenElement){
-        screenElement.classList.remove('hidden');
-        screenElement.style.display = 'flex';
-      }
+    // socket connection
+    socket.on('connect', () => { if(session) socket.emit('cell_connected'); });
+
+    // operator -> envia frames via 'stream_frame' events (server may relay)
+    socket.on('stream_frame', ({ session: s, frame }) => {
+      if(s !== session) return;
+      // receive frame (dataURL) and display it
+      lastRemoteFrame = frame;
+      // show remote image element
+      remoteImg.src = frame;
+      remoteImg.style.display = 'block';
+      videoEl.style.display = 'none';
+      usingRemoteStream = true;
+    });
+
+    // if server or operator sends stop_stream for this session
+    socket.on('stop_stream', ({ session: s }) => { if(s !== session) return stopUsingRemoteStream(); });
+
+    function stopUsingRemoteStream(){
+      usingRemoteStream = false;
+      lastRemoteFrame = null;
+      remoteImg.style.display = 'none';
+      // show video element again (if camera available)
+      if(localStream){ videoEl.style.display = 'block'; }
     }
 
-    function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
-
-    // startCamera com fallback (melhora compatibilidade Android)
-    async function startCamera(){
-      // mostra o container do vídeo antes de atribuir stream
-      videoWrap.style.display = 'flex';
+    async function startLocalCameraFallback(){
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "user" } }, audio:false });
-      } catch(e1){
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio:false });
-        } catch(e2){
-          try {
-            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio:false });
-          } catch(e3){
-            alert('Não foi possível acessar a câmera. Verifique as permissões.');
-            showScreen(welcomeScreen);
-            // esconder vídeoWrap se falhou
-            videoWrap.style.display = 'none';
-            return;
-          }
-        }
+        localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio:false });
+        videoEl.srcObject = localStream; videoEl.style.display = 'block'; await videoEl.play();
+      } catch(e){
+        // fallback: no camera available - keep remote stream only
+        console.warn('camera fallback failed', e);
       }
-      videoEl.srcObject = stream;
-      videoEl.style.display = 'block';
-      await videoEl.play();
     }
 
-    // ajusta previewImage para ocupar o mesmo espaço visível do video (evita "jump")
-    function fitPreviewToVideo(){
-      const rect = videoEl.getBoundingClientRect();
-      previewImage.style.width = rect.width + 'px';
-      previewImage.style.height = rect.height + 'px';
-      previewImage.style.objectFit = 'cover';
-    }
+    // fullscreen button
+    enterFsBtn.addEventListener('click', async () => {
+      try{ await document.documentElement.requestFullscreen(); }catch(e){}
+    });
 
-    // captura com qualidade reduzida pra Android (0.8)
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true; startBtn.textContent = '🎵 Preparando...';
+      await inicio.play().catch(()=>{});
+      startBtn.disabled = false; startBtn.textContent = '🎬 Iniciar Sessão de Fotos';
+      // before running capture we request operator stream (if any)
+      if(session) {
+        socket.emit('want_stream', { session }); // asks operator to send frames to this session
+      }
+      // ensure we have a fallback to local camera
+      await startLocalCameraFallback();
+      currentPhotoIndex = 0;
+      photos = [];
+      await runCaptureSequence();
+    });
+
+    // capture flow (uses remote frame if available during countdown)
+    function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+
     async function captureSinglePhoto(){
-      progressEl.textContent = `${currentPhotoIndex+1}/3`;
-      progressEl.style.display = 'block';
+      // ask for stream while counting
+      if(session) socket.emit('want_stream', { session });
 
-      // mostra apenas o número (sem overlay escuro)
+      // show countdown (transparent background, just big number)
       countdownOverlay.style.display = 'flex';
       let c = 5;
       countdownText.textContent = String(c);
       await sleep(120);
-
       for(; c>0; c--){
         if(c <= 2){
           countdownText.textContent = 'SORRIA!';
@@ -255,32 +180,36 @@
         }
         await sleep(1000);
       }
-
-      // hide countdown briefly before capture to avoid black frames on some devices
+      // hide countdown to avoid black frame in some devices
       countdownOverlay.style.display = 'none';
+      // stop requesting stream just before capture
+      if(session) socket.emit('stop_stream', { session });
 
-      // captura
-      canvasEl.width = videoEl.videoWidth || 1280;
-      canvasEl.height = videoEl.videoHeight || 720;
-      const ctx = canvasEl.getContext('2d');
-      ctx.translate(canvasEl.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
-      return canvasEl.toDataURL('image/jpeg', 0.8);
+      // If we received remote frame(s), use the last one as the photo
+      if(lastRemoteFrame){
+        return lastRemoteFrame;
+      }
+
+      // otherwise use local camera capture
+      const canvas = document.createElement('canvas');
+      canvas.width = videoEl.videoWidth || 1280;
+      canvas.height = videoEl.videoHeight || 720;
+      const ctx = canvas.getContext('2d');
+      ctx.translate(canvas.width, 0); ctx.scale(-1,1); // mirror
+      ctx.drawImage(videoEl,0,0,canvas.width,canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.8);
     }
 
     function showPhotoPreview(photoData){
       previewImage.src = photoData;
-      fitPreviewToVideo();
       previewScreen.style.display = 'flex';
       previewScreen.classList.remove('hidden');
     }
 
     async function runCaptureSequence(){
-      if(currentPhotoIndex>=3){
-        stopCamera();
-        progressEl.style.display = 'none';
-        showScreen(thankScreen);
+      if(currentPhotoIndex >= 3){
+        // finished all
+        showThank();
         sendPhotosToServer();
         return;
       }
@@ -288,64 +217,64 @@
       showPhotoPreview(currentPhotoData);
     }
 
-    function stopCamera(){ if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} videoEl.style.display='none'; canvasEl.style.display='none'; videoWrap.style.display = 'none'; }
-
-    refazerBtn.addEventListener('click',async()=>{
+    refazerBtn.addEventListener('click', async () => {
+      // allow requesting stream again next capture
       previewScreen.style.display = 'none';
-      previewScreen.classList.add('hidden');
-      showScreen(null);
-      videoEl.style.display = 'block';
+      currentPhotoData = null;
       await runCaptureSequence();
     });
 
-    continuarBtn.addEventListener('click',async()=>{
+    continuarBtn.addEventListener('click', async () => {
       photos.push(currentPhotoData);
       currentPhotoIndex++;
       previewScreen.style.display = 'none';
-      previewScreen.classList.add('hidden');
-      showScreen(null);
-      videoEl.style.display = 'block';
+      currentPhotoData = null;
       await runCaptureSequence();
     });
 
-    // envio de fotos (mantive a lógica original)
+    function showThank(){
+      // hides everything and shows thank screen
+      document.getElementById('enterScreen').style.display = 'none';
+      previewScreen.style.display = 'none';
+      thankScreen.style.display = 'flex';
+      // play finish sound
+      fim.play().catch(()=>{});
+    }
+
+    // Robust sendPhotosToServer: mantém lógica de retry semelhante ao original do celular
     function sendPhotosToServer(){
       if(session && photos.length>0){
         const sendPhotosWithRetry=(attempt=1,maxAttempts=5)=>{
           if(socket.connected){
-            socket.emit('photos_from_cell',{photos,attempt,totalAttempts:maxAttempts});
+            socket.emit('photos_from_cell',{ session, photos, attempt, totalAttempts:maxAttempts });
+            logDebug(`📤 photos_from_cell emitted (attempt ${attempt})`);
             if(attempt<maxAttempts){ setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),1500); }
-          } else if(attempt<maxAttempts){
+          }else if(attempt<maxAttempts){
+            // tenta reconexão automática
             setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),2000);
+          } else {
+            console.warn('❌ Falha ao enviar fotos após tentativas');
           }
         };
         sendPhotosWithRetry();
       }
     }
 
-    socket.on('connect',()=>{ if(session) socket.emit('cell_connected'); });
-    socket.on('disconnect',()=>{});
-    socket.on('reset_session',()=>{ stopCamera(); currentPhotoIndex=0; photos=[]; currentPhotoData=null; showScreen(welcomeScreen); });
+    // if operator or server asks to reset session
+    socket.on('reset_session', ()=>{ location.reload(); });
 
-    showScreen(enterFs);
+    // debug helper
+    function logDebug(msg){
+      if(debugInfo) {
+        const ts = new Date().toLocaleTimeString();
+        debugInfo.textContent += `[${ts}] ${msg}\n`;
+        debugInfo.scrollTop = debugInfo.scrollHeight;
+      }
+      console.log(msg);
+    }
 
-    // fullscreen + ir para welcome
-    enterFsBtn.addEventListener('click',async()=>{
-      try{ await document.documentElement.requestFullscreen(); }catch(e){}
-      showScreen(welcomeScreen);
-      if(session) socket.emit('cell_entered_fullscreen');
-    });
-
-    startBtn.addEventListener('click',async()=>{
-      startBtn.disabled=true; startBtn.textContent='🎵 Preparando...';
-      await inicio.play().catch(()=>{});
-      startBtn.disabled=false; startBtn.textContent='🎬 Iniciar Sessão de Fotos';
-      showScreen(null);
-      await startCamera();
-      currentPhotoIndex=0;
-      photos=[];
-      await runCaptureSequence();
-    });
+    // initial message
+    logDebug(`Sessão: ${session||'none'}. Ao iniciar, este dispositivo pedirá ao operador o stream (want_stream).`);
   </script>
 </body>
 </html>
