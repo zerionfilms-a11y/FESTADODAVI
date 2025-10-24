@@ -7,80 +7,52 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    /* fundo e texto global */
-    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#ffffff;color:#222222;overflow:hidden}
-
+    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
     .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-
-    /* botão entrar em tela cheia (antes amarelo) */
-    #enterFsBtn{padding:18px 25px;border-radius:12px;border:none;background:#b07e09;color:#fff;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px}
-
-    #welcome{background:rgba(255,255,255,0.85);padding:25px;text-align:center;border-radius:15px;width:95%;max-width:400px;backdrop-filter:blur(15px);border:2px solid rgba(0,0,0,0.06)}
-    #welcome h1{font-size:26px;margin-bottom:15px;text-shadow:none;color:#222222}
-    #welcome p{font-size:18px;margin-bottom:15px;color:#222222}
-
-    /* botão iniciar (antes texto azul) */
-    #startBtn{padding:18px 25px;border-radius:12px;border:none;background:#b07e09;color:#fff;font-weight:700;cursor:pointer;font-size:20px;margin-top:5px;box-shadow:0 4px 15px rgba(0,0,0,0.08);width:100%;max-width:300px;transition:all 0.3s ease}
-
+    #enterFsBtn{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px}
+    #welcome{background:rgba(255,255,255,0.15);padding:25px;text-align:center;border-radius:15px;width:95%;max-width:400px;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
+    #welcome h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
+    #welcome p{font-size:18px;margin-bottom:15px}
+    #startBtn{padding:18px 25px;border-radius:12px;border:none;background:#fff;color:#0b84ff;font-weight:700;cursor:pointer;font-size:20px;margin-top:5px;box-shadow:0 4px 15px rgba(0,0,0,0.3);width:100%;max-width:300px;transition:all 0.3s ease}
     .logo{max-width:180px;margin-bottom:20px;border-radius:10px}
-
     #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none; transform: scaleX(-1);}
     #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:10}
-
-    /* progresso e contadores adaptados para cor escura sobre fundo branco */
-    #progress{position:fixed;top:20px;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:150;color:#222222;text-shadow:0 0 6px rgba(0,0,0,0.06);background:rgba(255,255,255,0.9);padding:10px;backdrop-filter:blur(5px)}
-    #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:none;z-index:100;color:#222222}
-    #msg{position:fixed;top:50%;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:100;color:#222222}
-
-    /* preview agora claro */
-    #previewScreen{background:rgba(255,255,255,0.95);z-index:20;padding:0}
+    #progress{position:fixed;top:20px;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:150;color:#fff;text-shadow:0 0 10px #000;background:rgba(0,0,0,0.5);padding:10px;backdrop-filter:blur(5px)}
+    /* contagem: forço cor branca */
+    #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000, 0 0 30px #000;z-index:100;color:#fff !important}
+    #msg{position:fixed;top:50%;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:100;color:#fff;text-shadow:0 0 10px #000}
+    #previewScreen{background:rgba(0,0,0,0.9);z-index:20;padding:0}
     #previewContainer{position:relative;width:100%;height:100%;display:flex;flex-direction:column}
     #previewImage{width:100%;height:100%;object-fit:contain;display:block}
-
     .preview-buttons{position:absolute;bottom:30px;left:0;right:0;display:flex;gap:15px;justify-content:center;padding:0 20px}
-    .preview-btn{padding:12px 18px;border-radius:8px;border:none;font-weight:700;cursor:pointer;font-size:16px;flex:1;max-width:140px;background:rgba(255,255,255,0.9);color:#222222;backdrop-filter:blur(10px);border:1px solid rgba(0,0,0,0.06)}
-
-    /* botões de ação agora na cor da marca */
-    #refazerBtn{background:#b07e09}
-    #refazerBtn, #continuarBtn{color:#fff}
-    #continuarBtn{background:#b07e09}
-
-    #thank { background: rgba(255,255,255,0.85); padding: 25px; border-radius: 15px; width:95%;max-width:400px;text-align:center;backdrop-filter:blur(15px);border:2px solid rgba(0,0,0,0.06)}
-    #thank h1{font-size:26px;margin-bottom:15px;text-shadow:none;color:#222222}
-    #thank p{font-size:18px;color:#222222}
-
+    .preview-btn{padding:12px 18px;border-radius:8px;border:none;font-weight:700;cursor:pointer;font-size:16px;flex:1;max-width:140px;background:rgba(0,0,0,0.7);color:white;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.3)}
+    #refazerBtn{background:rgba(220,53,69,0.8)}
+    #continuarBtn{background:rgba(40,167,69,0.8)}
+    #thank { background: rgba(255,255,255,0.15); padding: 25px; border-radius: 15px; width:95%;max-width:400px;text-align:center;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
+    #thank h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
+    #thank p{font-size:18px}
     .hidden { display: none !important; }
     .visible { display: flex !important; }
-
-    /* debug em tom discreto */
-    #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#666;background:rgba(255,255,255,0.9);padding:4px;border-radius:4px;z-index:1000;border:1px solid rgba(0,0,0,0.06)}
-
-    /* animação: substituí o azul pelo tom da marca onde fazia sentido */
-    @keyframes superPulse {
-      0%{transform:scale(1);background:#fff;color:#b07e09;box-shadow:0 0 0 0 rgba(255,255,255,0.7);}
-      25%{transform:scale(1.08);background:#b07e09;color:#fff;box-shadow:0 0 0 10px rgba(176,126,9,0.3);}
-      50%{transform:scale(1.05);background:#b07e09;color:#fff;box-shadow:0 0 0 15px rgba(176,126,9,0.2);}
-      75%{transform:scale(1.08);background:#b07e09;color:#fff;box-shadow:0 0 0 10px rgba(176,126,9,0.3);}
-      100%{transform:scale(1);background:#fff;color:#b07e09;box-shadow:0 0 0 0 rgba(255,255,255,0);}
-    }
+    #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:4px;border-radius:4px;z-index:1000}
+    @keyframes superPulse {0%{transform:scale(1);background:#fff;color:#0b84ff;box-shadow:0 0 0 0 rgba(255,255,255,0.7);}25%{transform:scale(1.08);background:#0b84ff;color:#fff;box-shadow:0 0 0 10px rgba(11,132,255,0.3);}50%{transform:scale(1.05);background:#ff4081;color:#fff;box-shadow:0 0 0 15px rgba(255,64,129,0.2);}75%{transform:scale(1.08);background:#0b84ff;color:#fff;box-shadow:0 0 0 10px rgba(11,132,255,0.3);}100%{transform:scale(1);background:#fff;color:#0b84ff;box-shadow:0 0 0 0 rgba(255,255,255,0);}}
     .super-pulse-animation{animation:superPulse 2.5s infinite;}
   </style>
 </head>
 <body>
-  <div id="enterFs" class="screen visible" style="background:#ffffff">
-    <div style="text-align:center;background:rgba(255,255,255,0.85);padding:20px;border-radius:15px;backdrop-filter:blur(10px);width:95%;max-width:400px">
+  <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
+    <div style="text-align:center;background:rgba(0,0,0,0.3);padding:20px;border-radius:15px;backdrop-filter:blur(10px);width:95%;max-width:400px">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1 style="font-size:24px;margin-bottom:20px;color:#222222">📸 Cabine Fotográfica</h1>
-      <p style="font-size:16px;margin-bottom:20px;color:#222222">Para melhor experiência, entre em tela cheia</p>
+      <h1 style="font-size:24px;margin-bottom:20px">📸 Cabine Fotográfica</h1>
+      <p style="font-size:16px;margin-bottom:20px">Para melhor experiência, entre em tela cheia</p>
       <button id="enterFsBtn">🎬 Entrar em Tela Cheia</button>
     </div>
   </div>
 
-  <div id="welcomeScreen" class="screen hidden" style="background:#ffffff">
+  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
     <div id="welcome">
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1 style="color:#222222">📸 Bem-vindo à Cabine Fotográfica</h1>
-      <p style="color:#222222">Clique abaixo para iniciar</p>
+      <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+      <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
+      <p>Clique abaixo para iniciar</p>
       <button id="startBtn">🎬 Iniciar Sessão de Fotos</button>
     </div>
   </div>
@@ -101,7 +73,7 @@
     </div>
   </div>
 
-  <div id="thankScreen" class="screen hidden" style="background:#ffffff">
+  <div id="thankScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
     <div id="thank">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <h1>✨ Obrigado por utilizar a cabine!</h1>
@@ -116,7 +88,7 @@
   <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
   <script>
-    const SERVER_URL = "https://festadodavi.onrender.com";
+    const SERVER_URL = "https://agoraequeeuquerover-production.up.railway.app";
     const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true, reconnectionAttempts:5, reconnectionDelay:1000, timeout:20000, forceNew:true, withCredentials:true });
 
     const params = new URLSearchParams(location.search);
@@ -165,8 +137,15 @@
     async function captureSinglePhoto(){
       progressEl.textContent=`${currentPhotoIndex+1}/3`; progressEl.classList.remove('hidden'); videoEl.style.display='block';
       for(let t=5;t>0;t--){ 
-        if(t<=2){ countdownEl.textContent='SORRIA!'; countdownEl.style.color='#b07e09'; if(t===2){clack.currentTime=0; clack.play().catch(()=>{});} } 
-        else{ countdownEl.textContent=String(t); countdownEl.style.color='#222222'; } 
+        if(t<=2){ 
+          countdownEl.textContent='SORRIA!'; 
+          // forço branco na contagem e na palavra SORRIA
+          countdownEl.style.color = '#fff'; 
+          if(t===2){clack.currentTime=0; clack.play().catch(()=>{});} 
+        } else { 
+          countdownEl.textContent=String(t); 
+          countdownEl.style.color = '#fff'; 
+        } 
         await sleep(1000);
       }
       canvasEl.width=videoEl.videoWidth; canvasEl.height=videoEl.videoHeight;
