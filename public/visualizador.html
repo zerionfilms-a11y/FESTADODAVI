@@ -1,127 +1,373 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8" />
-  <title>Visualizador — Cabine</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="theme-color" content="#ffffff">
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <meta charset="UTF-8">
+  <title>Visualizador de Fotos - Suas Fotos 📸</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#ffffff;color:#222222;overflow:auto}
-    .wrap{max-width:1100px;margin:32px auto;padding:20px}
-    header{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-    header img{height:48px}
-    h1{font-size:20px;margin:0;color:#222222}
-    .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
-    .thumb{background:#fff;border:1px solid rgba(0,0,0,0.06);padding:8px;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center}
-    .thumb img{width:100%;height:160px;object-fit:cover;border-radius:6px}
-    .meta{margin-top:8px;width:100%;display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#666}
-    .meta .id{color:#b07e09;font-weight:700}
-    .no-photos{padding:40px;text-align:center;border:2px dashed rgba(0,0,0,0.06);color:#b07e09}
-    .controls{display:flex;gap:10px;align-items:center}
-    .btn{padding:8px 12px;border-radius:8px;border:2px solid #b07e09;background:transparent;color:#b07e09;font-weight:700}
-    .btn.primary{background:#b07e09;color:#fff;border-color:#b07e09}
-    /* preview modal */
-    #previewModal{position:fixed;top:0;left:0;right:0;bottom:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,0.9);z-index:200}
-    #previewModal.show{display:flex}
-    #previewModal img{max-width:95%;max-height:85%;border-radius:8px;box-shadow:0 12px 40px rgba(0,0,0,0.08)}
-    .modal-buttons{position:absolute;bottom:30px;display:flex;gap:12px}
-    .modal-buttons button{padding:10px 14px;border-radius:8px;border:none;background:#b07e09;color:#fff;font-weight:700}
-    footer{margin-top:22px;text-align:center;color:#666;font-size:13px}
-    @media(max-width:600px){
-      .thumb img{height:120px}
-      .wrap{padding:12px;margin:18px auto}
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    /* Paleta: marca = #b07e09, texto escuro = #222222, fundo claro */
+    body { 
+      margin: 0; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      background: #ffffff;
+      color: #222222; 
+      padding: 15px;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      font-size: 16px;
+    }
+    
+    .session-info { 
+      background: rgba(255,255,255,0.95); 
+      padding: 20px; 
+      border-radius: 20px; 
+      margin-bottom: 20px; 
+      text-align: center;
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(0,0,0,0.06);
+      width: 100%;
+      max-width: 500px;
+      display:flex;
+      gap:12px;
+      align-items:center;
+      justify-content:center;
+    }
+    
+    .session-info .logo-wrap{
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
+    .session-info img.logo1{
+      height:48px;
+      width:auto;
+      border-radius:8px;
+      object-fit:contain;
+    }
+    
+    .session-info h1 {
+      font-size: 28px;
+      margin-bottom: 6px;
+      color: #222222;
+    }
+    
+    .session-info p {
+      font-size: 16px;
+      margin: 5px 0;
+      color: #444;
+    }
+    
+    .expiry-info {
+      background: rgba(176,126,9,0.08); /* marca translúcida */
+      padding: 12px;
+      border-radius: 12px;
+      margin: 15px 0;
+      border: 1px solid rgba(176,126,9,0.12);
+      font-size: 14px;
+      text-align: center;
+      color: #5a3e09;
+    }
+    
+    .download-all-btn { 
+      padding: 18px 25px; 
+      background: linear-gradient(135deg, #b07e09, #d19c3a); 
+      color: white; 
+      border: none; 
+      border-radius: 12px; 
+      cursor: pointer; 
+      font-size: 18px; 
+      font-weight: bold; 
+      margin-bottom: 20px;
+      width: 100%;
+      max-width: 500px;
+      box-shadow: 0 4px 8px rgba(176,126,9,0.18);
+    }
+    
+    .gallery { 
+      display: flex; 
+      flex-direction: column;
+      align-items: center;
+      gap: 25px;
+      width: 100%;
+      max-width: 500px;
+    }
+    
+    .photo-container { 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      background: rgba(255,255,255,0.95);
+      padding: 20px;
+      border-radius: 20px;
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(0,0,0,0.06);
+      width: 100%;
+    }
+    
+    /* MANTIVE A MOLDURA PRONTO-PRÓ-INSTA exata (gradient intacto) */
+    .stories-container {
+      background: linear-gradient(135deg, #833AB4, #C13584, #E1306C, #FD1D1D);
+      padding: 25px;
+      border-radius: 25px;
+      margin-bottom: 30px;
+    }
+    
+    .stories-title {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 15px;
+      text-align: center;
+      color: white;
+    }
+    
+    img { 
+      width: 100%;
+      max-width: 300px;
+      height: auto;
+      border-radius: 15px; 
+      border: 3px solid rgba(0,0,0,0.06);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+      margin-bottom: 15px;
+      background: #fff;
+    }
+    
+    .download-btn { 
+      padding: 15px 20px; 
+      background: linear-gradient(135deg, #b07e09, #d19c3a); 
+      color: white; 
+      border: none; 
+      border-radius: 10px; 
+      cursor: pointer; 
+      font-size: 16px; 
+      font-weight: bold;
+      width: 100%;
+      max-width: 300px;
+      box-shadow: 0 3px 6px rgba(176,126,9,0.15);
+    }
+    
+    .instagram-btn {
+      background: linear-gradient(135deg, #405DE6, #5851DB, #833AB4, #C13584, #E1306C, #FD1D1D);
+      color: white;
+      padding: 18px 25px;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 18px;
+      font-weight: bold;
+      width: 100%;
+      max-width: 300px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    
+    .instagram-btn img {
+      width: 28px;
+      height: 28px;
+      border: none;
+      box-shadow: none;
+      margin: 0;
+      border-radius: 0;
+    }
+    
+    .loading {
+      font-size: 20px;
+      text-align: center;
+      margin: 40px 0;
+      color: #999;
+    }
+    
+    .no-photos {
+      font-size: 18px;
+      text-align: center;
+      margin: 40px 0;
+      color: #999;
+      padding: 20px;
+    }
+    
+    @media (max-width: 480px) {
+      body {
+        padding: 10px;
+      }
+      
+      .session-info {
+        padding: 15px;
+        margin-bottom: 15px;
+      }
+      
+      .session-info h1 {
+        font-size: 24px;
+      }
+      
+      .download-all-btn, .instagram-btn {
+        padding: 16px 20px;
+        font-size: 16px;
+      }
+      
+      .photo-container {
+        padding: 15px;
+      }
+      
+      img {
+        max-width: 100%;
+      }
     }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <img src="/public/logo.png" alt="Logo">
-      <div>
-        <h1>Visualizador da Cabine</h1>
-        <div style="font-size:12px;color:#666">Compartilhe suas fotos com o público</div>
-      </div>
-    </header>
-
-    <div id="gallery" class="gallery">
-      <!-- thumbs serão injetadas pelo JS -->
+  <div class="session-info">
+    <div class="logo-wrap">
+      <!-- logomarca chamada como logo1.png (vai usar essa imagem se disponível) -->
+      <img src="logo1.png" alt="Logo" class="logo1" onerror="this.style.display='none'">
     </div>
-
-    <div id="previewModal" role="dialog" aria-hidden="true">
-      <img id="previewLarge" src="" alt="Preview">
-      <div class="modal-buttons">
-        <button id="closePreview">Fechar</button>
-        <button id="download" class="primary">Baixar</button>
+    <div>
+      <h1>📸 Suas Fotos</h1>
+      <p><strong>Sessão:</strong> <span id="viewerIdDisplay">—</span></p>
+      <div class="expiry-info">
+        ⏰ Estas fotos ficarão disponíveis por 7 dias
       </div>
     </div>
-
-    <footer>
-      <div>© Zerion Films</div>
-    </footer>
   </div>
 
+  <button id="downloadAllBtn" class="download-all-btn" style="display:none;">
+    📥 Download Todas as Fotos
+  </button>
+
+  <div id="gallery" class="gallery">
+    <div class="loading">🔄 Carregando suas fotos...</div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
-    // Carregamento das fotos via socket / api (mantive a lógica original)
-    const gallery = document.getElementById('gallery');
-    const previewModal = document.getElementById('previewModal');
-    const previewLarge = document.getElementById('previewLarge');
-    const closePreview = document.getElementById('closePreview');
-    const download = document.getElementById('download');
-
-    // exemplo: lista de imagens (em produção vem do servidor)
-    let currentPhotos = [];
-    // Se houver um viewerId via query string, podemos buscar as fotos
     const params = new URLSearchParams(window.location.search);
-    const viewerId = params.get('id');
+    const viewerId = params.get("viewerId");
+    const gallery = document.getElementById("gallery");
+    const downloadAllBtn = document.getElementById("downloadAllBtn");
+    const viewerIdDisplay = document.getElementById("viewerIdDisplay");
+    
+    const socket = io("https://agoraequeeuquerover-production.up.railway.app");
 
-    function renderGallery(photos){
-      gallery.innerHTML = '';
-      if(!photos || photos.length===0){
-        gallery.innerHTML = "<div class='no-photos'>Nenhuma foto ainda — aguarde a sessão.</div>";
+    // Mostrar viewerId atual
+    if (viewerId) {
+      viewerIdDisplay.textContent = viewerId;
+      
+      // Conectar ao visualizador
+      socket.emit("join_viewer", { viewerId });
+    } else {
+      gallery.innerHTML = "<div class='no-photos'>❌ ID do visualizador não encontrado na URL.</div>";
+    }
+
+    let currentPhotos = [];
+    let currentStoriesMontage = null;
+
+    // Receber dados do visualizador
+    socket.on("viewer_photos_ready", (data) => {
+      console.log('📸 Dados recebidos no visualizador:', data);
+      
+      if (!data || !data.photos || !Array.isArray(data.photos)) {
+        gallery.innerHTML = "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
         return;
       }
-      photos.forEach(p=>{
-        const div = document.createElement('div');
-        div.className = 'thumb';
-        div.innerHTML = `<img src="${p.url}" alt="Foto"><div class="meta"><div class="id">${p.id}</div><div class="controls"><button class="btn" data-url="${p.url}">Ver</button></div></div>`;
-        gallery.appendChild(div);
-      });
-      // attach events
-      document.querySelectorAll('.btn').forEach(b=>{
-        b.addEventListener('click', (e)=>{
-          const url = e.currentTarget.getAttribute('data-url');
-          previewLarge.src = url;
-          previewModal.classList.add('show');
-          previewModal.setAttribute('aria-hidden','false');
-        });
+      
+      currentPhotos = data.photos;
+      currentStoriesMontage = data.storiesMontage;
+      
+      renderGallery(currentPhotos, currentStoriesMontage);
+      
+      if (currentPhotos.length > 0) {
+        downloadAllBtn.style.display = 'block';
+      }
+    });
+
+    function renderGallery(photos, storiesMontage) {
+      gallery.innerHTML = '';
+      
+      // Adicionar a moldura do stories se existir (mantive esse bloco igual)
+      if (storiesMontage) {
+        const storiesContainer = document.createElement("div");
+        storiesContainer.className = "photo-container stories-container";
+
+        const storiesTitle = document.createElement("div");
+        storiesTitle.className = "stories-title";
+        storiesTitle.innerHTML = "📱 Pronto para o Instagram";
+        storiesContainer.appendChild(storiesTitle);
+
+        const storiesImg = document.createElement("img");
+        storiesImg.src = storiesMontage;
+        storiesImg.alt = "Pronto para o Instagram";
+        storiesImg.loading = "lazy";
+
+        const instagramBtn = document.createElement("button");
+        instagramBtn.className = "instagram-btn";
+        instagramBtn.innerHTML = `
+          <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png" alt="Instagram">
+          Baixar Pronto pro Instagram
+        `;
+        instagramBtn.onclick = function() {
+          downloadImage(storiesMontage, `pronto-instagram-${viewerId}.jpg`);
+        };
+
+        storiesContainer.appendChild(storiesImg);
+        storiesContainer.appendChild(instagramBtn);
+        gallery.appendChild(storiesContainer);
+      }
+      
+      // Adicionar as fotos individuais
+      photos.forEach((photoData, index) => {
+        const container = document.createElement("div");
+        container.className = "photo-container";
+
+        const img = document.createElement("img");
+        img.src = photoData;
+        img.alt = `Foto ${index + 1}`;
+        img.loading = "lazy";
+
+        const downloadBtn = document.createElement("button");
+        downloadBtn.className = "download-btn";
+        downloadBtn.textContent = `📥 Download Foto ${index + 1}`;
+        downloadBtn.onclick = function() {
+          downloadImage(photoData, `foto-${index + 1}.jpg`);
+        };
+
+        container.appendChild(img);
+        container.appendChild(downloadBtn);
+        gallery.appendChild(container);
       });
     }
 
-    closePreview.addEventListener('click', ()=>{
-      previewModal.classList.remove('show');
-      previewModal.setAttribute('aria-hidden','true');
+    // Download de todas as fotos
+    downloadAllBtn.addEventListener('click', () => {
+      if (currentPhotos.length === 0) return;
+      
+      currentPhotos.forEach((photoData, index) => {
+        setTimeout(() => {
+          downloadImage(photoData, `foto-${index + 1}.jpg`);
+        }, index * 300);
+      });
+      
+      alert('📥 Download de todas as fotos iniciado!');
     });
 
-    download.addEventListener('click', ()=>{
-      const a = document.createElement('a');
-      a.href = previewLarge.src;
-      a.download = 'foto.png';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    });
-
-    // Mock fetch (substituir pela fetch real)
-    setTimeout(()=>{
-      // ex de mock
-      currentPhotos = [
-        {id:'A1', url:'/public/video.png'},
-        {id:'A2', url:'/public/imprimir (1).png'}
-      ];
-      renderGallery(currentPhotos);
-    },1000);
+    // Função para forçar download
+    function downloadImage(dataUrl, filename) {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
 
     // Mostrar mensagem se não conectar
     setTimeout(() => {
