@@ -1,4 +1,3 @@
-// server (1).js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -86,7 +85,7 @@ const io = new Server(server, {
   cors: {
     origin: [
       'https://agoraequeeuquerover.vercel.app',
-      'https://agoraequeeuquerover.onrender.com',
+      'https://festadodavi.onrender.com/',
       'http://localhost:3000',
       'http://localhost:10000'
     ],
