@@ -35,20 +35,14 @@
       border: 1px solid rgba(0,0,0,0.06);
       width: 100%;
       max-width: 500px;
-      display:flex;
-      gap:12px;
-      align-items:center;
-      justify-content:center;
     }
     
-    .session-info .logo-wrap{
-      display:flex;
-      align-items:center;
-      gap:12px;
-    }
+    /* Logo maior e acima do texto */
     .session-info img.logo1{
-      height:48px;
+      height:80px;
       width:auto;
+      display:block;
+      margin: 0 auto 12px;
       border-radius:8px;
       object-fit:contain;
     }
@@ -227,16 +221,12 @@
 </head>
 <body>
   <div class="session-info">
-    <div class="logo-wrap">
-      <!-- logomarca chamada como logo1.png (vai usar essa imagem se disponível) -->
-      <img src="logo1.png" alt="Logo" class="logo1" onerror="this.style.display='none'">
-    </div>
-    <div>
-      <h1>📸 Suas Fotos</h1>
-      <p><strong>Sessão:</strong> <span id="viewerIdDisplay">—</span></p>
-      <div class="expiry-info">
-        ⏰ Estas fotos ficarão disponíveis por 7 dias
-      </div>
+    <!-- logo maior e em cima do texto -->
+    <img src="logo1.png" alt="Logo" class="logo1" onerror="this.style.display='none'">
+    <h1>📸 Suas Fotos</h1>
+    <p><strong>Sessão:</strong> <span id="viewerIdDisplay">—</span></p>
+    <div class="expiry-info">
+      ⏰ Estas fotos ficarão disponíveis por 7 dias
     </div>
   </div>
 
@@ -256,7 +246,7 @@
     const downloadAllBtn = document.getElementById("downloadAllBtn");
     const viewerIdDisplay = document.getElementById("viewerIdDisplay");
     
-    const socket = io("https://festadodavi.onrender.com");
+    const socket = io("https://agoraequeeuquerover-production.up.railway.app");
 
     // Mostrar viewerId atual
     if (viewerId) {
@@ -314,6 +304,7 @@
           <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png" alt="Instagram">
           Baixar Pronto pro Instagram
         `;
+        // agora chama a função de download robusta
         instagramBtn.onclick = function() {
           downloadImage(storiesMontage, `pronto-instagram-${viewerId}.jpg`);
         };
@@ -359,14 +350,34 @@
       alert('📥 Download de todas as fotos iniciado!');
     });
 
-    // Função para forçar download
-    function downloadImage(dataUrl, filename) {
-      const link = document.createElement('a');
-      link.download = filename;
-      link.href = dataUrl;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+    // Função para forçar download — robusta para data:URI e URLs remotas
+    async function downloadImage(dataUrl, filename) {
+      try {
+        let blob;
+        // data: URI -> fetch it directly works in modern browsers
+        if (typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
+          const res = await fetch(dataUrl);
+          blob = await res.blob();
+        } else {
+          // remote URL: fetch as blob (may fail if the server disallows CORS)
+          const res = await fetch(dataUrl, { mode: 'cors' });
+          if (!res.ok) throw new Error('Network response was not ok: ' + res.status);
+          blob = await res.blob();
+        }
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.warn('downloadImage fallback, abrindo em nova aba por segurança', err);
+        // fallback: abre a imagem em nova aba para o usuário salvar manualmente
+        window.open(dataUrl, '_blank');
+      }
     }
 
     // Mostrar mensagem se não conectar
