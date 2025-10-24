@@ -12,43 +12,57 @@
     /* telas (cards) sempre acima do vídeo */
     .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:18px;z-index:800}
 
-    /* CARD INÍCIO: grande e legível */
+    /* CARD INÍCIO: grande, legível e alinhado ao centro */
     .card {
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
       width: 96%;
       max-width: 1100px;
       padding: 48px;
       border-radius: 18px;
-      background: rgba(255,255,255,0.995);
+      background: #ffffff; /* opaco para não mostrar vídeo por baixo */
       box-shadow: 0 18px 50px rgba(0,0,0,0.08);
       text-align:center;
       border: 1px solid rgba(0,0,0,0.06);
     }
 
     /* logo: tenta caminhos comuns */
-    .logo{height:120px; width:auto; margin-bottom:26px; border-radius:10px; display:block; margin-left:auto; margin-right:auto; object-fit:contain;}
-    h1 { font-size: 40px; line-height:1.05; margin-bottom: 12px; color:#222222; }
-    p.lead { font-size: 20px; color:#444; margin-bottom:22px; max-width:920px; margin-left:auto; margin-right:auto; }
+    .logo{height:120px; width:auto; margin-bottom:26px; border-radius:10px; display:block; object-fit:contain;}
+    h1 { font-size: 40px; line-height:1.05; margin-bottom: 12px; color:#222222; text-align:center; }
+    p.lead { font-size: 20px; color:#444; margin-bottom:22px; max-width:920px; text-align:center; }
 
-    /* botões grandes para toque */
-    .btn-primary { padding:22px 36px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:900;cursor:pointer;font-size:26px;margin:12px auto;width:90%;max-width:560px;display:block; }
-    .btn-start { padding:20px 32px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:900;cursor:pointer;font-size:24px;margin-top:18px;width:90%;max-width:520px;display:block; }
+    /* botões grandes para toque e centralizados */
+    .btn-primary { padding:22px 36px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:900;cursor:pointer;font-size:26px;display:block;margin:12px auto;width:90%;max-width:560px; }
+    .btn-start { padding:20px 32px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:900;cursor:pointer;font-size:24px;margin-top:18px;display:block;margin-left:auto;margin-right:auto;width:90%;max-width:520px; }
 
-    /* vídeo fica por baixo (z-index baixo) */
-    #videoWrap{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#000;z-index:100}
+    /* vídeo: escondido por padrão para não mostrar preto por baixo */
+    #videoWrap{position:fixed;top:0;left:0;right:0;bottom:0;display:none;align-items:center;justify-content:center;background:#000;z-index:100}
     #videoEl{width:100%;height:100%;object-fit:cover;display:none;transform:scaleX(-1);z-index:101}
     #canvasEl{display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:102}
 
-    /* progresso */
+    /* progresso (UI) */
     #progress{position:fixed;top:18px;left:50%;transform:translateX(-50%);text-align:center;font-size:18px;font-weight:700;z-index:810;color:#222;background:rgba(255,255,255,0.95);padding:10px 14px;border-radius:10px;display:none}
 
-    /* overlay contagem fullscreen (bloqueia câmera) */
+    /* CONTAGEM: sem fundo escuro; número grande e legível */
     #countdownOverlay{
-      position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:900;background:rgba(0,0,0,0.88);
+      position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:900;pointer-events:none;
+      /* sem background - transparente */
     }
-    #countdownText{color:#fff;font-size:140px;font-weight:900;text-align:center;line-height:1;padding:8px 16px;}
+    #countdownText{
+      color:#ffffff;
+      font-size:140px;
+      font-weight:900;
+      text-align:center;
+      line-height:1;
+      text-shadow: 0 6px 24px rgba(0,0,0,0.55); /* sombra para legibilidade sobre o vídeo */
+      padding:8px 16px;
+      pointer-events:none;
+    }
 
     /* PREVIEW (também acima do vídeo) */
-    #previewScreen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:920;background:rgba(0,0,0,0.92)}
+    #previewScreen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:920}
     #previewInner{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
     #previewImage{max-width:100%;max-height:100%;object-fit:cover;border-radius:6px}
     .preview-controls{position:absolute;bottom:28px;left:0;right:0;display:flex;justify-content:center;gap:16px;z-index:930}
@@ -56,10 +70,13 @@
     .btn--brand{background:#b07e09;color:#fff;font-size:18px}
     .btn--light{background:#fff;color:#222;border:1px solid rgba(0,0,0,0.06);font-size:18px}
 
+    /* thank screen */
+    #thankScreen .card{max-width:920px}
+
     /* debug */
     #debugInfo {position:fixed;bottom:12px;left:12px;font-size:12px;color:#666;background:rgba(255,255,255,0.95);padding:6px;border-radius:6px;z-index:850;border:1px solid rgba(0,0,0,0.06)}
 
-    /* responsivo: mantém legível em telas pequenas */
+    /* responsivo */
     @media (max-width:480px){
       .logo{height:84px}
       h1{font-size:26px}
@@ -73,8 +90,8 @@
   <!-- TELA DE INÍCIO (visível por padrão) -->
   <div id="enterFs" class="screen">
     <div class="card" role="region" aria-label="Iniciar Sessão">
-      <!-- tenta caminhos comuns: /public/logo1.png -> /public/logo.png -> /logo1.png -> /logo.png -->
-      <img src="/public/logo1.png" alt="Logo" class="logo" 
+      <!-- tenta caminhos: /public/logo1.png -> /public/logo.png -> /logo1.png -> /logo.png -->
+      <img src="/public/logo1.png" alt="Logo" class="logo"
            onerror="if(this.src!='/public/logo.png'){ this.src='/public/logo.png'; this.onerror=function(){ if(this.src!='/logo1.png'){ this.src='/logo1.png'; this.onerror=function(){ this.src='/logo.png'; } } } }">
       <h1>📸 Cabine Fotográfica</h1>
       <p class="lead">Para melhor experiência, entre em tela cheia e clique em iniciar sessão. Use o botão abaixo para começar.</p>
@@ -85,7 +102,7 @@
   <!-- WELCOME (escondido inicialmente) -->
   <div id="welcomeScreen" class="screen hidden" style="display:none">
     <div class="card" role="region" aria-label="Bem-vindo">
-      <img src="/public/logo1.png" alt="Logo" class="logo" 
+      <img src="/public/logo1.png" alt="Logo" class="logo"
            onerror="if(this.src!='/public/logo.png'){ this.src='/public/logo.png'; this.onerror=function(){ if(this.src!='/logo1.png'){ this.src='/logo1.png'; this.onerror=function(){ this.src='/logo.png'; } } } }">
       <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
       <p class="lead">Clique abaixo para iniciar a sessão de fotos.</p>
@@ -93,7 +110,7 @@
     </div>
   </div>
 
-  <!-- video por baixo -->
+  <!-- VIDEO: escondido até a câmera iniciar -->
   <div id="videoWrap" aria-hidden="true">
     <video id="videoEl" autoplay playsinline muted></video>
     <canvas id="canvasEl"></canvas>
@@ -101,13 +118,13 @@
 
   <div id="progress" aria-hidden="true"></div>
 
-  <!-- overlay contagem -->
+  <!-- contagem (transparente, só o número) -->
   <div id="countdownOverlay" aria-hidden="true">
     <div id="countdownText">3</div>
   </div>
 
-  <!-- preview -->
-  <div id="previewScreen" class="hidden" aria-hidden="true">
+  <!-- preview (em cima do vídeo) -->
+  <div id="previewScreen" class="hidden" aria-hidden="true" style="display:none">
     <div id="previewInner">
       <img id="previewImage" src="" alt="Preview da foto">
     </div>
@@ -119,7 +136,7 @@
 
   <div id="thankScreen" class="screen hidden" style="display:none">
     <div class="card" role="region" aria-label="Obrigado">
-      <img src="/public/logo1.png" alt="Logo" class="logo" 
+      <img src="/public/logo1.png" alt="Logo" class="logo"
            onerror="if(this.src!='/public/logo.png'){ this.src='/public/logo.png'; this.onerror=function(){ if(this.src!='/logo1.png'){ this.src='/logo1.png'; this.onerror=function(){ this.src='/logo.png'; } } } }">
       <h1>✨ Obrigado por utilizar a cabine!</h1>
       <p class="lead">Aguarde o operador encerrar a sessão.</p>
@@ -140,6 +157,7 @@
     const enterFsBtn = document.getElementById('enterFsBtn');
     const welcomeScreen = document.getElementById('welcomeScreen');
     const startBtn = document.getElementById('startBtn');
+    const videoWrap = document.getElementById('videoWrap');
     const videoEl = document.getElementById('videoEl');
     const canvasEl = document.getElementById('canvasEl');
     const progressEl = document.getElementById('progress');
@@ -181,8 +199,10 @@
 
     function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-    // startCamera com fallback para compatibilidade (Android)
+    // startCamera com fallback (melhora compatibilidade Android)
     async function startCamera(){
+      // mostra o container do vídeo antes de atribuir stream
+      videoWrap.style.display = 'flex';
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "user" } }, audio:false });
       } catch(e1){
@@ -194,6 +214,8 @@
           } catch(e3){
             alert('Não foi possível acessar a câmera. Verifique as permissões.');
             showScreen(welcomeScreen);
+            // esconder vídeoWrap se falhou
+            videoWrap.style.display = 'none';
             return;
           }
         }
@@ -203,6 +225,7 @@
       await videoEl.play();
     }
 
+    // ajusta previewImage para ocupar o mesmo espaço visível do video (evita "jump")
     function fitPreviewToVideo(){
       const rect = videoEl.getBoundingClientRect();
       previewImage.style.width = rect.width + 'px';
@@ -215,7 +238,7 @@
       progressEl.textContent = `${currentPhotoIndex+1}/3`;
       progressEl.style.display = 'block';
 
-      // mostra overlay que bloqueia a câmera
+      // mostra apenas o número (sem overlay escuro)
       countdownOverlay.style.display = 'flex';
       let c = 5;
       countdownText.textContent = String(c);
@@ -233,7 +256,7 @@
         await sleep(1000);
       }
 
-      // hide overlay shortly before capture to avoid black frame on some devices
+      // hide countdown briefly before capture to avoid black frames on some devices
       countdownOverlay.style.display = 'none';
 
       // captura
@@ -265,7 +288,7 @@
       showPhotoPreview(currentPhotoData);
     }
 
-    function stopCamera(){ if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} videoEl.style.display='none'; canvasEl.style.display='none'; }
+    function stopCamera(){ if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} videoEl.style.display='none'; canvasEl.style.display='none'; videoWrap.style.display = 'none'; }
 
     refazerBtn.addEventListener('click',async()=>{
       previewScreen.style.display = 'none';
