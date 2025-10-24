@@ -2,13 +2,12 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Cabine Fotográfica — Celular (Exibe webcam do operador)</title>
+  <title>Cabine Fotográfica — Celular (Tela da Webcam)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
-    /* screens/cards */
     .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px;z-index:900}
     .card{width:95%;max-width:420px;padding:22px;border-radius:14px;background:rgba(0,0,0,0.45);backdrop-filter:blur(8px);text-align:center;border:1px solid rgba(255,255,255,0.08)}
     .logo{max-width:160px;margin-bottom:18px}
@@ -17,32 +16,22 @@
     button{padding:14px 18px;border-radius:12px;border:none;cursor:pointer;font-weight:800}
     #enterFsBtn{background:#ffd600;color:#000;font-size:18px;width:100%}
     #startBtn{background:#b07e09;color:#fff;font-size:20px;width:100%}
-    /* remote stream displayed full screen */
     #remoteImg{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;display:none;transform:scaleX(-1);z-index:100}
-    /* progress / waiting overlay */
-    #waitingOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:910;background:rgba(0,0,0,0.5)}
-    #waitingBox{padding:18px 20px;border-radius:12px;background:rgba(255,255,255,0.06);text-align:center}
-    /* countdown big */
     #countdownOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:920;pointer-events:none}
     #countdownText{color:#fff;font-size:140px;font-weight:900;text-shadow:0 8px 30px rgba(0,0,0,0.7)}
-    /* preview */
     #previewScreen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:930;background:rgba(0,0,0,0.9)}
     #previewImage{max-width:95%;max-height:85%;object-fit:contain;border-radius:8px}
     .preview-controls{position:absolute;bottom:28px;left:0;right:0;display:flex;gap:14px;justify-content:center;z-index:940}
     .preview-btn{padding:12px 18px;border-radius:10px;border:none;font-weight:700;cursor:pointer}
     .btn-refazer{background:rgba(220,53,69,0.9);color:#fff}
     .btn-continuar{background:rgba(40,167,69,0.95);color:#fff}
-    /* thank */
     #thankCard{width:95%;max-width:420px;padding:22px;border-radius:14px;background:rgba(0,0,0,0.45);backdrop-filter:blur(8px);text-align:center;border:1px solid rgba(255,255,255,0.08)}
-    /* small debug */
     #debugInfo {position:fixed;bottom:8px;left:8px;font-size:12px;color:#ddd;background:rgba(0,0,0,0.35);padding:6px;border-radius:6px;z-index:995}
   </style>
 </head>
 <body>
-  <!-- remote image (stream from operator) -->
   <img id="remoteImg" alt="Stream do Operador">
 
-  <!-- initial enter fullscreen screen -->
   <div id="enterScreen" class="screen">
     <div class="card" role="region" aria-label="Entrar em tela cheia">
       <img src="logo1.png" class="logo" alt="Logo" onerror="this.onerror=null;this.src='logo.png'">
@@ -52,31 +41,19 @@
     </div>
   </div>
 
-  <!-- welcome screen (shows after fullscreen) -->
   <div id="welcomeScreen" class="screen" style="display:none">
     <div class="card" role="region" aria-label="Bem-vindo">
       <img src="logo1.png" class="logo" alt="Logo" onerror="this.onerror=null;this.src='logo.png'">
       <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
-      <p>Quando o operador transmitir a webcam, ela aparecerá aqui. Clique em iniciar para começar a sessão.</p>
+      <p>Esta tela exibirá a webcam do operador. Quando estiver pronta, pressione iniciar.</p>
       <button id="startBtn">🎬 Iniciar Sessão de Fotos</button>
     </div>
   </div>
 
-  <!-- waiting overlay while awaiting operator stream -->
-  <div id="waitingOverlay">
-    <div id="waitingBox">
-      <div id="waitingMsg">🔌 Aguardando stream do operador...</div>
-      <div style="height:12px"></div>
-      <button id="waitingCancel" style="padding:10px 14px;border-radius:10px;background:#444;color:#fff;border:none;cursor:pointer">Cancelar</button>
-    </div>
-  </div>
-
-  <!-- countdown overlay -->
   <div id="countdownOverlay">
     <div id="countdownText">3</div>
   </div>
 
-  <!-- preview screen -->
   <div id="previewScreen">
     <img id="previewImage" src="" alt="Preview">
     <div class="preview-controls">
@@ -85,7 +62,6 @@
     </div>
   </div>
 
-  <!-- thank screen -->
   <div id="thankScreen" class="screen" style="display:none">
     <div id="thankCard">
       <img src="logo1.png" class="logo" alt="Logo" onerror="this.onerror=null;this.src='logo.png'">
@@ -101,25 +77,17 @@
   <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
   <script>
-    // CONFIG
     const SERVER_URL = "https://festadodavi.onrender.com/";
-    const WAIT_FOR_FIRST_FRAME_MS = 7000; // tempo máximo para esperar o primeiro frame do operador
-    const COUNTDOWN_SECONDS = 5;
-
     const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true, reconnectionAttempts:5, reconnectionDelay:1000, timeout:20000, forceNew:true, withCredentials:true });
 
     const params = new URLSearchParams(location.search);
     const session = params.get('session');
 
-    // UI elems
     const enterScreen = document.getElementById('enterScreen');
     const enterFsBtn  = document.getElementById('enterFsBtn');
     const welcomeScreen = document.getElementById('welcomeScreen');
     const startBtn = document.getElementById('startBtn');
     const remoteImg = document.getElementById('remoteImg');
-    const waitingOverlay = document.getElementById('waitingOverlay');
-    const waitingMsg = document.getElementById('waitingMsg');
-    const waitingCancel = document.getElementById('waitingCancel');
     const countdownOverlay = document.getElementById('countdownOverlay');
     const countdownText = document.getElementById('countdownText');
     const previewScreen = document.getElementById('previewScreen');
@@ -130,179 +98,103 @@
     const debugInfo = document.getElementById('debugInfo');
     const clack = document.getElementById('clack'), inicio = document.getElementById('inicio'), fim = document.getElementById('fim');
 
-    // state
     let lastRemoteFrame = null;
     let remoteAvailable = false;
     let photos = [];
     let currentPhotoIndex = 0;
     let currentPhotoData = null;
-    let waitingResolve = null;
-    let waitingReject = null;
+    const WAIT_FOR_FIRST_FRAME_MS = 7000;
+    const COUNTDOWN_SECONDS = 5;
 
-    // small debug UI
-    setInterval(()=> {
-      debugInfo.textContent = `Sessão: ${session||'none'} | Socket: ${socket.connected ? '🟢' : '🔴'} | Remote: ${remoteAvailable ? '🟢' : '🔴'} | Fotos: ${photos.length}`;
-    }, 800);
+    setInterval(()=>{ debugInfo.textContent = `Sessão:${session||'none'} | Socket:${socket.connected?'🟢':'🔴'} | Remote:${remoteAvailable?'🟢':'🔴'} | Fotos:${photos.length}` }, 800);
 
-    // helper: show/hide screens cleanly
-    function showOnly(element){
-      // hide all
-      [enterScreen, welcomeScreen, previewScreen, thankScreen].forEach(s=>{
-        s.style.display = 'none';
-      });
-      // hide overlays by default
-      countdownOverlay.style.display = 'none';
-      waitingOverlay.style.display = 'none';
-      // show requested
-      if(element) element.style.display = 'flex';
-    }
-
-    // socket handlers
     socket.on('connect', () => {
-      if(session) socket.emit('cell_connected');
+      if(session) {
+        socket.emit('want_stream', { session });
+      } else {
+        socket.emit('cell_connected', {});
+      }
     });
 
-    // operator or server re-emits frames to this session
     socket.on('stream_frame', ({ session: s, frame }) => {
       if(!session) return;
       if(s !== session) return;
       lastRemoteFrame = frame;
       remoteAvailable = true;
-      // display it
       remoteImg.src = frame;
       remoteImg.style.display = 'block';
-      // if waiting for first frame, resolve
-      if(waitingResolve) {
-        waitingResolve();
-        waitingResolve = null;
-        waitingReject = null;
-      }
     });
 
-    // server/operator can force stop stream
     socket.on('stop_stream', ({ session: s }) => {
       if(!session) return;
       if(s !== session) return;
-      remoteAvailable = false;
       lastRemoteFrame = null;
+      remoteAvailable = false;
       remoteImg.style.display = 'none';
     });
 
-    socket.on('reset_session', ()=> {
-      // abort and show welcome again
-      photos = []; currentPhotoIndex = 0; currentPhotoData = null;
-      showOnly(welcomeScreen);
-    });
+    function showOnly(elm){
+      [enterScreen,welcomeScreen,previewScreen,thankScreen].forEach(s=>s.style.display='none');
+      countdownOverlay.style.display='none';
+      if(elm) elm.style.display = 'flex';
+    }
+    showOnly(enterScreen);
 
-    // Start flow: enter fullscreen
     enterFsBtn.addEventListener('click', async () => {
       try { await document.documentElement.requestFullscreen(); } catch(e){}
-      // hide enter screen immediately and show welcome
       showOnly(welcomeScreen);
       if(session) socket.emit('cell_entered_fullscreen');
     });
 
-    // Start session button: request stream and wait for operator frames
     startBtn.addEventListener('click', async () => {
-      startBtn.disabled = true;
-      startBtn.textContent = '🎵 Preparando...';
+      startBtn.disabled = true; startBtn.textContent='🎵 Preparando...';
       await inicio.play().catch(()=>{});
-      startBtn.disabled = false;
-      startBtn.textContent = '🎬 Iniciar Sessão de Fotos';
+      startBtn.disabled = false; startBtn.textContent='🎬 Iniciar Sessão de Fotos';
 
-      // Ask operator to start streaming frames for this session
-      if(session) socket.emit('want_stream', { session });
-
-      // show waiting overlay
-      waitingMsg.textContent = '🔌 Aguardando stream do operador...';
-      waitingOverlay.style.display = 'flex';
-
-      try {
-        await waitForFirstFrame(WAIT_FOR_FIRST_FRAME_MS);
-        // got first frame — hide waiting and start capture sequence
-        waitingOverlay.style.display = 'none';
-        currentPhotoIndex = 0;
-        photos = [];
-        await runCaptureSequence();
-      } catch (err) {
-        waitingOverlay.style.display = 'none';
-        // no stream — inform user and keep on welcome screen
-        alert('Não foi possível receber o stream do operador. Peça para o operador iniciar o stream e tente novamente.');
+      const got = await waitForFirstFrame(WAIT_FOR_FIRST_FRAME_MS);
+      if(!got){
+        alert('Não recebeu stream do operador. Peça para reiniciar o stream no PC e tente novamente.');
         showOnly(welcomeScreen);
+        return;
       }
+      currentPhotoIndex = 0;
+      photos = [];
+      await runCaptureSequence();
     });
 
-    // cancel waiting
-    waitingCancel.addEventListener('click', () => {
-      if(waitingReject) waitingReject(new Error('cancelled'));
-      waitingOverlay.style.display = 'none';
-      showOnly(welcomeScreen);
-    });
-
-    function waitForFirstFrame(timeoutMs){
-      if(remoteAvailable) return Promise.resolve();
-      return new Promise((resolve, reject) => {
-        waitingResolve = resolve;
-        waitingReject = reject;
-        setTimeout(()=>{
-          if(waitingReject) {
-            waitingReject(new Error('timeout'));
-            waitingResolve = null;
-            waitingReject = null;
-          }
-        }, timeoutMs);
+    function waitForFirstFrame(timeout){
+      if(remoteAvailable) return Promise.resolve(true);
+      return new Promise((resolve) => {
+        const onStream = ({session:s}) => { if(s===session){ socket.off('stream_frame', onStream); clearTimeout(tid); resolve(true); } };
+        socket.on('stream_frame', onStream);
+        const tid = setTimeout(()=>{ socket.off('stream_frame', onStream); resolve(false); }, timeout);
       });
     }
 
-    // capture single photo: always use lastRemoteFrame
     async function captureSinglePhoto(){
-      if(!remoteAvailable || !lastRemoteFrame){
-        throw new Error('remote-unavailable');
-      }
-      // show remoteImg full screen while counting (already displayed)
       countdownOverlay.style.display = 'flex';
-      for(let t = COUNTDOWN_SECONDS; t>0; t--){
-        if(t <= 2){
+      for(let t=COUNTDOWN_SECONDS; t>0; t--){
+        if(t<=2){
           countdownText.textContent = 'SORRIA!';
-          countdownText.style.color = '#ffffff';
-          if(t === 2){ try { clack.currentTime = 0; clack.play().catch(()=>{}); } catch(e){} }
-        } else {
-          countdownText.textContent = String(t);
-          countdownText.style.color = '#ffffff';
-        }
-        // wait 1s
+          if(t===2) try{ clack.currentTime=0; clack.play().catch(()=>{}); }catch(e){}
+        } else countdownText.textContent = String(t);
         await new Promise(r=>setTimeout(r,1000));
       }
       countdownOverlay.style.display = 'none';
-      // capture the latest frame received
-      if(lastRemoteFrame){
-        return lastRemoteFrame;
-      } else {
-        throw new Error('no-frame-after-countdown');
-      }
+      if(lastRemoteFrame){ return lastRemoteFrame; }
+      throw new Error('no-frame');
     }
 
-    function showPhotoPreview(photoData){
-      previewImage.src = photoData;
-      previewScreen.style.display = 'flex';
-    }
+    function showPhotoPreview(photoData){ previewImage.src = photoData; previewScreen.style.display = 'flex'; }
 
     async function runCaptureSequence(){
-      // stop if already 3
-      if(currentPhotoIndex >= 3){
-        // end
-        showOnly(thankScreen);
-        sendPhotosToServer();
-        return;
-      }
-
+      if(currentPhotoIndex >= 3){ showOnly(thankScreen); sendPhotosToServer(); return; }
       try {
-        const photoData = await captureSinglePhoto();
-        currentPhotoData = photoData;
-        showPhotoPreview(photoData);
-      } catch (err) {
-        // if remote lost mid-flow
-        alert('Erro ao capturar — stream do operador indisponível. Peça para reiniciar o stream e tente novamente.');
+        const data = await captureSinglePhoto();
+        currentPhotoData = data;
+        showPhotoPreview(data);
+      } catch (e) {
+        alert('Erro ao capturar — stream indisponível.');
         showOnly(welcomeScreen);
       }
     }
@@ -310,9 +202,9 @@
     refazerBtn.addEventListener('click', async () => {
       previewScreen.style.display = 'none';
       currentPhotoData = null;
-      // ask operator to resume stream for next photo (keeps flow predictable)
       if(session) socket.emit('want_stream', { session });
-      await waitForFirstFrame(WAIT_FOR_FIRST_FRAME_MS).catch(()=>{ alert('Stream não disponível. Voltando.'); showOnly(welcomeScreen); return; });
+      const ok = await waitForFirstFrame(WAIT_FOR_FIRST_FRAME_MS);
+      if(!ok){ alert('Stream não disponível.'); showOnly(welcomeScreen); return; }
       await runCaptureSequence();
     });
 
@@ -321,42 +213,23 @@
       currentPhotoIndex++;
       previewScreen.style.display = 'none';
       currentPhotoData = null;
-      // ask operator to resume stream (operator might already be streaming)
       if(session) socket.emit('want_stream', { session });
-      // proceed to next or finish
       await runCaptureSequence();
     });
 
-    // send photos to server (keeps retry behavior)
     function sendPhotosToServer(){
       if(session && photos.length>0){
         const sendPhotosWithRetry=(attempt=1,maxAttempts=6)=>{
           if(socket.connected){
             socket.emit('photos_from_cell',{ session, photos, attempt, totalAttempts:maxAttempts });
-            if(attempt < maxAttempts){
-              setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),1500);
-            }
+            if(attempt < maxAttempts) setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),1500);
           } else if(attempt < maxAttempts){
             setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),2000);
-          } else {
-            alert('Falha ao enviar fotos — verifique a conexão do dispositivo.');
-          }
+          } else alert('Falha ao enviar fotos.');
         };
         sendPhotosWithRetry();
       }
     }
-
-    // ensure remoteImg hidden initially and enter screen shown
-    showOnly(enterScreen);
-
-    // Handle case operator stops stream explicitly
-    socket.on('stop_stream', ({ session: s }) => {
-      if(!session) return;
-      if(s !== session) return;
-      remoteAvailable = false;
-      lastRemoteFrame = null;
-      remoteImg.style.display = 'none';
-    });
   </script>
 </body>
 </html>
