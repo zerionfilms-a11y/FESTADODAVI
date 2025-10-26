@@ -1,21 +1,33 @@
-// server.js (adaptado completo)
-// Mantive as rotas e o comportamento original e adicionei integrações para streaming (index <-> celular).
-// Requisitos: node >= 14, instalar dependências: express, socket.io, fs-extra, form-data, uuid
-// OBS: fetch usa fallback para globalThis.fetch (Node 18+) e import dinâmico de node-fetch se necessário.
+// server.js (corrigido: fallback para uuid via crypto.randomUUID)
+// Mantive todo o comportamento anterior; só adicionei fallback seguro para uuid
+// Requisitos: node >= 14 (Node 18+/25 tem fetch & crypto.randomUUID nativos)
 
 const express = require('express');
 const http = require('http');
 const path = require('path');
-const fs = require('fs-extra');
-// const fetch = require('node-fetch'); // <-- removed require; use fallback below
+const fs = require('fs-extra'); // mantido (se não existir no ambiente, será erro — geralmente está no package.json)
 const FormData = require('form-data');
-const { v4: uuidv4 } = require('uuid');
+// tentar require('uuid') com fallback para crypto.randomUUID
+let uuidv4;
+try {
+  // prefer explicit require if installed
+  uuidv4 = require('uuid').v4;
+} catch (e) {
+  // fallback: use crypto.randomUUID if available (Node 14.17+/18+), else use a timestamp+random
+  const crypto = require('crypto');
+  if (crypto && typeof crypto.randomUUID === 'function') {
+    uuidv4 = () => crypto.randomUUID();
+  } else {
+    uuidv4 = () => {
+      return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    };
+  }
+}
+
 const { Server } = require('socket.io');
 
-//
 // Safe fetch: use globalThis.fetch when available (Node 18+ / 25), otherwise dynamic import node-fetch.
 // This avoids crashing when node-fetch is not installed on environments that already provide fetch.
-//
 const fetch = (globalThis && globalThis.fetch)
   ? globalThis.fetch.bind(globalThis)
   : (...args) => import('node-fetch').then(m => m.default(...args));
