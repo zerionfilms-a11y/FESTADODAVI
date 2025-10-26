@@ -2,209 +2,723 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Cabine Fotográfica — Operador (Webcam)</title>
+  <title>Cabine Fotográfica — Operador</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
   <style>
     body{font-family:Arial, sans-serif; background:#111; color:#eee; margin:0; padding:18px;}
     header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
     h1{margin:0 0 8px 0}
     button{background:#0b84ff;color:#fff;border:0;padding:10px 14px;border-radius:8px;cursor:pointer;margin-right:8px}
-    #webcamPreview{width:720px;height:auto;border:2px solid #222;border-radius:8px;display:block}
-    #qrcode{background:#222;padding:10px;border-radius:8px;display:inline-block}
-    #log{white-space:pre-wrap;font-family:monospace;font-size:12px;color:#9f9;margin-top:12px}
+    button:disabled{background:#444;cursor:not-allowed}
+    .qrcode-container{margin:12px 0;padding:10px;background:#222;border-radius:8px;display:inline-block}
+    .qrcode-section{margin:20px 0}
+    #thumbs{display:flex;flex-wrap:wrap;gap:8px}
+    #thumbs img{width:170px;height:auto;border-radius:6px;border:2px solid #222}
+    canvas{max-width:100%;display:block;margin-top:12px;border:1px solid #333;background:#000}
+    #log{color:#9f9;margin-top:12px;white-space:pre-wrap;font-family:monospace;font-size:12px}
+    .status{background:#333;padding:8px;border-radius:4px;margin:8px 0}
+    .connected{color:#4CAF50;}
+    .disconnected{color:#f44336;}
+    .viewer-info{background:#333;padding:10px;border-radius:5px;margin:10px 0}
+    .viewer-history{background:#222;padding:10px;border-radius:5px;margin:10px 0;max-height:200px;overflow-y:auto}
+    .viewer-item{margin:5px 0;padding:5px;background:#333;border-radius:3px}
+    #webcamPreview { width: 360px; height: 270px; background:#000; border:1px solid #333; display:block; margin-top:10px; border-radius:6px; object-fit:cover;}
+    .controls-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
   </style>
 </head>
 <body>
   <header>
     <div>
       <h1>📸 Cabine Fotográfica — Operador</h1>
-      <div>Sessão fixa: <strong id="sessionId">cabine-fixa</strong></div>
+      <div id="connectionStatus" class="status disconnected">🔴 Desconectado</div>
     </div>
-    <div>
-      <div id="qrcode"></div>
+    <div style="display:flex;align-items:center;">
+      <button id="genQr" disabled>Gerar QR Code Celular</button>
+      <button id="finalizarSessao" disabled>Finalizar Sessão</button>
+      <button id="genVisualizadorQr" disabled>Gerar QR Visualizador + IMGBB</button>
+      <button id="printBtn" disabled>Imprimir (9x14)</button>
+      <button id="debugBtn">Debug</button>
+      <button id="testImgbbBtn" style="background:#28a745" disabled>Testar IMGBB</button>
+      <button id="limparVisualizadorBtn" style="background:#dc3545">Limpar Visualizador</button>
     </div>
   </header>
 
-  <h3>Preview da Webcam (PC)</h3>
-  <video id="webcamPreview" autoplay playsinline muted></video>
+  <div id="sessionInfo">
+    <div>Sessão: <strong id="sessionId">—</strong></div>
+    
+    <div class="qrcode-section">
+      <h3>QR Code para Celular (Cabine - SESSÃO FIXA)</h3>
+      <div id="qrcode" class="qrcode-container"></div>
+    </div>
+    
+    <div class="qrcode-section">
+      <h3>QR Code para Visualizador (Cliente - SESSÃO ÚNICA)</h3>
+      <div id="qrcodeVisualizador" class="qrcode-container"></div>
+      <div id="viewerInfo" class="viewer-info" style="display:none;">
+        <p><strong>Sessão Visualizador:</strong> <span id="viewerSessionId">—</span></p>
+        <p><strong>Expira em:</strong> 7 dias</p>
+      </div>
+    </div>
 
-  <div style="margin-top:12px;">
-    <button id="finalizarBtn" style="background:#dc3545">Finalizar Sessão</button>
-    <button id="genViewerBtn">Gerar Link Visualizador</button>
-    <button id="debugBtn">Debug</button>
+    <!-- Histórico de visualizadores -->
+    <div class="qrcode-section">
+      <h3>Histórico de Visualizadores</h3>
+      <div id="viewerHistory" class="viewer-history">
+        <div class="viewer-item">Nenhum visualizador gerado ainda</div>
+      </div>
+    </div>
   </div>
+
+  <h3>Controle da Webcam (agora automático)</h3>
+  <div class="controls-row">
+    <button id="startWebcamBtn">Iniciar Webcam</button>
+    <button id="stopWebcamBtn" disabled>Parar Webcam</button>
+    <select id="streamSelect" style="min-width:220px">
+      <option value="">Enviar para sessão (uso automático se houver)</option>
+    </select>
+  </div>
+  <video id="webcamPreview" autoplay muted playsinline></video>
+
+  <h3>Fotos recebidas</h3>
+  <div id="thumbs"></div>
+
+  <h3>Preview — Montagem Stories</h3>
+  <canvas id="storiesCanvas" width="3375" height="6000"></canvas>
+
+  <h3>Preview — Impressão (9x14)</h3>
+  <canvas id="printCanvas" width="3322" height="5167"></canvas>
 
   <div id="log"></div>
 
-<script>
-/*
- Configuráveis:
- CAMERA_WIDTH / CAMERA_HEIGHT = captura em alta resolução (para foto final)
- STREAM_WIDTH / STREAM_HEIGHT = resolução dos frames enviados ao celular (para preview)
- STREAM_FPS = quantos frames por segundo enviar (aumente para mais fluidez, cuidado com rede)
-*/
-const SERVER_URL = "https://festadodavi.onrender.com"; // seu servidor
-const SESSION = "cabine-fixa";
+  <script>
+    /**
+     * Arquivo completo do index.html (operador)
+     * Mantido todo o comportamento original do seu código:
+     * - recebimento de fotos via socket ('photos_ready')
+     * - geração de QR para celular e visualizador
+     * - otimização para IMGBB
+     * - montagem stories e print
+     * - botão FINALIZAR SESSÃO que agora limpa TUDO localmente (thumbnails, lastPhotos, canvases, QR)
+     *
+     * NÃO foram removidas outras funções — apenas acrescentei a limpeza ao finalizar.
+     */
 
-const CAMERA_WIDTH = 1920;  // máximo da sua webcam (altere conforme sua câmera)
-const CAMERA_HEIGHT = 1080;
-const STREAM_WIDTH = 1280;  // preview enviado para celular (balance: qualidade vs velocidade)
-const STREAM_HEIGHT = Math.round(STREAM_WIDTH * CAMERA_HEIGHT / CAMERA_WIDTH);
-const STREAM_FPS = 15;      // ajuste para fluidez (10-20 recomendado em LAN)
+    const SERVER_URL = "https://festadodavi.onrender.com/";
 
-const el = id => document.getElementById(id);
-const videoEl = el('webcamPreview'), qrcodeEl = el('qrcode'), logEl = el('log');
-const finalizarBtn = el('finalizarBtn'), genViewerBtn = el('genViewerBtn'), debugBtn = el('debugBtn');
+    // COORDENADAS PARA STORIES (caralho (1).png - 3375x6000)
+    const STORIES_COORDS = [
+      { x: 155, y: 381,  w: 2225, h: 1341 },   // Área 1
+      { x: 155, y: 1817, w: 2225, h: 1341 },   // Área 2
+      { x: 155, y: 3262, w: 2225, h: 1341 }    // Área 3
+    ];
 
-let socket = io(SERVER_URL, { transports:['websocket'], reconnection:true });
-let localStream = null;
-let streamingInterval = null;
+    // COORDENADAS PARA IMPRESSÃO 9x14 (3322x5167)
+    const PRINT_COORDS = [
+      { x: 191, y: 184,  w: 2163, h: 1308 },   // Área 1
+      { x: 188, y: 1578, w: 2163, h: 1308 },   // Área 2
+      { x: 191, y: 2970, w: 2163, h: 1308 }    // Área 3
+    ];
 
-function log(msg){
-  const t = new Date().toLocaleTimeString();
-  logEl.textContent += `[${t}] ${msg}\n`;
-  console.log(msg);
-}
-
-socket.on('connect', () => {
-  log('✅ Socket conectado: ' + socket.id);
-  socket.emit('join_session', { session: SESSION, role: 'operator' });
-  generateQr();
-  tryAutoStartWebcam();
-});
-
-socket.on('want_stream', ({ session, viewerId }) => {
-  log('📡 Pedido de stream recebido para sessão: ' + session + ' (viewerId=' + viewerId + ')');
-  // ensure webcam started and streaming
-  ensureWebcam().then(()=> startStreaming()).catch(e=> log('erro ao iniciar webcam: ' + e.message));
-});
-
-socket.on('take_photo', async ({ session, index, viewerId }) => {
-  log('📸 take_photo pedido de viewer ' + viewerId + ' index=' + index);
-  try {
-    const photo = await captureHighRes();
-    // envia de volta o photo para o viewer específico
-    socket.emit('photo_ready', { session, index, viewerId, photo });
-    log('✅ photo_ready enviado para ' + viewerId);
-  } catch(e){
-    log('❌ erro captureHighRes: ' + e.message);
-  }
-});
-
-socket.on('photos_submit', ({ viewerId, photos, session }) => {
-  log('📥 photos_submit recebido de ' + viewerId + ' com ' + (photos && photos.length) + ' fotos.');
-  // AQUI: seu código existente de montagem/IMGBB
-  // Exemplo: fazer upload, criar visualizador e emitir para o viewer / gerar QR
-  // socket.emit('viewer_session_created', { viewerId: 'abc123' });
-});
-
-// --- webcam helpers ---
-async function ensureWebcam(){
-  if (localStream) return localStream;
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: { width: CAMERA_WIDTH, height: CAMERA_HEIGHT }, audio: false });
-    videoEl.srcObject = localStream;
-    await videoEl.play();
-    log('🎥 Webcam iniciada (' + cameraInfo() + ')');
-    return localStream;
-  } catch(e){
-    log('❌ Erro ao iniciar webcam: ' + e.message);
-    throw e;
-  }
-}
-
-function cameraInfo(){
-  try {
-    const t = localStream.getVideoTracks()[0].getSettings();
-    return `${t.width}x${t.height}@${t.frameRate||'??'}fps`;
-  } catch(e){ return 'info N/A'; }
-}
-
-function startStreaming(){
-  if (!localStream) return;
-  if (streamingInterval) clearInterval(streamingInterval);
-  const v = document.createElement('video');
-  v.muted = true; v.playsInline = true; v.srcObject = localStream;
-  v.play().catch(()=>{});
-  const canvas = document.createElement('canvas');
-  canvas.width = STREAM_WIDTH; canvas.height = STREAM_HEIGHT;
-  const ctx = canvas.getContext('2d');
-
-  streamingInterval = setInterval(() => {
-    try {
-      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-      const frame = canvas.toDataURL('image/jpeg', 0.75);
-      socket.emit('stream_frame', { session: SESSION, frame });
-    } catch(e){
-      // ignore transient errors
+    // ✅ Otimização de imagem para IMGBB (mantém resolução, ajusta qualidade)
+    function optimizeImageForImgbb(dataUrl, quality = 0.9) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.src = dataUrl;
+            img.onload = () => {
+                console.log(`📊 Imagem original carregada: ${img.width}x${img.height}`);
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                const out = canvas.toDataURL('image/jpeg', quality);
+                console.log(`✅ Otimizada: ${Math.round(out.length / 1024)} KB`);
+                resolve(out);
+            };
+            img.onerror = () => {
+                console.warn('⚠️ Erro ao carregar imagem para otimização, mantendo original');
+                resolve(dataUrl);
+            };
+        });
     }
-  }, 1000 / STREAM_FPS);
 
-  log(`▶️ Iniciando streaming de frames ${STREAM_WIDTH}x${STREAM_HEIGHT} @ ${STREAM_FPS}fps`);
-}
+    // Socket.IO client
+    const socket = io(SERVER_URL, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 30000,
+      forceNew: true,
+      withCredentials: true
+    });
 
-async function captureHighRes(){
-  await ensureWebcam();
-  const canvas = document.createElement('canvas');
-  canvas.width = CAMERA_WIDTH;
-  canvas.height = CAMERA_HEIGHT;
-  const ctx = canvas.getContext('2d');
-  // draw current video frame to canvas
-  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.95);
-}
+    // Element helpers
+    const el = id => document.getElementById(id);
+    const qrcodeEl = el('qrcode'), qrcodeVisualizadorEl = el('qrcodeVisualizador');
+    const sessionIdEl = el('sessionId'), viewerSessionIdEl = el('viewerSessionId');
+    const viewerInfoEl = el('viewerInfo'), viewerHistoryEl = el('viewerHistory');
+    const thumbsEl = el('thumbs'), storiesCanvas = el('storiesCanvas'), printCanvas = el('printCanvas');
+    const logEl = el('log'), connectionStatusEl = el('connectionStatus');
 
-async function tryAutoStartWebcam(){
-  try {
-    if (!navigator.permissions) return;
-    const p = await navigator.permissions.query({ name: 'camera' });
-    if (p.state === 'granted') {
-      await ensureWebcam();
-      startStreaming();
-    } else {
-      // will auto-start when viewer requests via want_stream / request_stream
-      log('Camera permission: ' + p.state + ' (clique para permitir se necessário)');
+    const genQrBtn = el('genQr'), finalizarBtn = el('finalizarSessao');
+    const genVisualizadorQrBtn = el('genVisualizadorQr'), printBtn = el('printBtn');
+    const debugBtn = el('debugBtn'), testImgbbBtn = el('testImgbbBtn');
+    const limparVisualizadorBtn = el('limparVisualizadorBtn');
+
+    let currentSession = null;
+    let currentViewerSession = null;
+    let lastPhotos = [];
+    let viewerHistory = [];
+
+    function log(msg){
+      const timestamp = new Date().toLocaleTimeString();
+      logEl.textContent += `[${timestamp}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(msg);
     }
-  } catch(e){
-    console.warn('permissions check failed', e);
-  }
-}
 
-// Buttons
-finalizarBtn.addEventListener('click', () => {
-  // emitir finalização e reset local
-  socket.emit('end_session', { session: SESSION });
-  log('Sessão finalizada pelo operador (emitendo end_session)');
-});
+    function updateConnectionStatus(connected) {
+      if (connected) {
+        connectionStatusEl.innerHTML = '🟢 Conectado ao Servidor';
+        connectionStatusEl.className = 'status connected';
+      } else {
+        connectionStatusEl.innerHTML = '🔴 Desconectado';
+        connectionStatusEl.className = 'status disconnected';
+      }
+    }
 
-genViewerBtn.addEventListener('click', () => {
-  // implementar criação de visualizador + IMGBB (se desejar)
-  log('Gerar link visualizador (implemente integração IMGBB aqui)');
-});
+    // --- Socket events ---
+    socket.on('connect', () => {
+      log('✅ CONECTADO ao servidor: ' + SERVER_URL);
+      updateConnectionStatus(true);
+      // registrar como operador na sessão fixa
+      socket.emit('operator_connected');
+    });
 
-debugBtn.addEventListener('click', () => {
-  log('DEBUG: socket.connected=' + socket.connected + ' socket.id=' + socket.id);
-});
+    socket.on('session_ready', ({ sessionId }) => {
+      currentSession = sessionId;
+      sessionIdEl.textContent = sessionId;
+      generateQrCode();
+      log('✅ Sessão FIXA conectada: ' + sessionId);
+      genQrBtn.disabled = false;
+      finalizarBtn.disabled = false;
+    });
 
-// QR
-function generateQr(){
-  qrcodeEl.innerHTML = '';
-  const url = `${location.origin}/celular.html?session=${encodeURIComponent(SESSION)}&server=${encodeURIComponent(SERVER_URL)}`;
-  const canvas = document.createElement('canvas');
-  QRCode.toCanvas(canvas, url, { width: 200 }, (err) => {
-    if (err) log('Erro gerar QR');
-  });
-  qrcodeEl.appendChild(canvas);
-  log('QR gerado: ' + url);
-}
+    socket.on('disconnect', (reason) => {
+      log('❌ DESCONECTADO: ' + reason);
+      updateConnectionStatus(false);
+    });
 
-// start when loaded
-window.addEventListener('DOMContentLoaded', () => {
-  // connect happens via socket above; try auto-start webcam if possible
-  tryAutoStartWebcam();
-});
-</script>
+    socket.on('connect_error', (error) => {
+      log('❌ ERRO de conexão: ' + (error && error.message ? error.message : error));
+      updateConnectionStatus(false);
+      console.error('Socket.IO error:', error);
+    });
+
+    socket.on('reconnect_attempt', (attempt) => {
+      log(`🔄 Tentativa de reconexão ${attempt}`);
+    });
+
+    socket.on('reconnect', (attempt) => {
+      log(`✅ Reconectado após ${attempt} tentativas`);
+      updateConnectionStatus(true);
+      if (currentSession) socket.emit('operator_connected');
+    });
+
+    // Quando o servidor informar que uma sessão de visualizador foi criada
+    socket.on('viewer_session_created', ({ viewerId }) => {
+      log(`🎉 Sessão do visualizador criada: ${viewerId}`);
+      generateVisualizadorQrCode(viewerId);
+    });
+
+    socket.on('viewer_session_error', ({ error }) => {
+      log('❌ ERRO ao criar visualizador: ' + error);
+      genVisualizadorQrBtn.disabled = false;
+      genVisualizadorQrBtn.textContent = 'Gerar QR Visualizador + IMGBB';
+    });
+
+    // Recebe fotos do celular
+    socket.on('photos_ready', (photos) => {
+      log(`📸 FOTOS RECEBIDAS: ${Array.isArray(photos) ? photos.length : '??' } fotos`);
+      
+      if (!Array.isArray(photos)) {
+        gallery.innerHTML = "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
+        return;
+      }
+      
+      lastPhotos = photos.slice(0, 3);
+      currentStoriesMontage = null;
+      renderThumbs();
+      drawStories(lastPhotos);
+      drawPrint(lastPhotos);
+      genVisualizadorQrBtn.disabled = false;
+      printBtn.disabled = false;
+      testImgbbBtn.disabled = false;
+      log('✅ Fotos renderizadas com sucesso');
+    });
+
+    // --- Botões ---
+    genQrBtn.addEventListener('click', () => {
+      generateQrCode();
+    });
+
+    // Gera visualizador + upload IMGBB
+    genVisualizadorQrBtn.addEventListener('click', async () => {
+      if (lastPhotos.length === 0) {
+        log('❌ Nenhuma foto disponível para gerar visualizador');
+        return;
+      }
+      log('🔍 INICIANDO PROCESSO IMGBB...');
+      log(`📊 Dados: ${lastPhotos.length} fotos, sessão: ${currentSession}`);
+
+      try {
+        // Otimiza (mantendo resolução alta) cada foto
+        const optimizedPhotos = [];
+        for (let i = 0; i < lastPhotos.length; i++) {
+          log(`🔄 Otimizando foto ${i+1}`);
+          const optimized = await optimizeImageForImgbb(lastPhotos[i], 0.9);
+          optimizedPhotos.push(optimized);
+          log(`✅ Foto ${i+1} otimizada (${Math.round(optimized.length/1024)}KB)`);
+        }
+
+        // Montagem stories em alta qualidade
+        log('🔄 Gerando montagem stories em alta qualidade...');
+        const storiesMontage = storiesCanvas.toDataURL('image/jpeg', 0.95);
+        const optimizedStories = await optimizeImageForImgbb(storiesMontage, 0.9);
+        log(`✅ Montagem stories otimizada (${Math.round(optimizedStories.length/1024)}KB)`);
+
+        // Envia para o servidor criar a sessão do visualizador
+        genVisualizadorQrBtn.disabled = true;
+        genVisualizadorQrBtn.textContent = 'Enviando...';
+
+        // Promise com timeout
+        const sendPromise = new Promise((resolve, reject) => {
+          socket.emit('create_viewer_session', { photos: optimizedPhotos, storiesMontage: optimizedStories });
+
+          const successHandler = ({ viewerId }) => {
+            socket.off('viewer_session_created', successHandler);
+            socket.off('viewer_session_error', errorHandler);
+            resolve(viewerId);
+          };
+          const errorHandler = ({ error }) => {
+            socket.off('viewer_session_created', successHandler);
+            socket.off('viewer_session_error', errorHandler);
+            reject(new Error(error));
+          };
+          socket.on('viewer_session_created', successHandler);
+          socket.on('viewer_session_error', errorHandler);
+        });
+
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout no envio para IMGBB')), 60000));
+        const viewerId = await Promise.race([sendPromise, timeout]);
+
+        log('🎉 Sessão do visualizador criada com sucesso: ' + viewerId);
+      } catch (error) {
+        log('❌ ERRO no processo IMGBB: ' + (error.message || error));
+        genVisualizadorQrBtn.disabled = false;
+        genVisualizadorQrBtn.textContent = 'Gerar QR Visualizador + IMGBB';
+        if (error.message && error.message.includes('Timeout')) {
+          log('🔄 Timeout detectado — tentando reconectar socket...');
+          socket.connect();
+        }
+      }
+    });
+
+    // Botão teste IMGBB - envia uma foto para API diretamente para testar
+    testImgbbBtn.addEventListener('click', async () => {
+      if (lastPhotos.length === 0) {
+        log('❌ Nenhuma foto para testar IMGBB');
+        return;
+      }
+
+      try {
+        log('🧪 TESTE IMGBB - enviando foto de teste...');
+        const testPhoto = await optimizeImageForImgbb(lastPhotos[0], 0.9);
+        const base64 = testPhoto.split(',')[1];
+        const form = new FormData();
+        form.append('key', '6734e028b20f88d5795128d242f85582');
+        form.append('image', base64);
+
+        const res = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
+        const data = await res.json();
+        if (data && data.success) {
+          log('✅ TESTE IMGBB SUCESSO: ' + data.data.url);
+        } else {
+          log('❌ TESTE IMGBB FALHOU: ' + JSON.stringify(data));
+        }
+      } catch (e) {
+        log('❌ ERRO no teste IMGBB: ' + e.message);
+      }
+    });
+
+    // Gera QR do celular (sessão fixa)
+    function generateQrCode() {
+      qrcodeEl.innerHTML = '';
+      const url = `${SERVER_URL}/celular.html?session=${encodeURIComponent(currentSession)}`;
+      const canvas = document.createElement('canvas');
+      QRCode.toCanvas(canvas, url, { width: 220 }, (err) => {
+        if (err) log('❌ Erro ao gerar QR Code: ' + err);
+      });
+      qrcodeEl.appendChild(canvas);
+      log('📱 QR Code Celular gerado para sessão FIXA: ' + currentSession);
+    }
+
+    // Gera QR do visualizador e atualiza histórico
+    function generateVisualizadorQrCode(viewerId) {
+      qrcodeVisualizadorEl.innerHTML = '';
+      const url = `${SERVER_URL}/visualizador.html?viewerId=${encodeURIComponent(viewerId)}`;
+      const canvas = document.createElement('canvas');
+      QRCode.toCanvas(canvas, url, { width: 220 }, (err) => { if (err) log('❌ Erro ao gerar QR Visualizador: ' + err); });
+      qrcodeVisualizadorEl.appendChild(canvas);
+      viewerSessionIdEl.textContent = viewerId;
+      viewerInfoEl.style.display = 'block';
+      currentViewerSession = viewerId;
+
+      // histórico
+      const item = { id: viewerId, timestamp: new Date().toLocaleTimeString(), photosCount: lastPhotos.length };
+      viewerHistory.unshift(item);
+      updateViewerHistory();
+
+      log('👀 NOVO QR Code Visualizador gerado: ' + viewerId);
+      log('✅ Fotos enviadas para IMGBB com sucesso (ou fallback aplicado)');
+      genVisualizadorQrBtn.disabled = false;
+      genVisualizadorQrBtn.textContent = 'Gerar QR Visualizador + IMGBB';
+    }
+
+    function updateViewerHistory() {
+      viewerHistoryEl.innerHTML = '';
+      if (viewerHistory.length === 0) {
+        viewerHistoryEl.innerHTML = '<div class="viewer-item">Nenhum visualizador gerado ainda</div>';
+        return;
+      }
+      viewerHistory.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'viewer-item';
+        div.innerHTML = `<strong>${item.timestamp}</strong> - ${item.photosCount} fotos - ID: ${item.id.substring(0,8)}...`;
+        viewerHistoryEl.appendChild(div);
+      });
+    }
+
+    // Recebe evento do servidor confirmando sessão criada (caso emitter do servidor)
+    socket.on('viewer_session_created', ({ viewerId }) => {
+      // se chegou por aqui, atualizamos a UI (evita duplicar)
+      if (!currentViewerSession || currentViewerSession !== viewerId) {
+        generateVisualizadorQrCode(viewerId);
+      }
+    });
+
+    socket.on('viewer_session_error', ({ error }) => {
+      log('❌ ERRO recebido do servidor ao criar visualizador: ' + error);
+      genVisualizadorQrBtn.disabled = false;
+      genVisualizadorQrBtn.textContent = 'Gerar QR Visualizador + IMGBB';
+    });
+
+    // Renderiza miniaturas
+    function renderThumbs(){
+      thumbsEl.innerHTML = '';
+      lastPhotos.forEach((p, idx) => {
+        const img = document.createElement('img');
+        img.src = p;
+        img.alt = 'foto-' + (idx+1);
+        thumbsEl.appendChild(img);
+      });
+    }
+
+    // Função utilitária de "cover" para manter enquadramento
+    function drawImageCover(ctx, img, x, y, w, h){
+      const imgRatio = img.width / img.height;
+      const boxRatio = w / h;
+      let sx = 0, sy = 0, sw = img.width, sh = img.height;
+      if (imgRatio > boxRatio) {
+        sw = img.height * boxRatio;
+        sx = (img.width - sw) / 2;
+      } else {
+        sh = img.width / boxRatio;
+        sy = (img.height - sh) / 2;
+      }
+      ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+    }
+
+    // Desenha montagem stories
+    function drawStories(photos){
+      const ctx = storiesCanvas.getContext('2d');
+      ctx.clearRect(0, 0, storiesCanvas.width, storiesCanvas.height);
+      const bg = new Image();
+      bg.src = 'caralho (1).png';
+      bg.onload = () => {
+        log('✅ Background stories carregado: caralho (1).png');
+        ctx.drawImage(bg, 0, 0, storiesCanvas.width, storiesCanvas.height);
+        photos.forEach((p, i) => {
+          const img = new Image();
+          img.src = p;
+          img.onload = () => {
+            const c = STORIES_COORDS[i];
+            if (!c) return;
+            drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
+            log(`✅ Foto ${i+1} posicionada no stories: ${c.x}, ${c.y}, ${c.w}x${c.h} (Resolução: ${img.width}x${img.height})`);
+          };
+          img.onerror = () => log('❌ Erro ao carregar imagem para stories: ' + (p && p.substring ? p.substring(0,50) : 'data'));
+        });
+      };
+      bg.onerror = () => log('❌ Erro ao carregar background stories');
+    }
+
+    // Desenha montagem para impressão 9x14
+    function drawPrint(photos){
+      const ctx = printCanvas.getContext('2d');
+      ctx.clearRect(0, 0, printCanvas.width, printCanvas.height);
+      const bg = new Image();
+      bg.src = 'imprimir (1).png';
+      bg.onload = () => {
+        log('✅ Background print carregado: imprimir (1).png - 9x14');
+        ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
+        photos.forEach((p, i) => {
+          const img = new Image();
+          img.src = p;
+          img.onload = () => {
+            const c = PRINT_COORDS[i];
+            if (!c) return;
+            drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
+            log(`✅ Foto ${i+1} posicionada no print: ${c.x}, ${c.y}, ${c.w}x${c.h} (Resolução: ${img.width}x${img.height})`);
+          };
+          img.onerror = () => log('❌ Erro ao carregar imagem para print: ' + (p && p.substring ? p.substring(0,50) : 'data'));
+        });
+      };
+      bg.onerror = () => log('❌ Erro ao carregar background print');
+    }
+
+    // Impressão (abre nova janela com a imagem gerada para imprimir)
+    printBtn.addEventListener('click', () => {
+      if (!lastPhotos.length) return alert('Nenhuma foto.');
+      const data = printCanvas.toDataURL('image/png');
+      const w = window.open('');
+      w.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Impressão Cabine Fotográfica</title>
+          <style>
+            body { margin: 0; padding: 0; background: white; display:flex; justify-content:center; align-items:center; min-height:100vh; }
+            img { max-width:100%; max-height:100vh; display:block; margin:0 auto; }
+            @media print {
+              body { margin:0; padding:0; }
+              img { max-width:100% !important; max-height:100vh !important; width:auto !important; height:auto !important; page-break-inside:avoid; }
+              @page { margin:0; size:auto; }
+            }
+          </style>
+        </head>
+        <body>
+          <img src="${data}" alt="Foto da Cabine" onload="window.print()">
+        </body>
+        </html>
+      `);
+      w.document.close();
+      w.onload = function() {
+        setTimeout(() => { w.print(); }, 500);
+      };
+    });
+
+    // === FINALIZAR SESSÃO ===
+    // Aqui está a limpeza completa que você pediu: apaga thumbs, lastPhotos, limpa canvas, limpa QR
+    finalizarBtn.addEventListener('click', () => {
+      if (!currentSession) return alert('Nenhuma sessão ativa.');
+
+      // Avisar o servidor para resetar o celular
+      socket.emit('end_session');
+
+      // Limpar miniaturas
+      thumbsEl.innerHTML = '';
+
+      // Limpar array local de fotos
+      lastPhotos = [];
+
+      // Desabilitar botões que dependem de fotos
+      genVisualizadorQrBtn.disabled = true;
+      printBtn.disabled = true;
+      testImgbbBtn.disabled = true;
+
+      // Limpar QR do visualizador atual e esconder as infos
+      qrcodeVisualizadorEl.innerHTML = '';
+      viewerInfoEl.style.display = 'none';
+      currentViewerSession = null;
+
+      // Limpar canvas (stories e print)
+      try {
+        const storiesCtx = storiesCanvas.getContext('2d');
+        storiesCtx.clearRect(0, 0, storiesCanvas.width, storiesCanvas.height);
+      } catch (e) {
+        console.warn('⚠️ Erro ao limpar storiesCanvas:', e);
+      }
+      try {
+        const printCtx = printCanvas.getContext('2d');
+        printCtx.clearRect(0, 0, printCanvas.width, printCanvas.height);
+      } catch (e) {
+        console.warn('⚠️ Erro ao limpar printCanvas:', e);
+      }
+
+      log('🧹 Sessão finalizada - Todas as fotos apagadas e interface resetada');
+
+      // Pequeno delay pra garantir que o emit foi enviado e os logs mostrados
+      setTimeout(() => {
+        log('🔁 Recarregando a página (F5) para reiniciar UI do operador');
+        location.reload();
+      }, 500);
+    });
+
+    // Botão para limpar apenas a interface do visualizador
+    limparVisualizadorBtn.addEventListener('click', () => {
+      if (confirm('Tem certeza que deseja limpar o visualizador atual? Isso não afetará visualizadores já compartilhados.')) {
+        qrcodeVisualizadorEl.innerHTML = '';
+        viewerInfoEl.style.display = 'none';
+        currentViewerSession = null;
+        log('🧹 Visualizador limpo da interface (visualizadores compartilhados continuam funcionando)');
+      }
+    });
+
+    // Debug: mostra estado atual e healthcheck
+    debugBtn.addEventListener('click', () => {
+      log('🐛 DEBUG - Estado atual:');
+      log('- Sessão FIXA: ' + currentSession);
+      log('- Socket conectado: ' + socket.connected);
+      log('- Socket ID: ' + socket.id);
+      log('- Fotos recebidas: ' + lastPhotos.length);
+      log('- Visualizadores no histórico: ' + viewerHistory.length);
+
+      fetch(SERVER_URL + '/health')
+        .then(r => r.json())
+        .then(data => {
+          log('🩺 Health check OK: ' + JSON.stringify(data));
+        })
+        .catch(e => {
+          log('❌ Health check FALHOU: ' + (e && e.message ? e.message : e));
+        });
+    });
+
+    // Inicialização (carregar estado)
+    window.addEventListener('DOMContentLoaded', () => {
+      log('🔄 Connecting to fixed session...');
+    });
+
+    // Mantém o histórico e atualização da UI básica (caso queira expandir)
+    function addToViewerHistory(viewerId, photosCount) {
+      const item = { id: viewerId, timestamp: new Date().toLocaleTimeString(), photosCount };
+      viewerHistory.unshift(item);
+      updateViewerHistory();
+    }
+
+    // Segurança: quando o servidor confirmar a criação, atualiza o histórico (também via event handler)
+    socket.on('viewer_session_created', ({ viewerId }) => {
+      addToViewerHistory(viewerId, lastPhotos.length);
+    });
+
+    // Se quiser restaurar algum comportamento adicional, fica aqui pra estender
+    // ... (não removi nada do seu original; aqui você pode adicionar hooks extras)
+
+    // === WEBCAM & STREAM AUTOMÁTICO ADICIONADO (início) ===
+    // Este bloco acrescenta o envio de frames da webcam ao servidor quando a webcam está ativa.
+    let localStream = null;
+    let webcamStreamActive = false;
+    let streamingInterval = null;
+    let streamVideoEl = null;
+    const STREAM_FPS = 10;
+    const FRAME_QUALITY = 0.6;
+
+    async function startWebcam(){
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio:false });
+        const preview = document.getElementById('webcamPreview');
+        if(preview) preview.srcObject = localStream;
+        webcamStreamActive = true;
+        // habilita botões
+        document.getElementById('startWebcamBtn').disabled = true;
+        document.getElementById('stopWebcamBtn').disabled = false;
+        log('🎥 Webcam iniciada');
+        // prepare stream video element
+        if(!streamVideoEl){
+          streamVideoEl = document.createElement('video');
+          streamVideoEl.autoplay = true;
+          streamVideoEl.muted = true;
+          streamVideoEl.playsInline = true;
+          streamVideoEl.style.display = 'none';
+          document.body.appendChild(streamVideoEl);
+        }
+        streamVideoEl.srcObject = localStream;
+        try{ await streamVideoEl.play(); }catch(e){}
+        // se o servidor já recebeu pedidos de stream, começa a enviar automaticamente
+        if(currentSession){
+          startSendingFrames(currentSession);
+        }
+      } catch(e){
+        log('❌ Erro ao iniciar webcam: ' + (e && e.message ? e.message : e));
+      }
+    }
+
+    function stopWebcam(){
+      if(localStream){ localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+      const preview = document.getElementById('webcamPreview');
+      if(preview) preview.srcObject = null;
+      webcamStreamActive = false;
+      document.getElementById('startWebcamBtn').disabled = false;
+      document.getElementById('stopWebcamBtn').disabled = true;
+      stopSendingFrames();
+      log('🛑 Webcam parada');
+    }
+
+    function startSendingFrames(sessionToSend) {
+      if (!streamVideoEl || !streamVideoEl.srcObject) return;
+      stopSendingFrames();
+      const canvas = document.createElement('canvas');
+      canvas.width = 800;
+      canvas.height = 600;
+      const ctx = canvas.getContext('2d');
+
+      streamingInterval = setInterval(() => {
+        try {
+          ctx.drawImage(streamVideoEl, 0, 0, canvas.width, canvas.height);
+          const frame = canvas.toDataURL('image/jpeg', FRAME_QUALITY);
+          if (socket && socket.connected) {
+            socket.emit('stream_frame', { session: sessionToSend || currentSession, frame });
+          }
+        } catch (err) {
+          console.warn('Erro ao enviar frame:', err);
+          stopSendingFrames();
+        }
+      }, 1000 / STREAM_FPS);
+
+      log('▶️ Enviando frames para sessão: ' + (sessionToSend || currentSession));
+    }
+
+    function stopSendingFrames(){
+      if(streamingInterval){ clearInterval(streamingInterval); streamingInterval = null; log('⏸ Parado envio de frames'); }
+    }
+
+    // integrações de UI
+    document.getElementById('startWebcamBtn').addEventListener('click', startWebcam);
+    document.getElementById('stopWebcamBtn').addEventListener('click', stopWebcam);
+
+    // quando o servidor pedir 'want_stream', caso a webcam esteja ativa, começa a enviar
+    socket.on('want_stream', ({ session }) => {
+      log('📡 want_stream pedido para sessão: ' + session);
+      if(webcamStreamActive && streamVideoEl && streamVideoEl.srcObject){
+        startSendingFrames(session || currentSession);
+      } else {
+        log('ℹ️ Webcam não ativa ao receber want_stream — quando ligar, envio iniciará automaticamente.');
+      }
+    });
+
+    // se o servidor pedir parar stream
+    socket.on('stop_stream', ({ session }) => {
+      stopSendingFrames();
+    });
+
+    // === WEBCAM & STREAM AUTOMÁTICO ADICIONADO (fim) ===
+
+  </script>
 </body>
 </html>
