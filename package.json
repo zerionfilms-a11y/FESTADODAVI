@@ -9,7 +9,12 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "socket.io": "^4.7.5"
+    "socket.io": "^4.7.5",
+    "cors": "^2.8.5",
+    "axios": "^1.4.0",
+    "multer": "^1.4.5-lts.1",
+    "fs-extra": "^11.1.1",
+    "qrcode": "^1.5.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.4"
