@@ -2,161 +2,79 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Cabine — Operador (webcam)</title>
+  <title>Cabine Fotográfica — Operador</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; background:#111; color:#eee; margin:0; padding:12px }
-    header{display:flex;align-items:center;justify-content:space-between}
-    video{border-radius:8px;border:1px solid #333; max-width:640px; width:100%}
-    #log{white-space:pre-wrap;font-family:monospace;font-size:12px;color:#9f9;margin-top:8px}
-    #qrcode{background:#222;padding:8px;border-radius:8px;display:inline-block}
+    body{margin:0;background:#000;color:#fff;font-family:Arial,Helvetica,sans-serif;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh}
+    video{width:90%;max-width:800px;border:3px solid #ffd600;border-radius:10px}
+    #qrcode{margin-top:20px}
   </style>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>Operador — Cabine Fotográfica</h1>
-      <div> Sessão fixa: <strong id="sessionId"></strong> </div>
-    </div>
-    <div>
-      <div id="qrcode">QR aqui</div>
-    </div>
-  </header>
-
-  <h3>Preview Webcam (PC)</h3>
+  <h1>🎥 Cabine do Operador</h1>
   <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas" style="display:none;"></canvas>
+  <div id="status">Iniciando...</div>
 
-  <h3>Log</h3>
-  <div id="log"></div>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script>
+    const SERVER_URL = "https://festadodavi.onrender.com";
+    const session = "cabine-fixa"; // sempre fixo
+    const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true });
 
-<script>
-const SERVER_URL = location.origin.replace(/\/$/,'') || 'http://localhost:3000';
-const SESSION = 'cabine-fixa'; // change if needed
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const statusEl = document.getElementById("status");
 
-const CAMERA_WIDTH = 1280; // set to your webcam max width later
-const CAMERA_HEIGHT = 720; // set to your webcam max height later
-const STREAM_WIDTH = 960;   // frame size to stream to cellphone (adjustable)
-const STREAM_HEIGHT = Math.round(STREAM_WIDTH * CAMERA_HEIGHT / CAMERA_WIDTH);
-const STREAM_FPS = 8; // frames per second to stream live preview
+    let stream, ctx;
+    let sending = false;
 
-const el = id => document.getElementById(id);
-const videoEl = el('video'), sessionIdEl = el('sessionId'), logEl = el('log'), qrcodeEl = el('qrcode');
+    socket.on("connect", () => {
+      statusEl.textContent = "🟢 Conectado — transmitindo sessão: " + session;
+      socket.emit("join_session", { session, role: "operator" });
+      startCamera();
+    });
 
-let localStream = null;
-let socket = null;
-let streamingInterval = null;
+    socket.on("disconnect", () => {
+      statusEl.textContent = "🔴 Desconectado. Tentando reconectar...";
+    });
 
-function log(msg){ const t = new Date().toLocaleTimeString(); logEl.textContent += `[${t}] ${msg}\n`; console.log(msg); }
-
-async function start() {
-  sessionIdEl.textContent = SESSION;
-  // connect socket
-  socket = io(SERVER_URL, { transports:['websocket'] });
-  socket.on('connect', ()=>{
-    log('Socket connected: ' + socket.id);
-    socket.emit('join_session', { session: SESSION, role: 'operator' });
-    // generate QR to scan (point to celular.html)
-    const url = `${location.origin}/celular.html?session=${encodeURIComponent(SESSION)}`;
-    qrcodeEl.textContent = url;
-  });
-
-  socket.on('request_stream', (p)=>{
-    log('request_stream from viewer: ' + JSON.stringify(p));
-    // viewers are requesting stream; we'll ensure webcam started and streaming
-    ensureWebcam().then(()=> startStreaming()).catch(e=> log('webcam start failed: '+e.message));
-  });
-
-  socket.on('take_photo', async ({ session, index, viewerId }) => {
-    log('take_photo request from viewer ' + viewerId + ' index=' + index);
-    // capture full-res photo and send back
-    try {
-      const photo = await captureHighRes();
-      socket.emit('photo_ready', { session, index, viewerId, photo });
-      log('photo_ready sent to viewer ' + viewerId);
-    } catch(e){
-      log('capture failed: ' + e.message);
+    async function startCamera(){
+      try{
+        stream = await navigator.mediaDevices.getUserMedia({video:true, audio:false});
+        video.srcObject = stream;
+        video.play();
+        ctx = canvas.getContext("2d");
+        startSendingFrames();
+      }catch(e){
+        alert("Erro ao acessar webcam: " + e.message);
+      }
     }
-  });
 
-  socket.on('photos_submit', ({ viewerId, photos, session }) => {
-    log('Photos submitted by viewer ' + viewerId + ' photos=' + photos.length);
-    // Here you can reuse your existing montage/IMGBB logic — photos is an array of dataURLs
-    // For demo we just log and could show thumbs
-  });
-
-  socket.on('disconnect', ()=> log('socket disconnected'));
-
-  // try to auto-start webcam if permission granted
-  tryAutoStartWebcamIfAllowed();
-}
-
-async function ensureWebcam(){
-  if (localStream) return localStream;
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: { width: CAMERA_WIDTH, height: CAMERA_HEIGHT }, audio:false });
-    videoEl.srcObject = localStream;
-    await videoEl.play();
-    log('Webcam started');
-    return localStream;
-  } catch(e){
-    log('Error starting webcam: ' + e.message);
-    throw e;
-  }
-}
-
-async function tryAutoStartWebcamIfAllowed(){
-  try {
-    if (!navigator.permissions) return;
-    const p = await navigator.permissions.query({ name: 'camera' });
-    if (p.state === 'granted') {
-      await ensureWebcam();
-      startStreaming();
-    } else {
-      log('Camera permission not granted (state=' + p.state + ') - please click allow once');
-      // still attempt to start when a viewer requests stream
+    function startSendingFrames(){
+      if(sending) return;
+      sending = true;
+      const FPS = 10; // taxa de atualização
+      const send = ()=>{
+        if(!stream) return;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        const frame = canvas.toDataURL("image/jpeg",0.6);
+        socket.emit("stream_frame",{session,frame});
+      };
+      setInterval(send,1000/FPS);
     }
-  } catch(e){
-    console.warn('permissions check failed', e);
-  }
-}
 
-function startStreaming(){
-  if (!localStream) {
-    log('No localStream to stream');
-    return;
-  }
-  if (streamingInterval) clearInterval(streamingInterval);
-  const v = document.createElement('video');
-  v.muted = true; v.playsInline = true; v.srcObject = localStream;
-  v.play().catch(()=>{});
-  const canvas = document.createElement('canvas');
-  canvas.width = STREAM_WIDTH; canvas.height = STREAM_HEIGHT;
-  const ctx = canvas.getContext('2d');
-  streamingInterval = setInterval(() => {
-    try {
-      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-      const frame = canvas.toDataURL('image/jpeg', 0.7);
-      socket.emit('stream_frame', { session: SESSION, frame });
-    } catch(e){ /* ignore frames errors */ }
-  }, 1000 / STREAM_FPS);
-  log('Started streaming frames at ' + STREAM_FPS + ' fps');
-}
-
-async function captureHighRes(){
-  if (!localStream) await ensureWebcam();
-  // capture from video element at native resolution
-  const canvas = document.createElement('canvas');
-  canvas.width = CAMERA_WIDTH;
-  canvas.height = CAMERA_HEIGHT;
-  const ctx = canvas.getContext('2d');
-  // draw mirrored to compensate front cam if needed
-  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.95);
-}
-
-// start on load
-window.addEventListener('DOMContentLoaded', start);
-</script>
+    // Exibir QR Code pro celular
+    const qrCanvas = document.createElement("canvas");
+    document.body.appendChild(qrCanvas);
+    const url = `${location.origin}/celular.html?session=${session}&server=${SERVER_URL}`;
+    QRCode.toCanvas(qrCanvas, url, {width:220}, err=>{
+      if(err) console.error(err);
+      statusEl.insertAdjacentHTML("beforebegin","<p>Escaneie com o celular:</p>");
+    });
+  </script>
 </body>
 </html>
