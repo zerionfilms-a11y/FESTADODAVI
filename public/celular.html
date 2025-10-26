@@ -2,33 +2,36 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Cabine — Celular (cliente)</title>
+  <title>Cabine — Celular (cliente) — FIXED</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
-    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:12px}
-    #streamImg{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:1;filter:brightness(0.6)}
-    #overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;display:flex;align-items:center;justify-content:center;flex-direction:column}
-    .btn{padding:16px 22px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;font-size:18px;cursor:pointer}
-    #countdown{font-size:140px;font-weight:800;text-align:center;color:#fff;text-shadow:0 0 20px #000;display:none}
-    #preview{position:fixed;bottom:10%;left:50%;transform:translateX(-50%);z-index:3;display:none; flex-direction:column;align-items:center}
+    #streamImg{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:1;filter:brightness(0.65)}
+    #overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:20px}
+    .btn{padding:14px 20px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;font-size:18px;cursor:pointer}
+    #countdown{font-size:120px;font-weight:800;text-align:center;color:#fff;text-shadow:0 0 20px #000;display:none;margin-top:20px}
+    #preview{position:fixed;bottom:8%;left:50%;transform:translateX(-50%);z-index:3;display:none;flex-direction:column;align-items:center}
     #preview img{max-width:90vw;border-radius:8px;border:4px solid rgba(0,0,0,0.5)}
     .preview-controls{display:flex;gap:12px;margin-top:12px}
     .control-btn{padding:10px 14px;border-radius:8px;border:none;font-weight:700;cursor:pointer}
     #refazer{background:#dc3545;color:white}
     #continuar{background:#28a745;color:white}
     #debug{position:fixed;left:8px;bottom:8px;font-size:12px;color:#aaa;background:rgba(0,0,0,0.4);padding:6px;border-radius:6px;z-index:10}
+    #status{position:fixed;top:8px;left:8px;font-size:14px;color:#fff;background:rgba(0,0,0,0.4);padding:6px;border-radius:6px;z-index:10}
+    #enterFsBtn{position:fixed;right:8px;top:8px;z-index:12}
   </style>
 </head>
 <body>
   <img id="streamImg" src="" crossorigin="anonymous">
-  <div id="overlay" class="screen">
+  <div id="overlay">
     <div style="text-align:center;z-index:5">
-      <h1>📸 Cabine</h1>
-      <button id="startBtn" class="btn">🎬 Iniciar Sessão de Fotos</button>
-      <div id="waiting" style="margin-top:12px;color:#ffd600;display:none">Aguardando câmera do operador...</div>
+      <h1 style="margin-bottom:8px">📸 Cabine</h1>
+      <div style="margin-bottom:12px">
+        <button id="startBtn" class="btn">🎬 Iniciar Sessão de Fotos</button>
+      </div>
+      <div id="waiting" style="margin-top:8px;color:#ffd600;display:none">Aguardando câmera do operador...</div>
     </div>
     <div id="countdown">3</div>
   </div>
@@ -36,18 +39,21 @@
   <div id="preview">
     <img id="previewImg" src="">
     <div class="preview-controls">
-      <button id="refazer" class="control-btn">🔄 Refazer</button>
-      <button id="continuar" class="control-btn">✅ Continuar</button>
+      <button id="refazer" class="control-btn" aria-label="refazer">🔄 Refazer</button>
+      <button id="continuar" class="control-btn" aria-label="continuar">✅ Continuar</button>
     </div>
   </div>
 
+  <div id="status">Conectando...</div>
   <div id="debug">debug</div>
+  <button id="enterFsBtn" class="btn">🔲 Tela cheia</button>
 
 <script>
-const SERVER_URL = location.origin.replace(/\/$/, '') || 'http://localhost:3000';
+// CONFIG: can be overridden by ?server=... in URL
 const params = new URLSearchParams(location.search);
+const SERVER_PARAM = params.get('server');
+const SERVER_URL = SERVER_PARAM || (location.origin && location.origin !== 'null' ? location.origin : 'http://YOUR_SERVER:3000');
 const SESSION = params.get('session') || 'cabine-fixa';
-const STREAM_FALLBACK = params.get('stream') || null;
 
 const streamImg = document.getElementById('streamImg');
 const startBtn = document.getElementById('startBtn');
@@ -58,39 +64,66 @@ const previewImg = document.getElementById('previewImg');
 const refazerBtn = document.getElementById('refazer');
 const continuarBtn = document.getElementById('continuar');
 const debugEl = document.getElementById('debug');
+const statusEl = document.getElementById('status');
+const enterFsBtn = document.getElementById('enterFsBtn');
 
 let socket = null;
 let photos = [];
 let currentIndex = 0;
 let lastFrame = null;
 let waitingForPhoto = false;
+let connected = false;
+let haveStreamFrames = false;
 
-function dbg(msg){ console.log(msg); debugEl.textContent = msg; }
+function dbg(msg){
+  console.log(msg);
+  debugEl.textContent = msg;
+}
+
+function setStatus(msg, color){
+  statusEl.textContent = msg;
+  if (color) statusEl.style.background = color;
+}
 
 function connectSocket(){
-  socket = io(SERVER_URL, { transports:['websocket'] });
+  dbg('connecting to ' + SERVER_URL);
+  try {
+    socket = io(SERVER_URL, { transports:['websocket'], reconnection:true, timeout:20000 });
+  } catch(e){
+    dbg('socket init error: ' + e.message);
+    setStatus('Erro socket', 'rgba(255,0,0,0.6)');
+    return;
+  }
+
   socket.on('connect', ()=>{
     dbg('connected: ' + socket.id);
+    setStatus('Conectado', 'rgba(0,128,0,0.3)');
+    connected = true;
     socket.emit('join_session', { session: SESSION, role: 'viewer' });
-    // request stream immediately
     socket.emit('request_stream', { session: SESSION });
     waitingEl.style.display = 'block';
   });
 
+  socket.on('connect_error', (err) => {
+    dbg('connect_error: ' + (err && err.message ? err.message : err));
+    setStatus('Erro conexão', 'rgba(255,0,0,0.6)');
+  });
+
   socket.on('stream_frame', ({ session, frame }) => {
-    // update preview image background
+    // show frame
     lastFrame = frame;
     streamImg.src = frame;
     waitingEl.style.display = 'none';
+    haveStreamFrames = true;
   });
 
   socket.on('stream_pending', ()=>{
     waitingEl.style.display = 'block';
+    haveStreamFrames = false;
   });
 
   socket.on('photo_ready', ({ index, photo }) => {
     dbg('photo_ready index=' + index);
-    // show preview and let user decide
     previewImg.src = photo;
     preview.style.display = 'flex';
     waitingForPhoto = false;
@@ -98,10 +131,26 @@ function connectSocket(){
 
   socket.on('viewer_count', (c)=> { dbg('viewers=' + c.viewers); });
 
-  socket.on('disconnect', ()=> dbg('socket disconnected'));
+  socket.on('disconnect', ()=>{
+    dbg('socket disconnected');
+    setStatus('Desconectado', 'rgba(128,0,0,0.3)');
+    connected = false;
+  });
 }
 
+// countdown but only if we have a stream frame; otherwise warn and wait a bit
 async function countdownAndRequest(){
+  if (!haveStreamFrames) {
+    // try to request stream and wait a bit
+    dbg('Sem frames ainda — pedindo stream e aguardando 2s');
+    socket && socket.emit('request_stream', { session: SESSION });
+    await new Promise(r => setTimeout(r, 1500));
+    if (!haveStreamFrames) {
+      alert('Ainda não há transmissão da webcam do operador. Peça para ligar a câmera no PC e permitir a transmissão.');
+      return;
+    }
+  }
+
   // show live stream behind and overlay countdown
   countdownEl.style.display = 'block';
   for (let t=3; t>0; t--) {
@@ -113,49 +162,60 @@ async function countdownAndRequest(){
   waitingForPhoto = true;
   socket.emit('take_photo', { session: SESSION, index: currentIndex, viewerId: socket.id });
   dbg('take_photo requested index=' + currentIndex);
+  setStatus('Aguardando foto...');
 }
 
 startBtn.addEventListener('click', async ()=>{
-  startBtn.disabled = true;
+  // ensure socket connected
+  if (!socket) connectSocket();
+  if (!connected) {
+    // wait small time for connect, but not forever
+    setStatus('Conectando...', 'rgba(255,165,0,0.3)');
+    await new Promise(r=>setTimeout(r, 800));
+  }
   photos = []; currentIndex = 0;
   await countdownAndRequest();
 });
 
 refazerBtn.addEventListener('click', async ()=>{
   preview.style.display = 'none';
-  // request again for same index
+  setStatus('Refazendo...');
   await countdownAndRequest();
 });
 
 continuarBtn.addEventListener('click', async ()=>{
-  // save current preview image
   if (previewImg.src) photos.push(previewImg.src);
   currentIndex++;
   preview.style.display = 'none';
+  setStatus('');
   if (currentIndex >= 3) {
     // send photos to server for montage
     socket.emit('photos_submit', { session: SESSION, viewerId: socket.id, photos });
-    // show thank you screen briefly
+    // show thank you overlay
     overlayShowThank();
   } else {
-    // request next photo
     await countdownAndRequest();
   }
 });
 
 function overlayShowThank(){
-  // simple thank you overlay
-  overlay = document.getElementById('overlay');
+  const overlay = document.getElementById('overlay');
   overlay.innerHTML = '<div style="text-align:center"><h2>Obrigado!</h2><p>Aguarde enquanto montamos suas fotos.</p></div>';
-  setTimeout(()=> location.reload(), 5000);
+  setTimeout(()=> location.reload(), 4500);
 }
 
+enterFsBtn.addEventListener('click', async ()=>{
+  try{ await document.documentElement.requestFullscreen(); } catch(e){ dbg('fullscreen failed: '+e.message); }
+});
+
 window.addEventListener('DOMContentLoaded', ()=>{
+  // If server param provided, show it in debug
+  dbg('SESSION=' + SESSION + ' SERVER=' + SERVER_URL);
+  // auto-connect (but start button controls the flow)
   connectSocket();
-  // if a direct stream was supplied via query ?stream=..., use it as background as fallback
-  if (STREAM_FALLBACK) {
-    streamImg.src = STREAM_FALLBACK;
-  }
+  // fallback direct stream param ?stream=URL can populate background
+  const streamParam = params.get('stream');
+  if (streamParam) streamImg.src = streamParam;
 });
 </script>
 </body>
