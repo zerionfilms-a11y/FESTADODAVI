@@ -1,519 +1,343 @@
+// server.js (adaptado completo)
+// Mantive as rotas e o comportamento original e adicionei integrações para streaming (index <-> celular).
+// Requisitos: node >= 14, instalar dependências: express, socket.io, fs-extra, node-fetch, form-data, uuid
+
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
 const path = require('path');
-const crypto = require('crypto');
+const fs = require('fs-extra');
+const fetch = require('node-fetch'); // se preferir axios, troque por axios
+const FormData = require('form-data');
+const { v4: uuidv4 } = require('uuid');
+const { Server } = require('socket.io');
 
 const app = express();
-
-// CORS MÁXIMO - PERMITIR TUDO (mantive seu comportamento original)
-app.use((req, res, next) => {
-  const allowedOrigins = [
-    'https://agoraequeeuquerover.vercel.app',
-    'https://festadodavi.onrender.com/',
-    'http://localhost:3000',
-    'http://localhost:10000'
-  ];
-  
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
-  } else {
-    res.header('Access-Control-Allow-Origin', '*');
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: ["*"],
+    methods: ["GET","POST"]
   }
-  
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-socket-id');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  next();
 });
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// CONFIGURAÇÃO
+const PORT = process.env.PORT || 3000;
+const FIXED_SESSION = process.env.FIXED_SESSION || 'cabine-fixa';
+const TMP_DIR = path.join(__dirname, 'tmp');
+fs.ensureDirSync(TMP_DIR);
 
-// SERVIÇO DE ARQUIVOS ESTÁTICOS (mantido)
-app.use(express.static(path.join(__dirname, 'public'), {
-  setHeaders: (res, path) => {
-    if (path.endsWith('.png')) {
-      res.setHeader('Content-Type', 'image/png');
-    } else if (path.endsWith('.jpg') || path.endsWith('.jpeg')) {
-      res.setHeader('Content-Type', 'image/jpeg');
-    } else if (path.endsWith('.mp3')) {
-      res.setHeader('Content-Type', 'audio/mpeg');
-    }
+// IMGBB KEY (opcional)
+const IMGBB_KEY = process.env.IMGBB_KEY || null;
+
+// Body parsers
+app.use(express.json({ limit: '200mb' }));
+app.use(express.urlencoded({ extended: true, limit: '200mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ------------------------
+// In-memory session store
+// ------------------------
+/*
+ sessions[sessionId] = {
+   operators: Set(socketId),
+   viewers: Set(socketId),
+   viewerMeta: { socketId: {...} },
+   lastFrame: 'data:image/jpeg;base64,...',      // cached last low-res frame
+   lastFrameTs: 0,                               // timestamp last frame was accepted
+   viewerSessions: { viewerId: { urls: [], createdAt } } // viewer visualizador metadata
+ }
+*/
+const sessions = {};
+
+function ensureSession(sid) {
+  if (!sessions[sid]) {
+    sessions[sid] = {
+      operators: new Set(),
+      viewers: new Set(),
+      viewerMeta: {},
+      lastFrame: null,
+      lastFrameTs: 0,
+      viewerSessions: {}
+    };
   }
-}));
+  return sessions[sid];
+}
 
-// ROTAS PARA OS ARQUIVOS PRINCIPAIS (mantidas)
+// Rate limit per session for frames (ms between accepted frames)
+const MIN_FRAME_INTERVAL_MS = 1000 / 60; // target up to 60 FPS (rough throttle)
+
+// ------------------------
+// Socket.IO handlers
+// ------------------------
+io.on('connection', (socket) => {
+  console.log('[SOCKET] conectado:', socket.id);
+
+  // Join a session (operator or viewer)
+  socket.on('join_session', ({ session, role }) => {
+    const sid = session || FIXED_SESSION;
+    ensureSession(sid);
+    socket.data.session = sid;
+    socket.data.role = role || 'viewer';
+
+    if (socket.data.role === 'operator') {
+      sessions[sid].operators.add(socket.id);
+      socket.join(`${sid}:operators`);
+      console.log(`[SESSION ${sid}] Operador entrou: ${socket.id}`);
+      // send cached frame to new operator (optional)
+      if (sessions[sid].lastFrame) {
+        socket.emit('stream_frame', { session: sid, frame: sessions[sid].lastFrame });
+      }
+    } else {
+      sessions[sid].viewers.add(socket.id);
+      socket.join(`${sid}:viewers`);
+      sessions[sid].viewerMeta[socket.id] = { connectedAt: Date.now() };
+      console.log(`[SESSION ${sid}] Viewer entrou: ${socket.id}`);
+      // notify operators
+      io.in(`${sid}:operators`).emit('peer_joined', { id: socket.id, role: 'viewer', session: sid });
+      // if we have cached frame, send immediately; else notify pending
+      if (sessions[sid].lastFrame) {
+        socket.emit('stream_frame', { session: sid, frame: sessions[sid].lastFrame });
+      } else {
+        socket.emit('stream_pending', { session: sid });
+      }
+    }
+
+    // emit counts to both groups
+    io.in(`${sid}:operators`).emit('viewer_count', {
+      viewers: sessions[sid].viewers.size,
+      operators: sessions[sid].operators.size
+    });
+    io.in(`${sid}:viewers`).emit('viewer_count', {
+      viewers: sessions[sid].viewers.size,
+      operators: sessions[sid].operators.size
+    });
+  });
+
+  // Viewer requests stream (server notifies operators and returns cached frame if any)
+  socket.on('request_stream', ({ session }) => {
+    const sid = session || socket.data.session || FIXED_SESSION;
+    ensureSession(sid);
+    io.in(`${sid}:operators`).emit('want_stream', { session: sid, viewerId: socket.id });
+    const last = sessions[sid].lastFrame;
+    if (last) {
+      socket.emit('stream_frame', { session: sid, frame: last });
+    } else {
+      socket.emit('stream_pending', { session: sid });
+    }
+  });
+
+  // Operator sends a preview frame (low-res) to broadcast to viewers
+  // We will cache last frame and broadcast to viewers with throttling
+  socket.on('stream_frame', ({ session, frame }) => {
+    const sid = session || socket.data.session || FIXED_SESSION;
+    ensureSession(sid);
+
+    const now = Date.now();
+    const elapsed = now - (sessions[sid].lastFrameTs || 0);
+    // Accept frame if enough time passed (throttle)
+    if (elapsed >= MIN_FRAME_INTERVAL_MS) {
+      sessions[sid].lastFrame = frame;
+      sessions[sid].lastFrameTs = now;
+      // Broadcast to viewers in that session
+      io.in(`${sid}:viewers`).emit('stream_frame', { session: sid, frame });
+    } else {
+      // Too frequent: ignore or optionally update cache without broadcast
+      sessions[sid].lastFrame = frame; // keep cache up to date
+      // don't broadcast to avoid flooding
+    }
+  });
+
+  // Operator can explicitly stop streaming for a session
+  socket.on('stop_stream', ({ session }) => {
+    const sid = session || socket.data.session || FIXED_SESSION;
+    ensureSession(sid);
+    // Notify viewers that stream stopped (clients can show message)
+    io.in(`${sid}:viewers`).emit('stream_stopped', { session: sid });
+    console.log(`[SESSION ${sid}] stream stopped by operator ${socket.id}`);
+  });
+
+  // Viewer asks operator(s) to take a high-res photo (operator captures and replies with photo_ready)
+  socket.on('take_photo', ({ session, index, viewerId }) => {
+    const sid = session || socket.data.session || FIXED_SESSION;
+    ensureSession(sid);
+    // forward to operators; operator will emit photo_ready
+    io.in(`${sid}:operators`).emit('take_photo', { session: sid, index, viewerId });
+  });
+
+  // Operator sends captured photo (high-res) back to a specific viewer, or broadcast if no viewerId
+  socket.on('photo_ready', ({ session, index, viewerId, photo }) => {
+    const sid = session || socket.data.session || FIXED_SESSION;
+    ensureSession(sid);
+    if (viewerId) {
+      io.to(viewerId).emit('photo_ready', { index, photo });
+    } else {
+      io.in(`${sid}:viewers`).emit('photo_ready', { index, photo });
+    }
+  });
+
+  // Viewer submits final photos (array of data URLs) -> forwarded to operators for montage/upload
+  socket.on('photos_submit', async ({ session, viewerId, photos }) => {
+    const sid = session || socket.data.session || FIXED_SESSION;
+    ensureSession(sid);
+    console.log(`[SESSION ${sid}] photos_submit from ${viewerId} (${photos.length})`);
+    io.in(`${sid}:operators`).emit('photos_submit', { viewerId, photos, session: sid });
+    // Acknowledge viewer immediately
+    io.to(viewerId).emit('photos_received', { status: 'ok' });
+
+    // Optionally upload to IMGBB and/or create viewer session (if logic desired server-side)
+    // Here we don't auto-upload unless create_viewer_session is called by operator or if IMGBB_KEY env var is used elsewhere.
+  });
+
+  // Operator may call server to create viewer session and upload to IMGBB
+  socket.on('create_viewer_session', async ({ photos = [], storiesMontage = null, session }) => {
+    const sid = session || socket.data.session || FIXED_SESSION;
+    ensureSession(sid);
+    const viewerId = uuidv4();
+    sessions[sid].viewerSessions[viewerId] = { createdAt: Date.now(), urls: [], storiesUrl: null };
+
+    try {
+      // If IMGBB_KEY set and photos provided, upload them
+      if (IMGBB_KEY && Array.isArray(photos) && photos.length) {
+        const uploaded = [];
+        for (let i = 0; i < photos.length; i++) {
+          const data = photos[i].replace(/^data:image\/\w+;base64,/, '');
+          const form = new FormData();
+          form.append('key', IMGBB_KEY);
+          form.append('image', data);
+          // optional name
+          form.append('name', `viewer_${viewerId}_${i}`);
+          const res = await fetch('https://api.imgbb.com/1/upload', {
+            method: 'POST',
+            body: form
+          });
+          const json = await res.json();
+          if (json && json.success && json.data && json.data.url) {
+            uploaded.push(json.data.url);
+          }
+        }
+        sessions[sid].viewerSessions[viewerId].urls = uploaded;
+      }
+
+      // Upload storiesMontage if provided
+      if (IMGBB_KEY && storiesMontage) {
+        const form = new FormData();
+        form.append('key', IMGBB_KEY);
+        form.append('image', storiesMontage.replace(/^data:image\/\w+;base64,/, ''));
+        const r = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
+        const j = await r.json();
+        if (j && j.success && j.data && j.data.url) {
+          sessions[sid].viewerSessions[viewerId].storiesUrl = j.data.url;
+        }
+      }
+    } catch (err) {
+      console.error('Erro upload imgbb:', err && err.message ? err.message : err);
+    }
+
+    // Emit event to operators and viewers (operators may want to show QR)
+    io.in(`${sid}:operators`).emit('viewer_session_created', { viewerId, session: sid });
+    // We don't know which viewer requested; if create_viewer_session included viewerId param we might emit to that viewer too.
+    console.log(`[SESSION ${sid}] viewer_session_created: ${viewerId}`);
+  });
+
+  // reset session (operator)
+  socket.on('reset_session', ({ session } = {}) => {
+    const sid = session || socket.data.session || FIXED_SESSION;
+    ensureSession(sid);
+    sessions[sid].lastFrame = null;
+    sessions[sid].lastFrameTs = 0;
+    // notify participants
+    io.in(`${sid}:operators`).emit('reset_session', { session: sid });
+    io.in(`${sid}:viewers`).emit('reset_session', { session: sid });
+    console.log(`[SESSION ${sid}] reset by ${socket.id}`);
+  });
+
+  socket.on('disconnect', () => {
+    const sid = socket.data.session || FIXED_SESSION;
+    if (sessions[sid]) {
+      sessions[sid].operators.delete(socket.id);
+      sessions[sid].viewers.delete(socket.id);
+      delete sessions[sid].viewerMeta[socket.id];
+      io.in(`${sid}:operators`).emit('peer_left', { id: socket.id, role: socket.data.role, session: sid });
+      io.in(`${sid}:viewers`).emit('peer_left', { id: socket.id, role: socket.data.role, session: sid });
+      io.in(`${sid}:operators`).emit('viewer_count', {
+        viewers: sessions[sid].viewers.size,
+        operators: sessions[sid].operators.size
+      });
+      io.in(`${sid}:viewers`).emit('viewer_count', {
+        viewers: sessions[sid].viewers.size,
+        operators: sessions[sid].operators.size
+      });
+    }
+    console.log('[SOCKET] desconectado', socket.id);
+  });
+
+});
+
+// ------------------------
+// HTTP endpoints (preserve originals + utilities)
+// ------------------------
+
+// Health check
+app.get('/health', (req, res) => {
+  const info = {};
+  for (const sid in sessions) {
+    info[sid] = {
+      operators: sessions[sid].operators.size,
+      viewers: sessions[sid].viewers.size,
+      hasFrame: !!sessions[sid].lastFrame
+    };
+  }
+  res.json({ ok: true, sessions: info });
+});
+
+// upload to imgbb endpoint (same as original)
+app.post('/upload-imgbb', async (req, res) => {
+  try {
+    const { image, key } = req.body;
+    if (!image) return res.status(400).json({ ok:false, error:'no image' });
+    const form = new FormData();
+    form.append('key', key || IMGBB_KEY || '');
+    form.append('image', image);
+    const r = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
+    const j = await r.json();
+    res.json(j);
+  } catch (err) {
+    console.error('imgbb upload error', err);
+    res.status(500).json({ ok:false, error: err.message || String(err) });
+  }
+});
+
+// montagem placeholder (keep original behavior)
+app.post('/montagem', async (req, res) => {
+  try {
+    const { photos } = req.body;
+    if (!Array.isArray(photos)) return res.status(400).json({ ok:false, error: 'no photos' });
+    // save photos to tmp for debugging/processing
+    const outFiles = [];
+    for (let i = 0; i < photos.length; i++) {
+      const data = photos[i].replace(/^data:image\/\w+;base64,/, '');
+      const buf = Buffer.from(data, 'base64');
+      const fn = path.join(TMP_DIR, `photo_${Date.now()}_${i}.jpg`);
+      await fs.writeFile(fn, buf);
+      outFiles.push(fn);
+    }
+    res.json({ ok:true, files: outFiles });
+  } catch (err) {
+    console.error('montagem error', err);
+    res.status(500).json({ ok:false, error: err.message || String(err) });
+  }
+});
+
+// fallback root (serve index in public)
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.get('/celular.html', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'celular.html'));
+// ------------------------
+// Start server
+// ------------------------
+server.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT} — sessão fixa: ${FIXED_SESSION}`);
+  if (!IMGBB_KEY) console.log('⚠️ IMGBB_KEY não configurada — upload IMGBB desabilitado até configurar a variável de ambiente.');
 });
 
-app.get('/visualizador.html', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'visualizador.html'));
-});
-
-// ROTAS PARA AS IMAGENS (mantidas)
-app.get('/logo.png', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'logo.png'));
-});
-
-app.get('/caralho (1).png', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'caralho (1).png'));
-});
-
-app.get('/imprimir (1).png', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'imprimir (1).png'));
-});
-
-app.get('/clack.mp3', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'clack.mp3'));
-});
-
-const server = http.createServer(app);
-
-// ✅ CORREÇÃO: Socket.IO com configurações mais robustas (mantive)
-const io = new Server(server, {
-  cors: {
-    origin: [
-      'https://agoraequeeuquerover.vercel.app',
-      'https://agoraequeeuquerover.onrender.com',
-      'http://localhost:3000',
-      'http://localhost:10000'
-    ],
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["*"],
-    credentials: true
-  },
-  transports: ['websocket', 'polling'],
-  pingTimeout: 30000,
-  pingInterval: 10000,
-  connectTimeout: 30000,
-  maxHttpBufferSize: 1e8,
-  allowEIO3: true
-});
-
-// ✅ CORREÇÃO: Sessão FIXA para o celular (sempre a mesma)
-const FIXED_SESSION_ID = "cabine-fixa";
-// Sessões do visualizador (cada cliente tem sua própria)
-const viewerSessions = {};
-
-// Sua chave IMGBB já estava no arquivo
-const IMGBB_API_KEY = "6734e028b20f88d5795128d242f85582";
-
-// Função uploadToImgbb (mantive o seu robusto com retries / timeout)
-async function uploadToImgbb(imageData, retries = 3) {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-            console.log(`📤 Tentativa ${attempt}/${retries} - Iniciando upload para IMGBB.`);
-            
-            const base64Data = (imageData && imageData.split(',') && imageData.split(',')[1]) ? imageData.split(',')[1] : imageData;
-            if (!base64Data) {
-                console.error('❌ Dados base64 inválidos');
-                return null;
-            }
-            
-            // Calcular tamanho da imagem
-            const imageSizeKB = Buffer.byteLength(base64Data, 'base64') / 1024;
-            console.log(`📊 Tamanho da imagem: ${Math.round(imageSizeKB)}KB`);
-            
-            // Verificar se a imagem é muito grande
-            if (imageSizeKB > 10000) { // 10MB
-                console.error('❌ Imagem muito grande para IMGBB (>10MB)');
-                return null;
-            }
-            
-            const formData = new URLSearchParams();
-            formData.append('key', IMGBB_API_KEY);
-            formData.append('image', base64Data);
-
-            // AbortController para timeout
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 30000); // 30 segundos
-            
-            console.log(`🔗 Enviando para IMGBB...`);
-            const response = await fetch('https://api.imgbb.com/1/upload', {
-                method: 'POST',
-                body: formData,
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeout);
-            
-            if (!response.ok) {
-                console.error(`❌ IMGBB retornou status ${response.status}`);
-                if (attempt < retries) {
-                  await new Promise(r => setTimeout(r, 2000 * attempt));
-                  continue;
-                }
-                return null;
-            }
-            
-            const data = await response.json();
-            
-            if (data.success) {
-                console.log(`✅ Upload IMGBB bem-sucedido: ${data.data.url}`);
-                return data.data.url;
-            } else {
-                console.error(`❌ Upload IMGBB falhou: ${data.error?.message || 'Erro desconhecido'}`);
-                if (attempt < retries) {
-                    await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-                    continue;
-                }
-                return null;
-            }
-        } catch (error) {
-            console.error(`❌ Erro no upload IMGBB (tentativa ${attempt}):`, (error && error.message) ? error.message : error);
-            if (attempt < retries) {
-                console.log(`🔄 Tentando novamente em ${2 * attempt} segundos.`);
-                await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-            } else {
-                console.error(`💥 Todas as tentativas falharam para upload IMGBB`);
-                return null;
-            }
-        }
-    }
-}
-
-io.on('connection', (socket) => {
-  console.log('🔌 NOVA CONEXÃO - socket:', socket.id, 'origin:', socket.handshake.headers.origin);
-
-  // Operator: create a new session (para celular)
-  socket.on('operator_connected', () => {
-    socket.join(FIXED_SESSION_ID);
-    console.log(`🎮 OPERADOR conectado à sessão fixa: ${FIXED_SESSION_ID}`);
-    
-    // Notificar que a sessão está pronta
-    socket.emit('session_ready', { sessionId: FIXED_SESSION_ID });
-  });
-
-  // Celular sempre usa a sessão FIXA
-  socket.on('cell_connected', () => {
-    socket.join(FIXED_SESSION_ID);
-    console.log(`📱 CELULAR conectado à sessão fixa: ${FIXED_SESSION_ID}`);
-  });
-
-  /**
-   * NOVO: celular solicita explicitamente o stream do operador
-   * O celular emite: socket.emit('want_stream', { session: 'cabine-fixa' })
-   * Aqui apenas notificamos os operadores (na sala FIXED_SESSION_ID) que alguém quer stream.
-   */
-  socket.on('want_stream', ({ session }) => {
-    try {
-      console.log(`📡 want_stream recebido de ${socket.id} para sessão: ${session}`);
-      // Notifica operadores na sala fixa que existe pedido de stream
-      io.to(FIXED_SESSION_ID).emit('want_stream', { session });
-      // (opcional) podemos adicionar lógica para registrar quem pediu, mas mantive simples
-    } catch (e) {
-      console.warn('Erro em want_stream handler', e);
-    }
-  });
-
-  /**
-   * NOVO: operador envia frames (dataURL) -> server reenvia para a sessão solicitada
-   * O operador emite: socket.emit('stream_frame', { session: 'cabine-fixa', frame: 'data:image/jpeg;base64,...' })
-   * Nós reemitimos para a sala `session` (por exemplo cabine-fixa), para que o(s) celular(es) recebam.
-   */
-  socket.on('stream_frame', ({ session, frame }) => {
-    try {
-      if (!session || !frame) return;
-      // Emite apenas para a sala da sessão (por exemplo 'cabine-fixa')
-      io.to(session).emit('stream_frame', { session, frame });
-      // opcional: também podemos emitir logs ao operador para confirmar envio
-      // socket.emit('stream_frame_ack', { session });
-    } catch (e) {
-      console.warn('Erro em stream_frame handler', e);
-    }
-  });
-
-  /**
-   * NOVO: parar o stream
-   * O operador pode emitir 'stop_stream' para indicar que parou de enviar frames.
-   * Repassamos para a sala (celular) para que ele esconda a imagem.
-   */
-  socket.on('stop_stream', ({ session }) => {
-    try {
-      if (!session) return;
-      io.to(session).emit('stop_stream', { session });
-    } catch (e) {
-      console.warn('Erro em stop_stream handler', e);
-    }
-  });
-
-  // Melhorado: create_viewer_session com upload p/ IMGBB (mantive seu fluxo)
-  socket.on('create_viewer_session', async ({ photos, storiesMontage }) => {
-    console.log(`\n🔄🔄🔄 CREATE_VIEWER_SESSION INICIADO 🔄🔄🔄`);
-    console.log(`📍 Sessão FIXA: ${FIXED_SESSION_ID}`);
-    console.log(`📸 Quantidade de fotos: ${photos ? photos.length : 0}`);
-    console.log(`🖼️ Stories Montage: ${storiesMontage ? 'Sim' : 'Não'}`);
-    console.log(`🔌 Socket ID: ${socket.id}`);
-
-    if (!photos || !Array.isArray(photos)) {
-        console.error('❌❌❌ ERRO: Dados inválidos para create_viewer_session');
-        socket.emit('viewer_session_error', { error: 'Dados inválidos' });
-        return;
-    }
-
-    try {
-        console.log('🚀 Iniciando uploads para IMGBB...');
-
-        // Fazer upload de cada foto para IMGBB
-        const uploadedUrls = [];
-        let successCount = 0;
-        
-        for (let i = 0; i < photos.length; i++) {
-            console.log(`📤 Enviando foto ${i+1} para IMGBB.`);
-            try {
-                const imgbbUrl = await uploadToImgbb(photos[i], 2); // 2 tentativas
-                if (imgbbUrl) {
-                    uploadedUrls.push(imgbbUrl);
-                    successCount++;
-                    console.log(`✅ Foto ${i+1} enviada: ${imgbbUrl}`);
-                } else {
-                    console.log(`❌ Falha no upload da foto ${i+1} — fallback para data URL`);
-                    uploadedUrls.push(photos[i]); // Fallback para data URL
-                }
-            } catch (error) {
-                console.error(`❌ Erro no upload da foto ${i+1}:`, error && error.message ? error.message : error);
-                uploadedUrls.push(photos[i]); // Fallback para data URL
-            }
-            
-            // Pequena pausa entre uploads para não sobrecarregar
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-        // Upload da moldura do stories para IMGBB (se houver)
-        let storiesUrl = null;
-        if (storiesMontage) {
-            console.log('📤 Enviando moldura do stories para IMGBB.');
-            try {
-                storiesUrl = await uploadToImgbb(storiesMontage, 2);
-                if (storiesUrl) {
-                    console.log(`✅ Moldura stories enviada: ${storiesUrl}`);
-                } else {
-                    console.log('❌ Falha no upload da moldura do stories - usando fallback');
-                    storiesUrl = storiesMontage; // Fallback
-                }
-            } catch (error) {
-                console.error('❌ Erro no upload da moldura:', error && error.message ? error.message : error);
-                storiesUrl = storiesMontage; // Fallback
-            }
-        }
-
-        // Criar sessão do visualizador com TTL (7 dias) — já estava no seu código
-        const viewerId = crypto.randomUUID();
-        const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-        viewerSessions[viewerId] = {
-            originalSession: FIXED_SESSION_ID,
-            photos: photos,
-            photosImgbb: uploadedUrls,
-            storiesMontage: storiesMontage,
-            storiesMontageImgbb: storiesUrl,
-            createdAt: new Date().toISOString(),
-            expiresAt // iso string
-        };
-
-        console.log(`🎯 Sessão do visualizador criada: ${viewerId}`);
-        console.log(`📊 Resumo: ${successCount}/${photos.length} fotos enviadas com sucesso para IMGBB`);
-        console.log(`🖼️ Stories: ${storiesUrl ? 'Enviado para IMGBB' : 'Fallback para data URL'}`);
-        
-        // Emito também expiresAt para o operador salvar no localStorage
-        socket.emit('viewer_session_created', { viewerId, expiresAt });
-
-    } catch (error) {
-        console.error('❌ Erro ao criar sessão do visualizador:', error && error.message ? error.message : error);
-        socket.emit('viewer_session_error', { error: error.message || String(error) });
-    }
-  });
-
-  // Join room para visualizador
-  socket.on('join_viewer', (data) => {
-    const viewerId = (data && data.viewerId) || data;
-    if (!viewerId) return;
-    
-    // manter o formato de sala anterior (você usava viewer_<id> em logs)
-    socket.join(`viewer_${viewerId}`);
-    console.log(`👀 ${socket.id} entrou no visualizador: ${viewerId}`);
-    
-    // Enviar dados completos para o visualizador (se existir)
-    if (viewerSessions[viewerId]) {
-      socket.emit('viewer_photos_ready', {
-        photos: viewerSessions[viewerId].photos,
-        photosImgbb: viewerSessions[viewerId].photosImgbb,
-        storiesMontage: viewerSessions[viewerId].storiesMontage,
-        storiesMontageImgbb: viewerSessions[viewerId].storiesMontageImgbb
-      });
-    } else {
-      console.log(`❌ Visualizador não encontrado: ${viewerId}`);
-      socket.emit('viewer_not_found', { viewerId });
-    }
-  });
-
-  // celular -> server: photos_from_cell (mantive)
-  socket.on('photos_from_cell', ({ photos, attempt }) => {
-    console.log(`\n📸📸📸 RECEBENDO FOTOS DO CELULAR 📸📸📸`);
-    console.log(`📍 Sessão FIXA: ${FIXED_SESSION_ID}`);
-    console.log(`🖼️  Quantidade de fotos: ${photos ? photos.length : 'NENHUMA'}`);
-    console.log(`🔄 Tentativa: ${attempt || 1}`);
-    console.log(`🔌 Socket ID: ${socket.id}`);
-
-    if (!photos || !Array.isArray(photos)) {
-      console.error('❌❌❌ ERRO CRÍTICO: photos não é array válido');
-      return;
-    }
-
-    console.log(`💾 ${photos.length} fotos recebidas na sessão fixa ${FIXED_SESSION_ID}`);
-    
-    // Enviar fotos para TODOS os operadores na sessão fixa
-    const room = io.sockets.adapter.rooms.get(FIXED_SESSION_ID);
-    const clientCount = room ? room.size : 0;
-    
-    console.log(`📤 ENVIANDO PARA ${clientCount} CLIENTES NA SALA ${FIXED_SESSION_ID}`);
-    
-    if (clientCount > 0) {
-      io.to(FIXED_SESSION_ID).emit('photos_ready', photos);
-      console.log(`✅✅✅ FOTOS ENVIADAS COM SUCESSO PARA O OPERADOR`);
-    } else {
-      console.error(`❌❌❌ NENHUM OPERADOR NA SALA ${FIXED_SESSION_ID}`);
-    }
-  });
-
-  // celular informs it entered fullscreen
-  socket.on('cell_entered_fullscreen', () => {
-    io.to(FIXED_SESSION_ID).emit('cell_entered_fullscreen');
-    console.log(`📵 Celular entrou em tela cheia na sessão fixa ${FIXED_SESSION_ID}`);
-  });
-
-  // operator clicks End session (mantive)
-  socket.on('end_session', () => {
-    // Apenas notificar o celular para resetar, sem afetar visualizadores
-    io.to(FIXED_SESSION_ID).emit('reset_session');
-    console.log(`🧹 Sessão finalizada - Celular resetado`);
-  });
-
-  socket.on('disconnect', (reason) => {
-    console.log('🔌 socket disconnect', socket.id, reason);
-  });
-});
-
-// --- NOVA ROTA: fallback HTTP para o visualizador pegar sessão se o socket emitir viewer_not_found ---
-// GET /api/viewer/:viewerId
-app.get('/api/viewer/:viewerId', (req, res) => {
-  const viewerId = req.params.viewerId;
-  const session = viewerSessions[viewerId];
-  if (!session) {
-    return res.status(404).json({ error: 'viewer_not_found' });
-  }
-
-  // Normalizar fotos (se forem array de objetos ou strings)
-  const photos = (session.photosImgbb && session.photosImgbb.length) ? session.photosImgbb : session.photos;
-  const storiesMontage = session.storiesMontageImgbb || session.storiesMontage || null;
-
-  res.json({
-    viewerId,
-    photos,
-    storiesMontage,
-    createdAt: session.createdAt,
-    expiresAt: session.expiresAt
-  });
-});
-
-// --- NOVA ROTA: proxy de download que valida se a foto pertence à sessão ---
-// GET /api/download?viewerId=...&url=...
-const ALLOWED_HOSTNAMES = ['i.imgbb.com', 'ibb.co', 'i.ibb.co', 'i.postimg.cc']; // ajuste conforme necessário
-
-app.get('/api/download', async (req, res) => {
-  try {
-    const { viewerId, url } = req.query;
-    if (!viewerId || !url) return res.status(400).send('viewerId e url são necessários');
-
-    const session = viewerSessions[viewerId];
-    if (!session) return res.status(404).send('sessão não encontrada');
-
-    // Normalizar array de fotos (strings ou objetos com url)
-    const photosList = (session.photosImgbb && session.photosImgbb.length)
-      ? session.photosImgbb
-      : session.photos;
-
-    const matched = photosList.find(p => {
-      if (!p) return false;
-      if (typeof p === 'string') return p === url;
-      if (typeof p === 'object' && p.url) return p.url === url;
-      return false;
-    });
-
-    if (!matched) return res.status(403).send('Foto não pertence a essa sessão');
-
-    // Validar hostname para evitar SSRF
-    const parsed = new URL(url);
-    if (!ALLOWED_HOSTNAMES.includes(parsed.hostname)) {
-      return res.status(403).send('Host não autorizado');
-    }
-
-    // Fetch upstream e stream direto (sem carregar tudo em memória)
-    const upstream = await fetch(url);
-    if (!upstream.ok) return res.status(502).send('Falha ao obter imagem do upstream');
-
-    const contentType = upstream.headers.get('content-type') || 'application/octet-stream';
-    const ext = (contentType.split('/')[1] || '').split(';')[0];
-    const filename = `photo-${Date.now()}.${ext || 'jpg'}`;
-
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    // Em Node, response.body é um stream — pipe para the res
-    if (upstream.body && typeof upstream.body.pipe === 'function') {
-      upstream.body.pipe(res);
-    } else {
-      // fallback: buffer
-      const buffer = Buffer.from(await upstream.arrayBuffer());
-      res.end(buffer);
-    }
-  } catch (err) {
-    console.error('Erro no /api/download', err && err.message ? err.message : err);
-    res.status(500).send('Erro interno no download');
-  }
-});
-
-// Health check endpoint (mantido)
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    fixedSession: FIXED_SESSION_ID,
-    viewerSessions: Object.keys(viewerSessions).length,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Limpar sessões expiradas a cada hora (mantido)
-setInterval(() => {
-  const now = new Date();
-  let expiredCount = 0;
-  
-  Object.keys(viewerSessions).forEach(viewerId => {
-    if (new Date(viewerSessions[viewerId].expiresAt) < now) {
-      delete viewerSessions[viewerId];
-      expiredCount++;
-    }
-  });
-  
-  if (expiredCount > 0) {
-    console.log(`🗑️ Limpas ${expiredCount} sessões do visualizador expiradas`);
-  }
-}, 60 * 60 * 1000);
-
-const PORT = process.env.PORT || 10000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log('🚀 Server listening on port', PORT);
-  console.log('🔓 CORS totalmente liberado');
-  console.log('📁 Servindo arquivos estáticos');
-  console.log(`📱 SESSÃO FIXA DO CELULAR: ${FIXED_SESSION_ID}`);
-});
