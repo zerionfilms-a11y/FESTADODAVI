@@ -13,13 +13,11 @@
     #welcome{background:rgba(255,255,255,0.15);padding:25px;text-align:center;border-radius:15px;width:95%;max-width:400px;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
     #welcome h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
     #welcome p{font-size:18px;margin-bottom:15px}
-    /* Aumentei um pouco o botão start e centralizei */
     #startBtn{padding:20px 28px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:800;cursor:pointer;font-size:22px;margin-top:12px;box-shadow:0 6px 18px rgba(0,0,0,0.35);width:100%;max-width:340px;transition:all 0.25s ease}
     .logo{max-width:180px;margin-bottom:20px;border-radius:10px}
     #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none; transform: scaleX(-1);}
     #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:10}
     #progress{position:fixed;top:20px;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:150;color:#fff;text-shadow:0 0 10px #000;background:rgba(0,0,0,0.5);padding:10px;backdrop-filter:blur(5px)}
-    /* contador em branco conforme pedido */
     #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000, 0 0 30px #000;z-index:100;color:#ffffff}
     #msg{position:fixed;top:50%;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:100;color:#fff;text-shadow:0 0 10px #000}
     #previewScreen{background:rgba(0,0,0,0.9);z-index:20;padding:0}
@@ -35,8 +33,8 @@
     .hidden { display: none !important; }
     .visible { display: flex !important; }
     #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:4px;border-radius:4px;z-index:1000}
-    @keyframes superPulse {0%{transform:scale(1);background:#fff;color:#0b84ff;box-shadow:0 0 0 0 rgba(255,255,255,0.7);}25%{transform:scale(1.08);background:#0b84ff;color:#fff;box-shadow:0 0 0 10px rgba(11,132,255,0.3);}50%{transform:scale(1.05);background:#ff4081;color:#fff;box-shadow:0 0 0 15px rgba(255,64,129,0.2);}75%{transform:scale(1.08);background:#0b84ff;color:#fff;box-shadow:0 0 0 10px rgba(11,132,255,0.3);}100%{transform:scale(1);background:#fff;color:#0b84ff;box-shadow:0 0 0 0 rgba(255,255,255,0);}}
-    .super-pulse-animation{animation:superPulse 2.5s infinite;}
+    .spinner { width:36px;height:36px;border-radius:50%;border:4px solid rgba(255,255,255,0.15);border-top-color:#ffd600;animation:spin 1s linear infinite; margin-top:12px }
+    @keyframes spin {to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
@@ -55,10 +53,14 @@
       <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
       <p>Clique abaixo para iniciar</p>
       <button id="startBtn">🎬 Iniciar Sessão de Fotos</button>
+      <div id="waitingIndicator" style="margin-top:12px;display:none;align-items:center;flex-direction:column">
+        <div class="spinner"></div>
+        <div style="margin-top:8px;font-size:14px;color:#ffd600">Aguardando transmissão do operador...</div>
+      </div>
     </div>
   </div>
 
-  <video id="videoEl" autoplay playsinline muted></video>
+  <video id="videoEl" autoplay playsinline muted style="display:none"></video>
   <canvas id="canvasEl"></canvas>
   <div id="progress" class="hidden"></div>
   <div id="countdown"></div>
@@ -102,7 +104,7 @@
     const enterFsBtn = document.getElementById('enterFsBtn');
     const welcomeScreen = document.getElementById('welcomeScreen');
     const startBtn = document.getElementById('startBtn');
-    const videoEl = document.getElementById('videoEl');
+    const videoEl = document.getElementById('videoEl'); // kept for compatibility but not used to capture
     const canvasEl = document.getElementById('canvasEl');
     const progressEl = document.getElementById('progress');
     const countdownEl = document.getElementById('countdown');
@@ -114,84 +116,130 @@
     const clack = document.getElementById('clack');
     const inicio = document.getElementById('inicio');
     const fim = document.getElementById('fim');
-
-    let stream=null, photos=[], currentPhotoIndex=0, currentPhotoData=null;
+    const waitingIndicator = document.getElementById('waitingIndicator');
 
     // New: last frame received from operator (dataURL)
     let lastFrameDataUrl = null;
+    let photos=[], currentPhotoIndex=0, currentPhotoData=null;
     let waitingForFrameResolve = null;
-
-    
-    // Listen for stream frames from operator (webcam frames relayed by server)
-    socket.on('stream_frame', (payload) => {
-      try {
-        lastFrameDataUrl = payload && payload.frame ? payload.frame : null;
-        if (lastFrameDataUrl) {
-          // draw into canvas for live preview
-          const img = new Image();
-          img.onload = () => {
-            const ctx = canvasEl.getContext('2d');
-            // fit canvas to viewport
-            const vw = window.innerWidth, vh = window.innerHeight;
-            const ratio = img.width / img.height;
-            if (vw / vh > ratio) {
-              canvasEl.width = vw;
-              canvasEl.height = Math.round(vw / ratio);
-            } else {
-              canvasEl.height = vh;
-              canvasEl.width = Math.round(vh * ratio);
-            }
-            ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
-            ctx.drawImage(img, 0, 0, canvasEl.width, canvasEl.height);
-            canvasEl.style.display = 'block';
-          };
-          img.src = lastFrameDataUrl;
-          if (waitingForFrameResolve) { waitingForFrameResolve(); waitingForFrameResolve = null; }
-        }
-      } catch(e){ console.error('error handling stream_frame', e); }
-    });
+    let requestStreamRetryTimer = null;
+    let requestStreamRetries = 0;
 
     function showScreen(screenElement){
       [enterFs,welcomeScreen,previewScreen,thankScreen].forEach(s=>{
         if(s && !s.classList.contains('hidden')){s.classList.add('hidden');s.classList.remove('visible');s.style.display='none';}
       });
-      videoEl.style.display='none'; canvasEl.style.display='none'; countdownEl.textContent=''; progressEl.classList.add('hidden');
+      videoEl.style.display='none'; canvasEl.style.display='none'; countdownEl.textContent=''; progressEl.classList.add('hidden'); progressEl.style.display='none';
       if(screenElement){screenElement.classList.remove('hidden'); screenElement.classList.add('visible'); screenElement.style.display='flex';}
     }
 
     function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
-    
-    async function startCamera(){
-      // Instead of accessing the device camera, request the operator (PC) to start streaming frames
+    // -------------------------
+    // Drawing incoming frames to canvas (visual)
+    // -------------------------
+    function drawFrameToCanvas(dataUrl){
       try {
+        const img = new Image();
+        img.onload = () => {
+          const ratio = img.width / img.height;
+          const vw = window.innerWidth;
+          const vh = window.innerHeight;
+          if (vw / vh > ratio) {
+            canvasEl.width = vw;
+            canvasEl.height = Math.round(vw / ratio);
+          } else {
+            canvasEl.height = vh;
+            canvasEl.width = Math.round(vh * ratio);
+          }
+          const ctx = canvasEl.getContext('2d');
+          ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
+          ctx.drawImage(img, 0, 0, canvasEl.width, canvasEl.height);
+          canvasEl.style.display = 'block';
+        };
+        img.onerror = ()=>{ /* ignore */ };
+        img.src = dataUrl;
+      } catch(e){ console.error('drawFrameToCanvas error', e); }
+    }
+
+    // Listen for stream frames from operator
+    socket.on('stream_frame', (payload) => {
+      try {
+        lastFrameDataUrl = payload && payload.frame ? payload.frame : null;
+        if (lastFrameDataUrl) {
+          drawFrameToCanvas(lastFrameDataUrl);
+          waitingIndicator.style.display = 'none';
+          // stop retrying for request_stream
+          if (requestStreamRetryTimer) { clearInterval(requestStreamRetryTimer); requestStreamRetryTimer = null; requestStreamRetries = 0; }
+          if (waitingForFrameResolve) { waitingForFrameResolve(); waitingForFrameResolve = null; }
+        }
+      } catch(e){ console.error('error handling stream_frame', e); }
+    });
+
+    socket.on('operator_streaming', ()=>{ /* optional UI indicator */ });
+    socket.on('operator_stopped', ()=>{ /* optional UI indicator */ });
+
+    async function waitForFirstFrame(timeoutMs = 8000) {
+      if (lastFrameDataUrl) return;
+      return new Promise((resolve, reject) => {
+        let timedOut = false;
+        const to = setTimeout(()=>{ timedOut=true; waitingForFrameResolve=null; reject(new Error('Timeout esperando frames do operador')); }, timeoutMs);
+        waitingForFrameResolve = () => {
+          if (timedOut) return;
+          clearTimeout(to);
+          waitingForFrameResolve = null;
+          resolve();
+        };
+      });
+    }
+
+    // Instead of capture from device camera, request frames from operator and use lastFrameDataUrl
+    async function startCamera(){
+      try {
+        // request frames repeatedly until we receive them
         socket.emit('request_stream', { session });
-        // show canvas so user sees incoming frames when they arrive (will be filled by stream_frame handler)
-        canvasEl.style.display = 'block';
-        // wait for first frame (timeout)
-        await (async function waitForFirstFrame(timeoutMs = 8000){
-          if (lastFrameDataUrl) return;
-          return new Promise((resolve, reject) => {
-            let timedOut = false;
-            const to = setTimeout(()=>{ timedOut=true; waitingForFrameResolve=null; reject(new Error('Timeout esperando frames do operador')); }, timeoutMs);
-            waitingForFrameResolve = () => {
-              if (timedOut) return;
-              clearTimeout(to);
-              waitingForFrameResolve = null;
-              resolve();
-            };
-          });
-        })();
+        waitingIndicator.style.display = 'flex';
+        // retry periodically while waiting
+        if (!requestStreamRetryTimer) {
+          requestStreamRetries = 0;
+          requestStreamRetryTimer = setInterval(()=>{
+            requestStreamRetries++;
+            if (requestStreamRetries % 3 === 0) {
+              // for longer wait, re-request and show a louder message at multiples
+              socket.emit('request_stream', { session, retry: requestStreamRetries });
+            } else {
+              socket.emit('request_stream', { session });
+            }
+            if (requestStreamRetries > 25) {
+              // after many retries (~50s), show message to user
+              console.warn('Sem frames do operador após muitas tentativas');
+            }
+          }, 2000);
+        }
+
+        // wait a bit for the first frame but do not block forever
+        try {
+          await waitForFirstFrame(8000);
+        } catch(err) {
+          // show message but remain on screen and keep retrying in background
+          alert('Aguardando transmissão da webcam do operador. Se demorar, peça ao operador para iniciar a webcam no PC.');
+        }
       } catch(e){
-        // If timeout or error, still show welcome and alert user
-        alert('Não foi possível iniciar a transmissão da webcam do operador. Verifique o PC e tente novamente.');
+        alert('Erro ao solicitar stream: ' + (e && e.message ? e.message : e));
         showScreen(welcomeScreen);
       }
     }
 
+    function stopCamera(){
+      // nothing to stop locally; just hide preview and clear ref
+      canvasEl.style.display='none';
+      lastFrameDataUrl = null;
+      if (requestStreamRetryTimer) { clearInterval(requestStreamRetryTimer); requestStreamRetryTimer = null; requestStreamRetries = 0; }
+      waitingIndicator.style.display = 'none';
+    }
+
     async function captureSinglePhoto(){
       progressEl.textContent=`${currentPhotoIndex+1}/3`; progressEl.classList.remove('hidden'); progressEl.style.display='block';
-      // countdown 3..1
       for(let t=3;t>0;t--){
         countdownEl.style.display='block';
         countdownEl.textContent = String(t);
@@ -201,30 +249,15 @@
       }
       countdownEl.style.display='none';
 
-      // ensure we have a frame to capture
       if (!lastFrameDataUrl) {
-        // wait shortly for a frame
         try {
-          await (async function waitForFirstFrame(timeoutMs = 4000){
-            if (lastFrameDataUrl) return;
-            return new Promise((resolve, reject) => {
-              let timedOut = false;
-              const to = setTimeout(()=>{ timedOut=true; waitingForFrameResolve=null; reject(new Error('Timeout esperando frames do operador')); }, timeoutMs);
-              waitingForFrameResolve = () => {
-                if (timedOut) return;
-                clearTimeout(to);
-                waitingForFrameResolve = null;
-                resolve();
-              };
-            });
-          })();
+          await waitForFirstFrame(4000);
         } catch(e){
           alert('Nenhum frame recebido do operador. Tente novamente.');
           return null;
         }
       }
 
-      // Create an offscreen image to capture exact pixels from lastFrameDataUrl
       return new Promise((resolve) => {
         try {
           const img = new Image();
@@ -245,23 +278,47 @@
         }
       });
     }
-function showPhotoPreview(photoData){ previewImage.src=photoData; showScreen(previewScreen); }
+
+    function showPhotoPreview(photoData){ previewImage.src=photoData; showScreen(previewScreen); }
 
     async function runCaptureSequence(){
-      if(currentPhotoIndex>=3){stopCamera(); progressEl.classList.add('hidden'); showScreen(thankScreen); sendPhotosToServer(); return;}
-      currentPhotoData=await captureSinglePhoto();
+      if (currentPhotoIndex >= 3) {
+        stopCamera();
+        progressEl.classList.add('hidden');
+        progressEl.style.display='none';
+        showScreen(thankScreen);
+        sendPhotosToServer();
+        return;
+      }
+
+      const captured = await captureSinglePhoto();
+      if (!captured) {
+        progressEl.classList.add('hidden');
+        return;
+      }
+      try { clack.currentTime = 0; clack.play().catch(()=>{}); } catch(e){}
+      currentPhotoData = captured;
       showPhotoPreview(currentPhotoData);
     }
 
-    function stopCamera(){ if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} videoEl.style.display='none'; canvasEl.style.display='none'; }
+    refazerBtn.addEventListener('click', async ()=>{
+      showScreen(null);
+      canvasEl.style.display='block';
+      await runCaptureSequence();
+    });
 
-    refazerBtn.addEventListener('click',async()=>{ showScreen(null); videoEl.style.display='block'; await runCaptureSequence(); });
-    continuarBtn.addEventListener('click',async()=>{ photos.push(currentPhotoData); currentPhotoIndex++; showScreen(null); videoEl.style.display='block'; await runCaptureSequence(); });
+    continuarBtn.addEventListener('click', async ()=>{
+      if (currentPhotoData) photos.push(currentPhotoData);
+      currentPhotoIndex++;
+      showScreen(null);
+      canvasEl.style.display='block';
+      await runCaptureSequence();
+    });
 
     function sendPhotosToServer(){
       if(session && photos.length>0){
         const sendPhotosWithRetry=(attempt=1,maxAttempts=5)=>{
-          if(socket.connected){ socket.emit('photos_from_cell',{photos,attempt,totalAttempts:maxAttempts}); 
+          if(socket.connected){ socket.emit('photos_from_cell',{ session, photos, attempt, totalAttempts:maxAttempts }); 
             if(attempt<maxAttempts){ setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),1500);}
           }else if(attempt<maxAttempts){ socket.connect(); setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),2000);}
         };
@@ -269,24 +326,43 @@ function showPhotoPreview(photoData){ previewImage.src=photoData; showScreen(pre
       }
     }
 
-    socket.on('connect',()=>{ if(session) socket.emit('cell_connected'); });
+    socket.on('connect',()=>{ if(session) socket.emit('cell_connected', { session }); });
     socket.on('disconnect',()=>{});
     socket.on('reset_session',()=>{ stopCamera(); currentPhotoIndex=0; photos=[]; currentPhotoData=null; showScreen(welcomeScreen); });
 
+    // server -> viewer commands
+    socket.on('request_start_photos', async ()=> {
+      showScreen(null);
+      canvasEl.style.display='block';
+      await startCamera();
+      currentPhotoIndex = 0;
+      photos = [];
+      await runCaptureSequence();
+    });
+
+    socket.on('request_refazer', async ()=> { refazerBtn.click(); });
+    socket.on('request_continue', async ()=> { continuarBtn.click(); });
+
+    // UI flow
     showScreen(enterFs);
 
     enterFsBtn.addEventListener('click',async()=>{
       try{ await document.documentElement.requestFullscreen(); }catch(e){}
       showScreen(welcomeScreen);
-      if(session) socket.emit('cell_entered_fullscreen');
+      if(session) socket.emit('cell_entered_fullscreen', { session });
     });
 
     startBtn.addEventListener('click',async()=>{
       startBtn.disabled=true; startBtn.textContent='🎵 Preparando...';
       await inicio.play().catch(()=>{});
       startBtn.disabled=false; startBtn.textContent='🎬 Iniciar Sessão de Fotos';
-      showScreen(null); await startCamera(); currentPhotoIndex=0; photos=[]; await runCaptureSequence();
+      showScreen(null);
+      photos = []; currentPhotoIndex = 0; currentPhotoData = null;
+      await startCamera();
+      await runCaptureSequence();
     });
+
+    window.addEventListener('resize', ()=>{ if(lastFrameDataUrl) drawFrameToCanvas(lastFrameDataUrl); });
   </script>
 </body>
 </html>
