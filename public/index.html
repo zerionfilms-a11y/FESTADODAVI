@@ -705,25 +705,12 @@
         } catch(e){ /* ignore drawing errors */ }
       }, 100); // ~10fps
 
-      // notify server that operator started streaming (added per your request)
-      try {
-        socket.emit('operator_streaming', { session: streamingTargetSession });
-      } catch (e) {
-        console.warn('⚠️ Erro emit operator_streaming:', e);
-      }
-
       stopStreamBtn.disabled = false;
       startStreamBtn.disabled = true;
       log(`▶️ Iniciando stream para sessão ${streamingTargetSession} (frames ~10fps)`);
     }
     function stopStream(){
       if(streamingInterval){ clearInterval(streamingInterval); streamingInterval = null; log('⏸ Stream parado'); }
-      // notify server that operator stopped streaming
-      try {
-        if (streamingTargetSession) socket.emit('operator_stopped', { session: streamingTargetSession });
-      } catch (e) {
-        console.warn('⚠️ Erro emit operator_stopped:', e);
-      }
       streamingTargetSession = null;
       stopStreamBtn.disabled = true;
       startStreamBtn.disabled = false;
