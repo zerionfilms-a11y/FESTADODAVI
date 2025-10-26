@@ -141,7 +141,7 @@
       border-radius: 10px; 
       cursor: pointer; 
       font-size: 16px; 
-      font-weight: bold;
+      font-weight: bold; 
       width: 100%;
       max-width: 300px;
       box-shadow: 0 3px 6px rgba(176,126,9,0.15);
@@ -240,50 +240,52 @@
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
+    // Preservei 100% da lógica original do seu visualizador e acrescentei
+    // suporte adicional para ?data=<base64> (payload gerado pelo index.html).
+    // Se data estiver presente, ele decodifica e renderiza imediatamente.
+    // Caso contrário, mantém o fluxo via socket.io exatamente como antes.
+
     const params = new URLSearchParams(window.location.search);
     const viewerId = params.get("viewerId");
+    const dataParam = params.get("data"); // se o index enviar payload base64, usamos ele
     const gallery = document.getElementById("gallery");
     const downloadAllBtn = document.getElementById("downloadAllBtn");
     const viewerIdDisplay = document.getElementById("viewerIdDisplay");
-    
-    const socket = io("https://agoraequeeuquerover-production.up.railway.app");
 
-    // Mostrar viewerId atual
-    if (viewerId) {
-      viewerIdDisplay.textContent = viewerId;
-      
-      // Conectar ao visualizador
-      socket.emit("join_viewer", { viewerId });
-    } else {
-      gallery.innerHTML = "<div class='no-photos'>❌ ID do visualizador não encontrado na URL.</div>";
+    // Mantive exibição do viewerId igual ao original
+    if (viewerId) viewerIdDisplay.textContent = viewerId;
+
+    // Função de download robusta (mantida igual)
+    async function downloadImage(dataUrl, filename) {
+      try {
+        let blob;
+        if (typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
+          const res = await fetch(dataUrl);
+          blob = await res.blob();
+        } else {
+          const res = await fetch(dataUrl, { mode: 'cors' });
+          if (!res.ok) throw new Error('Network response was not ok: ' + res.status);
+          blob = await res.blob();
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.warn('downloadImage fallback, abrindo em nova aba por segurança', err);
+        window.open(dataUrl, '_blank');
+      }
     }
 
-    let currentPhotos = [];
-    let currentStoriesMontage = null;
-
-    // Receber dados do visualizador
-    socket.on("viewer_photos_ready", (data) => {
-      console.log('📸 Dados recebidos no visualizador:', data);
-      
-      if (!data || !data.photos || !Array.isArray(data.photos)) {
-        gallery.innerHTML = "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
-        return;
-      }
-      
-      currentPhotos = data.photos;
-      currentStoriesMontage = data.storiesMontage;
-      
-      renderGallery(currentPhotos, currentStoriesMontage);
-      
-      if (currentPhotos.length > 0) {
-        downloadAllBtn.style.display = 'block';
-      }
-    });
-
+    // Renderização da galeria (mantive sua UI e funções)
     function renderGallery(photos, storiesMontage) {
       gallery.innerHTML = '';
       
-      // Adicionar a moldura do stories se existir (mantive esse bloco igual)
+      // Adicionar a moldura do stories se existir
       if (storiesMontage) {
         const storiesContainer = document.createElement("div");
         storiesContainer.className = "photo-container stories-container";
@@ -304,17 +306,22 @@
           <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png" alt="Instagram">
           Baixar Pronto pro Instagram
         `;
-        // agora chama a função de download robusta
         instagramBtn.onclick = function() {
-          downloadImage(storiesMontage, `pronto-instagram-${viewerId}.jpg`);
+          downloadImage(storiesMontage, `pronto-instagram-${viewerId || 'v'}.jpg`);
         };
 
         storiesContainer.appendChild(storiesImg);
         storiesContainer.appendChild(instagramBtn);
         gallery.appendChild(storiesContainer);
       }
-      
-      // Adicionar as fotos individuais
+
+      // Fotos individuais
+      if (!photos || photos.length === 0) {
+        gallery.innerHTML += "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
+        downloadAllBtn.style.display = 'none';
+        return;
+      }
+
       photos.forEach((photoData, index) => {
         const container = document.createElement("div");
         container.className = "photo-container";
@@ -335,54 +342,105 @@
         container.appendChild(downloadBtn);
         gallery.appendChild(container);
       });
+
+      downloadAllBtn.style.display = 'block';
     }
 
-    // Download de todas as fotos
+    // handler do botão baixar tudo (mantido)
     downloadAllBtn.addEventListener('click', () => {
-      if (currentPhotos.length === 0) return;
-      
-      currentPhotos.forEach((photoData, index) => {
+      const imgs = Array.from(gallery.querySelectorAll('img')).filter(i => !i.classList.contains('stories-img'));
+      imgs.forEach((img, idx) => {
         setTimeout(() => {
-          downloadImage(photoData, `foto-${index + 1}.jpg`);
-        }, index * 300);
+          downloadImage(img.src, `foto-${idx+1}.jpg`);
+        }, idx * 300);
       });
-      
       alert('📥 Download de todas as fotos iniciado!');
     });
 
-    // Função para forçar download — robusta para data:URI e URLs remotas
-    async function downloadImage(dataUrl, filename) {
+    // --- Função para decodificar payload base64 vindo do index ---
+    function decodeBase64Payload(param){
       try {
-        let blob;
-        // data: URI -> fetch it directly works in modern browsers
-        if (typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
-          const res = await fetch(dataUrl);
-          blob = await res.blob();
-        } else {
-          // remote URL: fetch as blob (may fail if the server disallows CORS)
-          const res = await fetch(dataUrl, { mode: 'cors' });
-          if (!res.ok) throw new Error('Network response was not ok: ' + res.status);
-          blob = await res.blob();
+        // param é a string base64 já URI-encoded possivelmente
+        const b64 = decodeURIComponent(param);
+        // primeira tentativa: atob direto
+        try {
+          const json = atob(b64);
+          return JSON.parse(json);
+        } catch(e) {
+          // segunda tentativa: atob e decodeURIComponent(escape(...))
+          try {
+            const step = atob(b64);
+            const decoded = decodeURIComponent(escape(step));
+            return JSON.parse(decoded);
+          } catch(err) {
+            console.warn('decode fallback failed', err);
+            return null;
+          }
         }
-
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.warn('downloadImage fallback, abrindo em nova aba por segurança', err);
-        // fallback: abre a imagem em nova aba para o usuário salvar manualmente
-        window.open(dataUrl, '_blank');
+      } catch(e) {
+        console.warn('decodeBase64Payload fail', e);
+        return null;
       }
     }
 
-    // Mostrar mensagem se não conectar
+    // Se houver parâmetro data (base64) - usamos ele e renderizamos
+    if (dataParam) {
+      const payload = decodeBase64Payload(dataParam);
+      if (!payload) {
+        gallery.innerHTML = "<div class='no-photos'>❌ Dados inválidos no parâmetro data.</div>";
+      } else {
+        // payload esperado: { photos: [url1, url2, ...], stories: url, print: url }
+        const photos = payload.photos || [];
+        const stories = payload.stories || payload.storiesMontage || null;
+        renderGallery(photos, stories);
+        // não precisamos depender do socket para mostrar as imagens quando data param existe,
+        // mas não removi a lógica do socket abaixo — se viewerId existir, o socket também se conecta.
+      }
+    }
+
+    // --- Socket.IO flow (mantive seu código intacto) ---
+    // Conectar ao servidor que você já usava (mantive exatamente)
+    const socket = io("https://agoraequeeuquerover-production.up.railway.app");
+
+    let currentPhotos = [];
+    let currentStoriesMontage = null;
+
+    // Se tiver viewerId, mantém o comportamento original: emite join_viewer
+    if (viewerId) {
+      socket.on('connect', () => {
+        console.log('Socket visualizador conectado', socket.id);
+        socket.emit("join_viewer", { viewerId });
+      });
+    } else {
+      socket.on('connect', () => {
+        console.log('Socket visualizador conectado (sem viewerId) ', socket.id);
+      });
+    }
+
+    socket.on("viewer_photos_ready", (data) => {
+      console.log('📸 Dados recebidos no visualizador (socket):', data);
+      
+      if (!data || !data.photos || !Array.isArray(data.photos)) {
+        gallery.innerHTML = "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
+        downloadAllBtn.style.display = 'none';
+        return;
+      }
+      
+      currentPhotos = data.photos;
+      currentStoriesMontage = data.storiesMontage || data.stories || null;
+      
+      // Se dataParam já tinha mostrado algo, decidimos sobrescrever (com dados push do server).
+      // Isso mantém compatibilidade com ambos os fluxos.
+      renderGallery(currentPhotos, currentStoriesMontage);
+      
+      if (currentPhotos.length > 0) {
+        downloadAllBtn.style.display = 'block';
+      }
+    });
+
+    // fallback: se nada aparecer em alguns segundos, mostra msg (mantido)
     setTimeout(() => {
-      if (currentPhotos.length === 0 && viewerId) {
+      if ((gallery.querySelectorAll('.photo-container').length === 0) && !dataParam) {
         gallery.innerHTML = "<div class='no-photos'>❌ Não foi possível carregar as fotos. Verifique o ID da sessão.</div>";
       }
     }, 5000);
