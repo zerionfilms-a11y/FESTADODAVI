@@ -7,289 +7,341 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    html,body{height:100%;font-family:Arial,Helvetica,sans-serif;background:#fff;color:#000;overflow:hidden}
-    .screen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;padding:18px}
-    .visible{display:flex}
-    .logo{max-width:160px;margin-bottom:14px}
-    #enterFsBtn{padding:14px 18px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:800;font-size:18px}
-    #startBtn{padding:14px 18px;border-radius:12px;border:none;background:#0b84ff;color:#fff;font-weight:800;font-size:18px}
-    #videoBg{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;display:none;transform:scaleX(-1)}
-    #countdown{position:fixed;left:0;right:0;top:28%;z-index:3;display:none;font-weight:900;font-size:120px;text-align:center;color:#fff;text-shadow:0 8px 28px rgba(0,0,0,0.8)}
-    #previewBox{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:6;background:rgba(0,0,0,0.88);flex-direction:column;padding:18px}
-    #previewImg{max-width:92vw;border-radius:14px;border:6px solid rgba(255,255,255,0.06)}
-    .controls-row{display:flex;gap:12px;margin-top:14px}
-    .btnSmall{padding:12px 14px;border-radius:10px;border:0;font-weight:800;cursor:pointer}
-    .btnRedo{background:#dc3545;color:#fff}
-    .btnContinue{background:#28a745;color:#fff}
-    #thankBox{display:none;align-items:center;justify-content:center;flex-direction:column;padding:18px}
-    #status{position:fixed;left:12px;top:12px;background:rgba(0,0,0,0.5);color:#fff;padding:6px 8px;border-radius:8px;font-size:12px;z-index:12}
+    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
+    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
+    #enterFsBtn{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px}
+    #welcome{background:rgba(255,255,255,0.15);padding:25px;text-align:center;border-radius:15px;width:95%;max-width:400px;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
+    #startBtn{padding:20px 28px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:800;cursor:pointer;font-size:22px;margin-top:12px;box-shadow:0 6px 18px rgba(0,0,0,0.35);width:100%;max-width:340px;transition:all 0.25s ease}
+    .logo{max-width:180px;margin-bottom:20px;border-radius:10px}
+    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none; transform: scaleX(-1);z-index:1}
+    #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:2}
+    #progress{position:fixed;top:20px;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:150;color:#fff;text-shadow:0 0 10px #000;background:rgba(0,0,0,0.5);padding:10px;backdrop-filter:blur(5px)}
+    #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000, 0 0 30px #000;z-index:100;color:#ffffff}
+    #msg{position:fixed;top:50%;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:100;color:#fff;text-shadow:0 0 10px #000}
+    #previewScreen{background:rgba(0,0,0,0.9);z-index:20;padding:0}
+    #previewContainer{position:relative;width:100%;height:100%;display:flex;flex-direction:column}
+    #previewImage{width:100%;height:100%;object-fit:contain;display:block}
+    .preview-buttons{position:absolute;bottom:30px;left:0;right:0;display:flex;gap:15px;justify-content:center;padding:0 20px;z-index:60}
+    .preview-btn{padding:12px 18px;border-radius:8px;border:none;font-weight:700;cursor:pointer;font-size:16px;flex:1;max-width:140px;background:rgba(0,0,0,0.7);color:white;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.3)}
+    #refazerBtn{background:rgba(220,53,69,0.8)}
+    #continuarBtn{background:rgba(40,167,69,0.8)}
+    #thank { background: rgba(255,255,255,0.15); padding: 25px; border-radius: 15px; width:95%;max-width:400px;text-align:center;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
+    .hidden { display: none !important; }
+    .visible { display: flex !important; }
+    #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:4px;border-radius:4px;z-index:1000}
+    /* QR overlay */
+    .qr-overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:300; }
+    .qr-backdrop { position:absolute; inset:0; backdrop-filter:blur(10px); background: rgba(0,0,0,0.45); }
+    .qr-modal { position:relative; background:rgba(255,255,255,0.98); padding:18px; border-radius:12px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.4); max-width:90%; width:360px; }
+    .qr-modal img { width:260px; height:260px; object-fit:contain; display:block; margin:0 auto 12px; }
+    .qr-close { position:absolute; top:8px; right:8px; border:none; background:transparent; font-size:22px; cursor:pointer; }
   </style>
 </head>
 <body>
-  <div id="status">Conectando...</div>
-
-  <div id="enterScreen" class="screen visible" style="background:#fff">
-    <img src="logo1.png" class="logo" alt="Logo" onerror="this.style.display='none'">
-    <h1>📸 Cabine Fotográfica</h1>
-    <p>Para melhor experiência, entre em tela cheia</p>
-    <button id="enterFsBtn">🔲 Entrar em Tela Cheia</button>
-  </div>
-
-  <div id="welcomeScreen" class="screen" style="background:#fff">
-    <img src="logo1.png" class="logo" alt="Logo" onerror="this.style.display='none'">
-    <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
-    <p>Clique abaixo para iniciar</p>
-    <button id="startBtn">🎬 Iniciar Sessão de Fotos</button>
-    <div id="waiting" style="margin-top:12px;color:#666;display:none">Aguardando câmera do operador...</div>
-  </div>
-
-  <img id="videoBg" src="" alt="preview">
-
-  <div id="countdown">3</div>
-
-  <div id="previewBox">
-    <img id="previewImg" alt="Preview">
-    <div class="controls-row">
-      <button id="refazerBtn" class="btnSmall btnRedo">🔄 Refazer</button>
-      <button id="continuarBtn" class="btnSmall btnContinue">✅ Continuar</button>
+  <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#fff,#f5f5f5);">
+    <div style="text-align:center;background:rgba(0,0,0,0.03);padding:20px;border-radius:15px;backdrop-filter:blur(10px);width:95%;max-width:400px">
+      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+      <h1 style="font-size:24px;margin-bottom:20px;color:#222">📸 Cabine Fotográfica</h1>
+      <p style="font-size:16px;margin-bottom:20px;color:#444">Para melhor experiência, entre em tela cheia</p>
+      <button id="enterFsBtn">🎬 Entrar em Tela Cheia</button>
     </div>
   </div>
 
-  <div id="thankBox" class="screen" style="background:linear-gradient(135deg,#0b84ff,#004aad);color:#fff">
-    <img src="logo1.png" class="logo" alt="Logo" onerror="this.style.display='none'">
-    <h1>✨ Obrigado!</h1>
-    <p>Espere o operador finalizar a sessão.</p>
+  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7)">
+    <div id="welcome">
+      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+      <h1 style="color:#222">📸 Bem-vindo à Cabine Fotográfica</h1>
+      <p style="color:#444">Clique abaixo para iniciar</p>
+      <button id="startBtn">🎬 Iniciar Sessão de Fotos</button>
+    </div>
   </div>
 
-<script>
-const params = new URLSearchParams(location.search);
-const SESSION = params.get('session') || 'cabine-fixa';
-const SERVER = params.get('server') || 'https://festadodavi.onrender.com';
+  <video id="videoEl" autoplay playsinline muted></video>
+  <canvas id="canvasEl"></canvas>
+  <div id="progress" class="hidden"></div>
+  <div id="countdown"></div>
+  <div id="msg"></div>
 
-const $ = id => document.getElementById(id);
-const statusEl = $('status'), enterScreen = $('enterScreen'), enterFsBtn = $('enterFsBtn');
-const welcomeScreen = $('welcomeScreen'), startBtn = $('startBtn'), waiting = $('waiting');
-const videoBg = $('videoBg'), countdownEl = $('countdown');
-const previewBox = $('previewBox'), previewImg = $('previewImg'), refazerBtn = $('refazerBtn'), continuarBtn = $('continuarBtn');
-const thankBox = $('thankBox');
+  <div id="previewScreen" class="screen hidden">
+    <div id="previewContainer">
+      <img id="previewImage" src="" alt="Preview da foto">
+      <div class="preview-buttons">
+        <button id="refazerBtn" class="preview-btn">🔄 Refazer</button>
+        <button id="continuarBtn" class="preview-btn">✅ Continuar</button>
+      </div>
+    </div>
+  </div>
 
-let socket = null;
-let connected = false;
-let haveFrame = false;
-let sessionStarted = false;
-let currentIndex = 0;
-let photos = [];
-let captureLock = false; // prevent duplicates
+  <div id="thankScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7)">
+    <div id="thank">
+      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+      <h1 style="color:#222">✨ Obrigado por utilizar a cabine!</h1>
+      <p style="color:#444">Espere o operador encerrar a sessão.</p>
+    </div>
+  </div>
 
-function show(screen){
-  [enterScreen, welcomeScreen, previewBox, thankBox].forEach(s=>{ s.style.display = 'none'; s.classList.remove('visible'); });
-  if(screen === 'enter'){ enterScreen.style.display='flex'; enterScreen.classList.add('visible'); }
-  if(screen === 'welcome'){ welcomeScreen.style.display='flex'; welcomeScreen.classList.add('visible'); }
-  if(screen === 'preview'){ previewBox.style.display='flex'; }
-  if(screen === 'thank'){ thankBox.style.display='flex'; thankBox.classList.add('visible'); }
-}
+  <!-- QR overlay (hidden by default) -->
+  <div id="qrOverlay" class="qr-overlay hidden" aria-hidden="true">
+    <div class="qr-backdrop"></div>
+    <div class="qr-modal" role="dialog" aria-modal="true">
+      <button id="qrClose" class="qr-close">✕</button>
+      <div id="qrTitle" style="font-weight:700;margin-bottom:8px;color:#222">Escaneie o QR</div>
+      <canvas id="qrCanvas" width="260" height="260" style="display:block;margin:0 auto 8px;background:#fff"></canvas>
+      <div style="font-size:14px;color:#333;margin-top:6px">Abra o link e veja suas fotos</div>
+    </div>
+  </div>
 
-function initSocket(){
-  if(socket) return;
-  socket = io(SERVER, { transports:['websocket'], reconnection:true, timeout:20000 });
+  <div id="debugInfo"></div>
 
-  socket.on('connect', ()=>{ connected = true; statusEl.textContent = 'Conectado'; socket.emit('join_session', { session: SESSION, role: 'viewer' }); socket.emit('request_stream', { session: SESSION }); });
-  socket.on('disconnect', ()=>{ connected = false; statusEl.textContent = 'Desconectado'; });
+  <audio id="clack" src="clack.mp3" preload="auto"></audio>
+  <audio id="inicio" src="inicio.mp3" preload="auto"></audio>
+  <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
-  socket.on('stream_frame', ({ frame }) => {
-    haveFrame = true;
-    if(sessionStarted){
-      videoBg.src = frame; videoBg.style.display = 'block';
+  <script>
+    const SERVER_URL = "https://festadodavi.onrender.com";
+    const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true, forceNew:true });
+
+    const params = new URLSearchParams(location.search);
+    const session = params.get('session') || 'cabine-fixa';
+
+    const debugEl = document.getElementById('debugInfo');
+    setInterval(()=>{debugEl.textContent=`Sessão: ${session||'none'} | Socket: ${socket.connected?'🟢':'🔴'}`},1000);
+
+    const enterFs = document.getElementById('enterFs');
+    const enterFsBtn = document.getElementById('enterFsBtn');
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    const startBtn = document.getElementById('startBtn');
+    const videoEl = document.getElementById('videoEl');
+    const canvasEl = document.getElementById('canvasEl');
+    const progressEl = document.getElementById('progress');
+    const countdownEl = document.getElementById('countdown');
+    const previewScreen = document.getElementById('previewScreen');
+    const previewImage = document.getElementById('previewImage');
+    const refazerBtn = document.getElementById('refazerBtn');
+    const continuarBtn = document.getElementById('continuarBtn');
+    const thankScreen = document.getElementById('thankScreen');
+    const clack = document.getElementById('clack');
+    const inicio = document.getElementById('inicio');
+    const fim = document.getElementById('fim');
+
+    const qrOverlay = document.getElementById('qrOverlay');
+    const qrCanvas = document.getElementById('qrCanvas');
+    const qrCloseBtn = document.getElementById('qrClose');
+
+    let stream=null, photos=[], currentPhotoIndex=0, currentPhotoData=null;
+
+    function showScreen(screenElement){
+      [enterFs,welcomeScreen,previewScreen,thankScreen].forEach(s=>{
+        if(s){ s.classList.add('hidden'); s.classList.remove('visible'); s.style.display='none'; }
+      });
+      videoEl.style.display='none'; canvasEl.style.display='none'; countdownEl.textContent=''; progressEl.classList.add('hidden');
+      if(screenElement){ screenElement.classList.remove('hidden'); screenElement.classList.add('visible'); screenElement.style.display='flex'; }
     }
-  });
+    function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
-  socket.on('stream_pending', ()=>{ haveFrame = false; });
+    // show live operator webcam frames in canvas background (if frames arrive)
+    socket.on('stream_frame', ({ frame }) => {
+      try {
+        const ctx = canvasEl.getContext('2d');
+        const img = new Image();
+        img.onload = function(){
+          canvasEl.width = window.innerWidth;
+          canvasEl.height = window.innerHeight;
+          ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
+          const scale = Math.max(canvasEl.width / img.width, canvasEl.height / img.height);
+          const w = img.width * scale, h = img.height * scale;
+          ctx.drawImage(img, (canvasEl.width-w)/2, (canvasEl.height-h)/2, w, h);
+          canvasEl.style.display='block';
+        };
+        img.src = frame;
+      } catch(e){}
+    });
 
-  socket.on('photo_ready', ({ index, photo, mirror }) => {
-    captureLock = false;
-    // preview final: if operator sent mirror true, we keep the image mirrored so it matches background preview; otherwise show as-is
-    previewImg.src = photo;
-    previewImg.style.transform = mirror ? 'scaleX(-1)' : 'none';
-    // show preview controls
-    previewBox.style.display = 'flex';
-  });
+    // server can send show_qr to display overlay
+    socket.on('show_qr', ({ visualizadorUrl }) => {
+      try {
+        const qrImg = new Image();
+        qrImg.crossOrigin = "anonymous";
+        // Use Google Chart API as quick QR renderer (operator can also send dataURL instead)
+        qrImg.src = `https://chart.googleapis.com/chart?cht=qr&chs=260x260&chl=${encodeURIComponent(visualizadorUrl)}`;
+        qrImg.onload = function(){
+          const ctx = qrCanvas.getContext('2d');
+          ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height);
+          ctx.drawImage(qrImg, 0, 0, qrCanvas.width, qrCanvas.height);
+          qrOverlay.classList.remove('hidden'); qrOverlay.classList.add('visible'); qrOverlay.setAttribute('aria-hidden','false');
+        };
+      } catch(e) { console.warn('show_qr erro', e); }
+    });
 
-  socket.on('photos_received', ({ status }) => {
-    statusEl.textContent = 'Fotos enviadas: ' + status;
-  });
+    qrCloseBtn.addEventListener('click', () => {
+      qrOverlay.classList.add('hidden'); qrOverlay.classList.remove('visible'); qrOverlay.setAttribute('aria-hidden','true');
+    });
 
-  socket.on('reset_session', ({ session }) => {
-    // operator finalized session -> viewer returns to welcomeScreen (not enterScreen)
-    sessionStarted = false;
-    haveFrame = false;
-    photos = []; currentIndex = 0; captureLock = false;
-    previewBox.style.display = 'none';
-    videoBg.style.display = 'none'; videoBg.src = '';
-    show('welcome');
-    statusEl.textContent = 'Sessão reiniciada';
-  });
-}
+    // server can instruct to reset
+    socket.on('reset_session', ({ session: s }) => {
+      photos = []; currentPhotoIndex = 0; currentPhotoData = null;
+      showScreen(welcomeScreen);
+      qrOverlay.classList.add('hidden');
+    });
 
-// ensure first fullscreen action only once
-enterFsBtn.addEventListener('click', async () => {
-  try { await document.documentElement.requestFullscreen(); } catch(e){}
-  show('welcome');
-  // init socket once user interacted
-  initSocket();
-});
+    // photo_ready (if operator captured high-res)
+    socket.on('photo_ready', ({ index, photo }) => {
+      currentPhotoData = photo;
+      showPhotoPreview(photo);
+    });
 
-// start session (visitor clicks to start) - now only after clicking they will see preview and countdown flow
-startBtn.addEventListener('click', async () => {
-  startBtn.disabled = true;
-  sessionStarted = true;
-  show(null); // hide screens
-  // tell server we entered full screen (optional)
-  socket && socket.emit('cell_entered_fullscreen', { session: SESSION });
-  // start showing frames (if available)
-  if(!haveFrame){
-    waiting.style.display = 'block';
-    socket && socket.emit('request_stream', { session: SESSION });
-    // wait short while
-    await new Promise(r => setTimeout(r, 1000));
-  }
-  waiting.style.display = 'none';
-  // run capture sequence
-  currentIndex = 0; photos = [];
-  await runCaptureSequence();
-});
-
-// capture 3 photos sequence
-async function runCaptureSequence(){
-  if(currentIndex >= 3){
-    // finished capture: send to server
-    previewBox.style.display = 'none';
-    videoBg.style.display = 'none';
-    // send photos
-    if(socket && socket.connected){
-      socket.emit('photos_submit', { session: SESSION, viewerId: socket.id, photos });
-      statusEl.textContent = 'Enviando fotos...';
-    } else {
-      statusEl.textContent = 'Sem conexão para enviar';
+    // start local camera (if you still want to capture locally)
+    async function startCamera(){
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio:false });
+        videoEl.srcObject = stream;
+        videoEl.style.display = 'block'; videoEl.style.transform='scaleX(-1)';
+        await videoEl.play();
+      } catch(e) {
+        console.warn('startCamera err', e);
+        alert('Não foi possível acessar a câmera. Verifique permissões.');
+        showScreen(welcomeScreen);
+      }
     }
-    // show thank you screen and WAIT for operator reset
-    show('thank');
-    return;
-  }
-  // start the countdown and request operator to capture (take_photo event)
-  await takeOnePhoto(currentIndex);
-}
 
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+    // capture locally (not used if you rely on operator capture)
+    async function captureSinglePhotoLocal(){
+      progressEl.textContent=`${currentPhotoIndex+1}/3`; progressEl.classList.remove('hidden'); videoEl.style.display='block';
+      for(let t=5;t>0;t--){
+        if(t<=2){ countdownEl.textContent='SORRIA!'; countdownEl.style.color='#ffd600'; if(t===2){clack.currentTime=0; clack.play().catch(()=>{});} }
+        else{ countdownEl.textContent=String(t); countdownEl.style.color='#fff'; }
+        await sleep(1000);
+      }
+      canvasEl.width = videoEl.videoWidth || 1280;
+      canvasEl.height = videoEl.videoHeight || 720;
+      const ctx = canvasEl.getContext('2d'); ctx.translate(canvasEl.width,0); ctx.scale(-1,1); ctx.drawImage(videoEl,0,0,canvasEl.width,canvasEl.height);
+      const dataUrl = canvasEl.toDataURL('image/jpeg', 1.0);
+      return dataUrl;
+    }
 
-async function takeOnePhoto(index){
-  if(captureLock) return;
-  captureLock = true;
-  // countdown overlay (3..1)
-  countdownEl.style.display = 'block';
-  for(let t=3;t>0;t--){
-    countdownEl.textContent = t === 1 ? 'SORRIA!' : String(t);
-    await sleep(900);
-  }
-  countdownEl.style.display = 'none';
-  // request operator to capture (operator will emit photo_ready)
-  statusEl.textContent = 'Pedindo captura ao operador...';
-  socket && socket.emit('take_photo', { session: SESSION, index, viewerId: socket.id });
-  // wait for photo_ready (with timeout)
-  let waited = 0;
-  const timeoutMs = 10000;
-  while(captureLock && waited < timeoutMs){
-    await sleep(200);
-    waited += 200;
-  }
-  if(captureLock){
-    // timed out — fallback: try to request lastFrame snapshot as image (server might have cached). We request server to send lastFrame via stream_frame cached — but no direct capture => show error and allow retry
-    captureLock = false;
-    alert('Tempo esgotado para captura. Por favor peça ao operador para verificar webcam.');
-    show('welcome');
-    return;
-  }
-  // when photo_ready arrives, previewBox is shown by handler with previewImg filled
-  // user decides: refazer or continuar
-  // set handlers for the current preview interaction
-  await waitForPreviewDecision(index);
-}
+    function showPhotoPreview(photoData){ previewImage.src = photoData; showScreen(previewScreen); }
 
-function waitForPreviewDecision(index){
-  return new Promise((resolve) => {
-    refazerBtn.onclick = async () => {
-      previewBox.style.display = 'none';
-      // repeat the same index
-      await sleep(300);
-      captureLock = false;
-      resolve(false); // not accepted
-      runCaptureSequence();
-    };
-    continuarBtn.onclick = async () => {
-      // accept this photo: push into photos and continue
-      photos.push(previewImg.src);
-      previewBox.style.display = 'none';
-      currentIndex++;
-      captureLock = false;
-      resolve(true);
-      await sleep(300);
-      runCaptureSequence();
-    };
-  });
-}
+    async function runCaptureSequenceLocal(){
+      if(currentPhotoIndex >= 3){
+        stopCamera();
+        showScreen(thankScreen);
+        sendPhotosToServer();
+        return;
+      }
+      currentPhotoData = await captureSinglePhotoLocal();
+      showPhotoPreview(currentPhotoData);
+    }
 
-function stopShowingPreview(){
-  previewBox.style.display = 'none';
-}
+    // If your workflow is operator-capture: request operator to capture a photo by emitting take_photo and wait for photo_ready
+    // This function demonstrates that flow:
+    function requestOperatorCapture(index){
+      // we send 'take_photo' to server; server forwards to operators; operator will later emit 'photo_ready' to this viewer socket
+      socket.emit('take_photo', { session, index, viewerId: socket.id });
+      logDebug(`take_photo pedido enviado (index ${index}) — aguardando photo_ready`);
+    }
 
-// helper to ensure preview orientation consistent with stream (operator sends mirror true)
-socketInitSafely();
-function socketInitSafely(){
-  // try to init socket asap so we can request stream on start; but do not show preview until user clicks startBtn
-  initSocket();
-}
+    function stopCamera(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null;} videoEl.style.display='none'; canvasEl.style.display='none'; }
 
-function initSocket(){
-  if(window.__socketInitialized) return;
-  window.__socketInitialized = true;
-  if(typeof io === 'undefined'){ statusEl.textContent = 'Socket.IO não carregado'; return; }
-  socket = io(SERVER, { transports:['websocket'], reconnection:true });
+    // preview buttons
+    refazerBtn.addEventListener('click', async () => {
+      // on refazer, restart sequence (but keep fullscreen)
+      showScreen(null);
+      await startCamera();
+      currentPhotoData = null; // don't push
+      await runCaptureSequenceLocal();
+    });
+    continuarBtn.addEventListener('click', async () => {
+      photos.push(currentPhotoData);
+      currentPhotoIndex++;
+      showScreen(null);
+      await startCamera();
+      if (currentPhotoIndex >= 3) {
+        stopCamera();
+        showScreen(thankScreen);
+        // send photos to server
+        sendPhotosToServer();
+      } else {
+        await runCaptureSequenceLocal();
+      }
+    });
 
-  socket.on('connect', ()=>{ connected = true; statusEl.textContent = 'Conectado'; socket.emit('join_session', { session: SESSION, role: 'viewer' }); socket.emit('request_stream', { session: SESSION }); });
-  socket.on('disconnect', ()=>{ connected = false; statusEl.textContent = 'Desconectado'; });
+    function sendPhotosToServer(){
+      if (session && photos.length > 0) {
+        socket.emit('photos_submit', { session, viewerId: socket.id, photos });
+        // photos stay local for now
+      }
+    }
 
-  socket.on('stream_frame', ({ frame }) => {
-    haveFrame = true;
-    if(sessionStarted) { videoBg.src = frame; videoBg.style.display = 'block'; }
-  });
+    // UI flow
+    showScreen(enterFs);
 
-  socket.on('stream_pending', ()=>{ haveFrame = false; });
+    enterFsBtn.addEventListener('click', async () => {
+      try { await document.documentElement.requestFullscreen(); } catch(e){/*ignore*/ }
+      showScreen(welcomeScreen);
+      if (session) socket.emit('cell_entered_fullscreen', { session });
+    });
 
-  socket.on('photo_ready', ({ index, photo, mirror }) => {
-    // show preview with same orientation as preview stream
-    previewImg.src = photo;
-    previewImg.style.transform = mirror ? 'scaleX(-1)' : 'none';
-    previewBox.style.display = 'flex';
-    statusEl.textContent = 'Foto recebida';
-    // clear capture lock only when preview is shown, so waitForPreviewDecision will continue
-    captureLock = false;
-  });
+    // Start button: we will request operator capture flow instead of local capture if you prefer
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true; startBtn.textContent = '🎵 Preparando...';
+      await inicio.play().catch(()=>{});
+      startBtn.disabled = false; startBtn.textContent = '🎬 Iniciar Sessão de Fotos';
+      // decide mode: operator-capture (preferred) or local-capture
+      // We'll request stream frames (preview) and then request operator to capture when countdown ends.
+      showScreen(null);
+      // request server to start sending stream frames to this viewer (server will notify operators)
+      socket.emit('request_stream', { session });
+      // show operator preview frames in canvasEl as they arrive
+      canvasEl.style.display = 'block';
+      // start sequence where we ask operator to take high-res captures
+      photos = []; currentPhotoIndex = 0;
+      // For each photo: show countdown overlay and then request operator to capture
+      const takeOne = async (index) => {
+        progressEl.textContent = `${index+1}/3`; progressEl.classList.remove('hidden');
+        for(let t=5;t>0;t--){
+          if(t<=2){ countdownEl.textContent='SORRIA!'; countdownEl.style.color='#ffd600'; if(t===2){clack.currentTime=0; clack.play().catch(()=>{});} }
+          else{ countdownEl.textContent=String(t); countdownEl.style.color='#fff'; }
+          await sleep(1000);
+        }
+        countdownEl.textContent = '';
+        // ask operator to capture high-res for this viewer
+        socket.emit('take_photo', { session, index, viewerId: socket.id });
+        // now await photo_ready event (handled above)
+      };
 
-  socket.on('photos_received', ({ status }) => {
-    statusEl.textContent = 'Fotos recebidas: ' + status;
-  });
+      // sequence handler: we will collect photos in photo_ready handler and continue flow there
+      // to make this simple, we set a temporary handler that listens for photo_ready specific to this socket
+      let photosReceived = 0;
+      const photoHandler = ({ index, photo }) => {
+        // push photo and continue sequence
+        photos.push(photo);
+        photosReceived++;
+        logDebug('photo_ready recebido localmente index=' + index);
+        if(photosReceived < 3) {
+          // trigger next take
+          takeOne(photosReceived);
+        } else {
+          // finished
+          socket.off('photo_ready', photoHandler);
+          showScreen(thankScreen);
+          // allow operator to process photos
+          sendPhotosToServer();
+        }
+      };
+      socket.on('photo_ready', photoHandler);
+      // start first one
+      await takeOne(0);
+    });
 
-  socket.on('reset_session', ({ session }) => {
-    // operator finalized: return visitor to welcome (not enter-screen)
-    sessionStarted = false; haveFrame = false; photos = []; currentIndex = 0; captureLock = false;
-    previewBox.style.display = 'none'; videoBg.style.display='none'; videoBg.src='';
-    show('welcome');
-    statusEl.textContent = 'Sessão finalizada pelo operador';
-  });
-}
+    // ensure thank screen remains until server emits reset_session
+    // (do not auto-return to enterFs)
 
-// initial view
-show('enter');
-
-</script>
+    // small helper to log debug
+    function logDebug(msg){
+      const de = document.getElementById('debugInfo');
+      de.textContent = (de.textContent ? de.textContent + '\n' : '') + `[${new Date().toLocaleTimeString()}] ${msg}`;
+      console.log(msg);
+    }
+  </script>
 </body>
 </html>
