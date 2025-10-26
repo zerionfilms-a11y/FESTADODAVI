@@ -9,7 +9,7 @@ const app = express();
 // CORS MÁXIMO - PERMITIR TUDO (mantive seu comportamento original)
 app.use((req, res, next) => {
   const allowedOrigins = [
-    'https://agoraequeeuquerover.vercel.app',
+    'https://festadodavi.vercel.app',
     'https://festadodavi.onrender.com/',
     'http://localhost:3000',
     'http://localhost:10000'
