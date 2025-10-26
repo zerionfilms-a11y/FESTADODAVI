@@ -2,194 +2,161 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Cabine Fotográfica — Celular</title>
+  <title>Cabine — Celular (cliente)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
-    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-    #enterFsBtn{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px}
-    #welcome{background:rgba(255,255,255,0.15);padding:25px;text-align:center;border-radius:15px;width:95%;max-width:400px;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
-    #welcome h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
-    #welcome p{font-size:18px;margin-bottom:15px}
-    /* Aumentei um pouco o botão start e centralizei */
-    #startBtn{padding:20px 28px;border-radius:14px;border:none;background:#b07e09;color:#fff;font-weight:800;cursor:pointer;font-size:22px;margin-top:12px;box-shadow:0 6px 18px rgba(0,0,0,0.35);width:100%;max-width:340px;transition:all 0.25s ease}
-    .logo{max-width:180px;margin-bottom:20px;border-radius:10px}
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none; transform: scaleX(-1);}
-    #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:10}
-    #progress{position:fixed;top:20px;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:150;color:#fff;text-shadow:0 0 10px #000;background:rgba(0,0,0,0.5);padding:10px;backdrop-filter:blur(5px)}
-    /* contador em branco conforme pedido */
-    #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000, 0 0 30px #000;z-index:100;color:#ffffff}
-    #msg{position:fixed;top:50%;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:100;color:#fff;text-shadow:0 0 10px #000}
-    #previewScreen{background:rgba(0,0,0,0.9);z-index:20;padding:0}
-    #previewContainer{position:relative;width:100%;height:100%;display:flex;flex-direction:column}
-    #previewImage{width:100%;height:100%;object-fit:contain;display:block}
-    .preview-buttons{position:absolute;bottom:30px;left:0;right:0;display:flex;gap:15px;justify-content:center;padding:0 20px}
-    .preview-btn{padding:12px 18px;border-radius:8px;border:none;font-weight:700;cursor:pointer;font-size:16px;flex:1;max-width:140px;background:rgba(0,0,0,0.7);color:white;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.3)}
-    #refazerBtn{background:rgba(220,53,69,0.8)}
-    #continuarBtn{background:rgba(40,167,69,0.8)}
-    #thank { background: rgba(255,255,255,0.15); padding: 25px; border-radius: 15px; width:95%;max-width:400px;text-align:center;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
-    #thank h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
-    #thank p{font-size:18px}
-    .hidden { display: none !important; }
-    .visible { display: flex !important; }
-    #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:4px;border-radius:4px;z-index:1000}
-    @keyframes superPulse {0%{transform:scale(1);background:#fff;color:#0b84ff;box-shadow:0 0 0 0 rgba(255,255,255,0.7);}25%{transform:scale(1.08);background:#0b84ff;color:#fff;box-shadow:0 0 0 10px rgba(11,132,255,0.3);}50%{transform:scale(1.05);background:#ff4081;color:#fff;box-shadow:0 0 0 15px rgba(255,64,129,0.2);}75%{transform:scale(1.08);background:#0b84ff;color:#fff;box-shadow:0 0 0 10px rgba(11,132,255,0.3);}100%{transform:scale(1);background:#fff;color:#0b84ff;box-shadow:0 0 0 0 rgba(255,255,255,0);}}
-    .super-pulse-animation{animation:superPulse 2.5s infinite;}
+    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:12px}
+    #streamImg{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:1;filter:brightness(0.6)}
+    #overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;display:flex;align-items:center;justify-content:center;flex-direction:column}
+    .btn{padding:16px 22px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;font-size:18px;cursor:pointer}
+    #countdown{font-size:140px;font-weight:800;text-align:center;color:#fff;text-shadow:0 0 20px #000;display:none}
+    #preview{position:fixed;bottom:10%;left:50%;transform:translateX(-50%);z-index:3;display:none; flex-direction:column;align-items:center}
+    #preview img{max-width:90vw;border-radius:8px;border:4px solid rgba(0,0,0,0.5)}
+    .preview-controls{display:flex;gap:12px;margin-top:12px}
+    .control-btn{padding:10px 14px;border-radius:8px;border:none;font-weight:700;cursor:pointer}
+    #refazer{background:#dc3545;color:white}
+    #continuar{background:#28a745;color:white}
+    #debug{position:fixed;left:8px;bottom:8px;font-size:12px;color:#aaa;background:rgba(0,0,0,0.4);padding:6px;border-radius:6px;z-index:10}
   </style>
 </head>
 <body>
-  <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
-    <div style="text-align:center;background:rgba(0,0,0,0.3);padding:20px;border-radius:15px;backdrop-filter:blur(10px);width:95%;max-width:400px">
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1 style="font-size:24px;margin-bottom:20px">📸 Cabine Fotográfica</h1>
-      <p style="font-size:16px;margin-bottom:20px">Para melhor experiência, entre em tela cheia</p>
-      <button id="enterFsBtn">🎬 Entrar em Tela Cheia</button>
+  <img id="streamImg" src="" crossorigin="anonymous">
+  <div id="overlay" class="screen">
+    <div style="text-align:center;z-index:5">
+      <h1>📸 Cabine</h1>
+      <button id="startBtn" class="btn">🎬 Iniciar Sessão de Fotos</button>
+      <div id="waiting" style="margin-top:12px;color:#ffd600;display:none">Aguardando câmera do operador...</div>
+    </div>
+    <div id="countdown">3</div>
+  </div>
+
+  <div id="preview">
+    <img id="previewImg" src="">
+    <div class="preview-controls">
+      <button id="refazer" class="control-btn">🔄 Refazer</button>
+      <button id="continuar" class="control-btn">✅ Continuar</button>
     </div>
   </div>
 
-  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
-    <div id="welcome">
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
-      <p>Clique abaixo para iniciar</p>
-      <button id="startBtn">🎬 Iniciar Sessão de Fotos</button>
-    </div>
-  </div>
+  <div id="debug">debug</div>
 
-  <video id="videoEl" autoplay playsinline muted></video>
-  <canvas id="canvasEl"></canvas>
-  <div id="progress" class="hidden"></div>
-  <div id="countdown"></div>
-  <div id="msg"></div>
+<script>
+const SERVER_URL = location.origin.replace(/\/$/, '') || 'http://localhost:3000';
+const params = new URLSearchParams(location.search);
+const SESSION = params.get('session') || 'cabine-fixa';
+const STREAM_FALLBACK = params.get('stream') || null;
 
-  <div id="previewScreen" class="screen hidden">
-    <div id="previewContainer">
-      <img id="previewImage" src="" alt="Preview da foto">
-      <div class="preview-buttons">
-        <button id="refazerBtn" class="preview-btn">🔄 Refazer</button>
-        <button id="continuarBtn" class="preview-btn">✅ Continuar</button>
-      </div>
-    </div>
-  </div>
+const streamImg = document.getElementById('streamImg');
+const startBtn = document.getElementById('startBtn');
+const countdownEl = document.getElementById('countdown');
+const waitingEl = document.getElementById('waiting');
+const preview = document.getElementById('preview');
+const previewImg = document.getElementById('previewImg');
+const refazerBtn = document.getElementById('refazer');
+const continuarBtn = document.getElementById('continuar');
+const debugEl = document.getElementById('debug');
 
-  <div id="thankScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
-    <div id="thank">
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1>✨ Obrigado por utilizar a cabine!</h1>
-      <p>Espere o operador encerrar a sessão.</p>
-    </div>
-  </div>
+let socket = null;
+let photos = [];
+let currentIndex = 0;
+let lastFrame = null;
+let waitingForPhoto = false;
 
-  <div id="debugInfo"></div>
+function dbg(msg){ console.log(msg); debugEl.textContent = msg; }
 
-  <audio id="clack" src="clack.mp3" preload="auto"></audio>
-  <audio id="inicio" src="inicio.mp3" preload="auto"></audio>
-  <audio id="fim" src="fim.mp3" preload="auto"></audio>
+function connectSocket(){
+  socket = io(SERVER_URL, { transports:['websocket'] });
+  socket.on('connect', ()=>{
+    dbg('connected: ' + socket.id);
+    socket.emit('join_session', { session: SESSION, role: 'viewer' });
+    // request stream immediately
+    socket.emit('request_stream', { session: SESSION });
+    waitingEl.style.display = 'block';
+  });
 
-  <script>
-    const SERVER_URL = "https://festadodavi.onrender.com";
-    const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true, reconnectionAttempts:5, reconnectionDelay:1000, timeout:20000, forceNew:true, withCredentials:true });
+  socket.on('stream_frame', ({ session, frame }) => {
+    // update preview image background
+    lastFrame = frame;
+    streamImg.src = frame;
+    waitingEl.style.display = 'none';
+  });
 
-    const params = new URLSearchParams(location.search);
-    const session = params.get('session');
+  socket.on('stream_pending', ()=>{
+    waitingEl.style.display = 'block';
+  });
 
-    const debugEl = document.getElementById('debugInfo');
-    setInterval(()=>{debugEl.textContent=`Sessão: ${session||'none'} | Socket: ${socket.connected?'🟢':'🔴'}`},1000);
+  socket.on('photo_ready', ({ index, photo }) => {
+    dbg('photo_ready index=' + index);
+    // show preview and let user decide
+    previewImg.src = photo;
+    preview.style.display = 'flex';
+    waitingForPhoto = false;
+  });
 
-    const enterFs = document.getElementById('enterFs');
-    const enterFsBtn = document.getElementById('enterFsBtn');
-    const welcomeScreen = document.getElementById('welcomeScreen');
-    const startBtn = document.getElementById('startBtn');
-    const videoEl = document.getElementById('videoEl');
-    const canvasEl = document.getElementById('canvasEl');
-    const progressEl = document.getElementById('progress');
-    const countdownEl = document.getElementById('countdown');
-    const previewScreen = document.getElementById('previewScreen');
-    const previewImage = document.getElementById('previewImage');
-    const refazerBtn = document.getElementById('refazerBtn');
-    const continuarBtn = document.getElementById('continuarBtn');
-    const thankScreen = document.getElementById('thankScreen');
-    const clack = document.getElementById('clack');
-    const inicio = document.getElementById('inicio');
-    const fim = document.getElementById('fim');
+  socket.on('viewer_count', (c)=> { dbg('viewers=' + c.viewers); });
 
-    let stream=null, photos=[], currentPhotoIndex=0, currentPhotoData=null;
+  socket.on('disconnect', ()=> dbg('socket disconnected'));
+}
 
-    function showScreen(screenElement){
-      [enterFs,welcomeScreen,previewScreen,thankScreen].forEach(s=>{
-        if(s && !s.classList.contains('hidden')){s.classList.add('hidden');s.classList.remove('visible');s.style.display='none';}
-      });
-      videoEl.style.display='none'; canvasEl.style.display='none'; countdownEl.textContent=''; progressEl.classList.add('hidden');
-      if(screenElement){screenElement.classList.remove('hidden'); screenElement.classList.add('visible'); screenElement.style.display='flex';}
-    }
+async function countdownAndRequest(){
+  // show live stream behind and overlay countdown
+  countdownEl.style.display = 'block';
+  for (let t=3; t>0; t--) {
+    countdownEl.textContent = t;
+    await new Promise(r=>setTimeout(r, 800));
+  }
+  countdownEl.style.display = 'none';
+  // ask server to instruct operator to take photo
+  waitingForPhoto = true;
+  socket.emit('take_photo', { session: SESSION, index: currentIndex, viewerId: socket.id });
+  dbg('take_photo requested index=' + currentIndex);
+}
 
-    function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+startBtn.addEventListener('click', async ()=>{
+  startBtn.disabled = true;
+  photos = []; currentIndex = 0;
+  await countdownAndRequest();
+});
 
-    async function startCamera(){
-      try{
-        stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{exact:"user"}},audio:false});
-        videoEl.srcObject=stream; videoEl.style.display='block'; videoEl.style.transform='scaleX(-1)';
-        await videoEl.play();
-      }catch(e){alert('Não foi possível acessar a câmera. Verifique as permissões.'); showScreen(welcomeScreen);}
-    }
+refazerBtn.addEventListener('click', async ()=>{
+  preview.style.display = 'none';
+  // request again for same index
+  await countdownAndRequest();
+});
 
-    async function captureSinglePhoto(){
-      progressEl.textContent=`${currentPhotoIndex+1}/3`; progressEl.classList.remove('hidden'); videoEl.style.display='block';
-      for(let t=5;t>0;t--){ 
-        if(t<=2){ countdownEl.textContent='SORRIA!'; countdownEl.style.color='#ffd600'; if(t===2){clack.currentTime=0; clack.play().catch(()=>{});} } 
-        else{ countdownEl.textContent=String(t); countdownEl.style.color='#fff'; } 
-        await sleep(1000);
-      }
-      canvasEl.width=videoEl.videoWidth; canvasEl.height=videoEl.videoHeight;
-      const ctx=canvasEl.getContext('2d'); ctx.translate(canvasEl.width,0); ctx.scale(-1,1); ctx.drawImage(videoEl,0,0,canvasEl.width,canvasEl.height);
-      return canvasEl.toDataURL('image/jpeg',1.0);
-    }
+continuarBtn.addEventListener('click', async ()=>{
+  // save current preview image
+  if (previewImg.src) photos.push(previewImg.src);
+  currentIndex++;
+  preview.style.display = 'none';
+  if (currentIndex >= 3) {
+    // send photos to server for montage
+    socket.emit('photos_submit', { session: SESSION, viewerId: socket.id, photos });
+    // show thank you screen briefly
+    overlayShowThank();
+  } else {
+    // request next photo
+    await countdownAndRequest();
+  }
+});
 
-    function showPhotoPreview(photoData){ previewImage.src=photoData; showScreen(previewScreen); }
+function overlayShowThank(){
+  // simple thank you overlay
+  overlay = document.getElementById('overlay');
+  overlay.innerHTML = '<div style="text-align:center"><h2>Obrigado!</h2><p>Aguarde enquanto montamos suas fotos.</p></div>';
+  setTimeout(()=> location.reload(), 5000);
+}
 
-    async function runCaptureSequence(){
-      if(currentPhotoIndex>=3){stopCamera(); progressEl.classList.add('hidden'); showScreen(thankScreen); sendPhotosToServer(); return;}
-      currentPhotoData=await captureSinglePhoto();
-      showPhotoPreview(currentPhotoData);
-    }
-
-    function stopCamera(){ if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} videoEl.style.display='none'; canvasEl.style.display='none'; }
-
-    refazerBtn.addEventListener('click',async()=>{ showScreen(null); videoEl.style.display='block'; await runCaptureSequence(); });
-    continuarBtn.addEventListener('click',async()=>{ photos.push(currentPhotoData); currentPhotoIndex++; showScreen(null); videoEl.style.display='block'; await runCaptureSequence(); });
-
-    function sendPhotosToServer(){
-      if(session && photos.length>0){
-        const sendPhotosWithRetry=(attempt=1,maxAttempts=5)=>{
-          if(socket.connected){ socket.emit('photos_from_cell',{photos,attempt,totalAttempts:maxAttempts}); 
-            if(attempt<maxAttempts){ setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),1500);}
-          }else if(attempt<maxAttempts){ socket.connect(); setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),2000);}
-        };
-        sendPhotosWithRetry();
-      }
-    }
-
-    socket.on('connect', () => {
-  if (session) { socket.emit('join_session', { session, role: 'viewer' }); socket.emit('request_stream', { session }); } else { socket.emit('join_session', { session: 'default_room', role: 'viewer' }); } if(session) socket.emit('cell_connected'); });
-    socket.on('disconnect',()=>{});
-    socket.on('reset_session',()=>{ stopCamera(); currentPhotoIndex=0; photos=[]; currentPhotoData=null; showScreen(welcomeScreen); });
-
-    showScreen(enterFs);
-
-    enterFsBtn.addEventListener('click',async()=>{
-      try{ await document.documentElement.requestFullscreen(); }catch(e){}
-      showScreen(welcomeScreen);
-      if(session) socket.emit('cell_entered_fullscreen');
-    });
-
-    startBtn.addEventListener('click',async()=>{
-      startBtn.disabled=true; startBtn.textContent='🎵 Preparando...';
-      await inicio.play().catch(()=>{});
-      startBtn.disabled=false; startBtn.textContent='🎬 Iniciar Sessão de Fotos';
-      showScreen(null); await startCamera(); currentPhotoIndex=0; photos=[]; await runCaptureSequence();
-    });
-  </script>
+window.addEventListener('DOMContentLoaded', ()=>{
+  connectSocket();
+  // if a direct stream was supplied via query ?stream=..., use it as background as fallback
+  if (STREAM_FALLBACK) {
+    streamImg.src = STREAM_FALLBACK;
+  }
+});
+</script>
 </body>
 </html>
