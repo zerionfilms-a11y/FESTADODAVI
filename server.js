@@ -1,15 +1,24 @@
 // server.js (adaptado completo)
 // Mantive as rotas e o comportamento original e adicionei integrações para streaming (index <-> celular).
-// Requisitos: node >= 14, instalar dependências: express, socket.io, fs-extra, node-fetch, form-data, uuid
+// Requisitos: node >= 14, instalar dependências: express, socket.io, fs-extra, form-data, uuid
+// OBS: fetch usa fallback para globalThis.fetch (Node 18+) e import dinâmico de node-fetch se necessário.
 
 const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs-extra');
-const fetch = require('node-fetch'); // se preferir axios, troque por axios
+// const fetch = require('node-fetch'); // <-- removed require; use fallback below
 const FormData = require('form-data');
 const { v4: uuidv4 } = require('uuid');
 const { Server } = require('socket.io');
+
+//
+// Safe fetch: use globalThis.fetch when available (Node 18+ / 25), otherwise dynamic import node-fetch.
+// This avoids crashing when node-fetch is not installed on environments that already provide fetch.
+//
+const fetch = (globalThis && globalThis.fetch)
+  ? globalThis.fetch.bind(globalThis)
+  : (...args) => import('node-fetch').then(m => m.default(...args));
 
 const app = express();
 const server = http.createServer(app);
@@ -340,4 +349,3 @@ server.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT} — sessão fixa: ${FIXED_SESSION}`);
   if (!IMGBB_KEY) console.log('⚠️ IMGBB_KEY não configurada — upload IMGBB desabilitado até configurar a variável de ambiente.');
 });
-
