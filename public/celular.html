@@ -6,46 +6,158 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
+    /* === ESTILOS GERAIS === */
     *{box-sizing:border-box;margin:0;padding:0}
-    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#fff;color:#000;overflow:hidden}
-    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:none;align-items:center;justify-content:center;flex-direction:column;padding:15px;text-align:center}
+    html,body{
+      height:100%;
+      margin:0;
+      font-family:Arial,Helvetica,sans-serif;
+      background:#fff;
+      color:#000;
+      overflow:hidden;
+    }
+
+    .screen{
+      position:fixed;
+      top:0; left:0;
+      width:100%; height:100%;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      padding:15px;
+      text-align:center;
+      transition:all 0.4s ease;
+    }
+
     .visible{display:flex}
-    button{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px;transition:all 0.25s ease}
-    button:hover{transform:scale(1.03);background:#ffdf33}
-    img.logo{max-width:220px;margin-bottom:25px}
-    #videoBg{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:1;display:none;filter:brightness(0.9)}
-    #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000;z-index:2;display:none;color:#fff}
-    #previewScreen img{max-width:90vw;border-radius:10px;border:4px solid rgba(0,0,0,0.4)}
-    .buttons{display:flex;gap:15px;margin-top:20px}
-    .buttons button{flex:1;max-width:150px}
+    button{
+      padding:18px 25px;
+      border-radius:12px;
+      border:none;
+      background:#ffd600;
+      color:#000;
+      font-weight:700;
+      cursor:pointer;
+      font-size:20px;
+      margin:15px;
+      width:90%;
+      max-width:320px;
+      box-shadow:0 5px 15px rgba(0,0,0,0.25);
+      transition:transform 0.25s ease, background 0.25s ease;
+    }
+    button:hover{transform:scale(1.05); background:#ffe14c}
+
+    img.logo{
+      max-width:220px;
+      margin-bottom:25px;
+      border-radius:8px;
+    }
+
+    /* === VÍDEO E CONTAGEM === */
+    #videoBg{
+      position:fixed;
+      top:0; left:0;
+      width:100%; height:100%;
+      object-fit:cover;
+      z-index:1;
+      display:none;
+      filter:brightness(0.9);
+    }
+
+    #countdown{
+      position:fixed;
+      top:30%; left:0; right:0;
+      text-align:center;
+      font-size:140px;
+      font-weight:900;
+      text-shadow:0 0 20px #000;
+      z-index:2;
+      display:none;
+      color:#fff;
+    }
+
+    /* === PREVIEW === */
+    #previewScreen img{
+      max-width:90vw;
+      border-radius:10px;
+      border:4px solid rgba(0,0,0,0.4);
+      box-shadow:0 0 20px rgba(0,0,0,0.4);
+    }
+
+    .buttons{
+      display:flex;
+      gap:15px;
+      margin-top:25px;
+    }
+
+    .buttons button{
+      flex:1;
+      max-width:160px;
+    }
+
     #refazer{background:#dc3545;color:#fff}
     #continuar{background:#28a745;color:#fff}
+
+    /* === TELAS === */
+    #fullscreenScreen{background:#fff;color:#000;}
+    #welcomeScreen{background:#fff;color:#000;}
+    #thankScreen{background:linear-gradient(135deg,#0b84ff,#004aad);color:#fff;}
+
+    /* === MENSAGENS === */
+    #waitingMsg{
+      color:#666;
+      margin-top:15px;
+      display:none;
+      font-size:16px;
+    }
+
+    /* === DEBUG (oculto para eventos técnicos) === */
+    #debug{
+      position:fixed;
+      bottom:5px; left:5px;
+      font-size:10px;
+      background:rgba(0,0,0,0.5);
+      color:#0f0;
+      padding:4px 6px;
+      border-radius:4px;
+      z-index:1000;
+    }
   </style>
 </head>
 <body>
 
-  <!-- TELA 1: ENTRAR EM TELA CHEIA -->
-  <div id="fullscreenScreen" class="screen visible" style="background:#fff;color:#000;">
+  <!-- ==============================
+       TELA 1 — ENTRAR EM TELA CHEIA
+  =============================== -->
+  <div id="fullscreenScreen" class="screen visible">
     <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
     <h1 style="font-size:26px;margin-bottom:20px;">📸 Cabine Fotográfica</h1>
     <p style="font-size:18px;margin-bottom:20px;">Para começar, entre em tela cheia</p>
     <button id="enterFullscreenBtn">🔲 Entrar em Tela Cheia</button>
   </div>
 
-  <!-- TELA 2: BEM-VINDO -->
-  <div id="welcomeScreen" class="screen" style="background:#fff;color:#000;">
+  <!-- ==============================
+       TELA 2 — BEM-VINDO
+  =============================== -->
+  <div id="welcomeScreen" class="screen">
     <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
     <h1 style="font-size:26px;margin-bottom:20px;">📸 Bem-vindo à Cabine Fotográfica</h1>
+    <p style="font-size:17px;margin-bottom:25px;">Clique abaixo para iniciar</p>
     <button id="startBtn">🎬 Iniciar Sessão de Fotos</button>
-    <p id="waitingMsg" style="color:#555;margin-top:10px;display:none;">Aguardando câmera do operador...</p>
+    <p id="waitingMsg">Aguardando câmera do operador...</p>
   </div>
 
-  <!-- STREAM + CONTAGEM -->
+  <!-- ==============================
+       STREAM + CONTAGEM
+  =============================== -->
   <img id="videoBg" src="">
   <div id="countdown">3</div>
 
-  <!-- TELA 3: PREVIEW -->
-  <div id="previewScreen" class="screen" style="background:rgba(0,0,0,0.9);z-index:3;">
+  <!-- ==============================
+       TELA 3 — PREVIEW
+  =============================== -->
+  <div id="previewScreen" class="screen" style="background:rgba(0,0,0,0.92);z-index:3;">
     <img id="previewImg" src="">
     <div class="buttons">
       <button id="refazer">🔄 Refazer</button>
@@ -53,19 +165,31 @@
     </div>
   </div>
 
-  <!-- TELA 4: OBRIGADO -->
-  <div id="thankScreen" class="screen" style="background:#0b84ff;color:#fff;">
+  <!-- ==============================
+       TELA 4 — OBRIGADO
+  =============================== -->
+  <div id="thankScreen" class="screen">
     <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-    <h1>✨ Obrigado por participar!</h1>
-    <p>Espere o operador finalizar a sessão.</p>
+    <h1 style="font-size:26px;margin-bottom:20px;">✨ Obrigado por participar!</h1>
+    <p style="font-size:18px;">Espere o operador finalizar a sessão.</p>
   </div>
 
+  <!-- DEBUG opcional -->
+  <div id="debug"></div>
+
   <script>
+    /**********************************************
+     * CONFIGURAÇÕES GERAIS
+     **********************************************/
     const SERVER_URL = "https://festadodavi.onrender.com";
-    const session = "cabine-fixa";
+    const session = "cabine-fixa"; // fixo, igual no index
 
-    const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true });
+    // debug util
+    const debug = msg => { document.getElementById('debug').textContent = msg; };
 
+    /**********************************************
+     * ELEMENTOS
+     **********************************************/
     const el = id => document.getElementById(id);
     const fullscreenScreen = el("fullscreenScreen");
     const welcomeScreen = el("welcomeScreen");
@@ -81,12 +205,28 @@
       if(screen) screen.classList.add("visible");
     }
 
-    let framesOk = false, currentPhoto=0, photos=[];
+    /**********************************************
+     * VARIÁVEIS DE ESTADO
+     **********************************************/
+    let framesOk = false;
+    let currentPhoto = 0;
+    let photos = [];
+
+    /**********************************************
+     * SOCKET.IO
+     **********************************************/
+    const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true, reconnectionAttempts:10, reconnectionDelay:1000 });
 
     socket.on("connect",()=>{
+      debug("🟢 Conectado ao servidor");
       socket.emit("join_session",{session,role:"viewer"});
     });
 
+    socket.on("disconnect",()=>{
+      debug("🔴 Desconectado, tentando reconectar...");
+    });
+
+    // Recebe os frames do PC (operador)
     socket.on("stream_frame",({frame})=>{
       videoBg.src = frame;
       videoBg.style.display="block";
@@ -94,17 +234,22 @@
       framesOk = true;
     });
 
+    // Recebe quando a foto estiver pronta (após contagem)
     socket.on("photo_ready",({photo})=>{
       previewImg.src = photo;
       show(previewScreen);
     });
 
+    /**********************************************
+     * FUNÇÕES DE FLUXO
+     **********************************************/
     function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
     async function countdownAndCapture(){
       if(!framesOk){
         waitingMsg.style.display="block";
-        await sleep(2000);
+        debug("Aguardando frames...");
+        await sleep(1500);
         if(!framesOk){ alert("Aguardando câmera do operador..."); return; }
       }
       countdown.style.display="block";
@@ -112,20 +257,29 @@
         countdown.textContent=i;
         await sleep(1000);
       }
+      countdown.textContent="📸";
+      await sleep(500);
       countdown.style.display="none";
       socket.emit("take_photo",{session,index:currentPhoto,viewerId:socket.id});
+      debug("📸 Solicitando captura da foto "+currentPhoto);
     }
 
+    /**********************************************
+     * EVENTOS DE INTERFACE
+     **********************************************/
     el("enterFullscreenBtn").onclick = async()=>{
       try{await document.documentElement.requestFullscreen();}catch(e){}
       show(welcomeScreen);
+      debug("Entrou em tela cheia");
     };
 
     el("startBtn").onclick = async()=>{
+      debug("Iniciando sessão de fotos");
       await countdownAndCapture();
     };
 
     el("refazer").onclick = async()=>{
+      debug("Refazendo foto "+currentPhoto);
       show(null);
       await countdownAndCapture();
     };
@@ -133,15 +287,34 @@
     el("continuar").onclick = async()=>{
       photos.push(previewImg.src);
       currentPhoto++;
+      debug("Foto "+currentPhoto+" confirmada");
       if(currentPhoto>=3){
         socket.emit("photos_submit",{session,photos});
         show(thankScreen);
-        setTimeout(()=>location.reload(),4000);
+        setTimeout(()=>location.reload(),5000);
       }else{
         show(null);
         await countdownAndCapture();
       }
     };
+
+    /**********************************************
+     * AJUSTES DE PERFORMANCE
+     **********************************************/
+    // Redesenho suave para evitar “travadas” no background
+    let lastFrame = 0;
+    function smoothRefresh(){
+      if(videoBg.complete && videoBg.naturalHeight>0){
+        if(Date.now()-lastFrame>16){ // ~60fps
+          videoBg.style.opacity="1";
+          lastFrame = Date.now();
+        }
+      }
+      requestAnimationFrame(smoothRefresh);
+    }
+    smoothRefresh();
+
+    debug("Pronto. Aguardando ação do usuário...");
   </script>
 </body>
 </html>
