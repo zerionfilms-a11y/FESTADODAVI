@@ -7,12 +7,12 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#111;color:#fff;overflow:hidden}
-    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:none;align-items:center;justify-content:center;flex-direction:column;padding:15px}
+    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#fff;color:#000;overflow:hidden}
+    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:none;align-items:center;justify-content:center;flex-direction:column;padding:15px;text-align:center}
     .visible{display:flex}
     button{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px}
     #videoBg{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:1;display:none;filter:brightness(0.8)}
-    #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000;z-index:2;display:none}
+    #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000;z-index:2;display:none;color:#fff}
     #previewScreen img{max-width:90vw;border-radius:10px;border:4px solid rgba(0,0,0,0.4)}
     .buttons{display:flex;gap:15px;margin-top:20px}
     .buttons button{flex:1;max-width:150px}
@@ -22,14 +22,12 @@
 </head>
 <body>
 
-  <!-- TELA 1 -->
-  <div id="fullscreenScreen" class="screen visible" style="background:#222;">
+  <div id="fullscreenScreen" class="screen visible" style="background:#222;color:#fff;">
     <h1 style="font-size:28px;margin-bottom:15px;">📸 Cabine Fotográfica</h1>
     <p style="font-size:18px;margin-bottom:15px;">Para começar, entre em tela cheia</p>
     <button id="enterFullscreenBtn">🔲 Entrar em Tela Cheia</button>
   </div>
 
-  <!-- TELA 2 -->
   <div id="welcomeScreen" class="screen" style="background:#fff;color:#000;">
     <h1 style="font-size:26px;margin-bottom:15px;">📸 Bem-vindo à Cabine!</h1>
     <p style="font-size:18px;margin-bottom:15px;">Clique abaixo para iniciar</p>
@@ -37,11 +35,9 @@
     <p id="waitingMsg" style="color:#555;margin-top:10px;display:none;">Aguardando câmera do operador...</p>
   </div>
 
-  <!-- STREAM + CONTAGEM -->
   <img id="videoBg" src="">
   <div id="countdown">3</div>
 
-  <!-- PREVIEW -->
   <div id="previewScreen" class="screen" style="background:rgba(0,0,0,0.9);z-index:3;">
     <img id="previewImg" src="">
     <div class="buttons">
@@ -50,19 +46,16 @@
     </div>
   </div>
 
-  <!-- TELA FINAL -->
-  <div id="thankScreen" class="screen" style="background:#0b84ff;">
+  <div id="thankScreen" class="screen" style="background:#0b84ff;color:#fff;">
     <h1>✨ Obrigado por participar!</h1>
     <p>Espere o operador finalizar.</p>
   </div>
 
   <script>
     const SERVER_URL = "https://festadodavi.onrender.com";
-    const params = new URLSearchParams(location.search);
-    const session = params.get("session") || "cabine-fixa";
+    const session = "cabine-fixa";
 
     const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true });
-    let connected = false, framesOk = false, currentPhoto = 0, photos = [];
 
     const el = id => document.getElementById(id);
     const fullscreenScreen = el("fullscreenScreen");
@@ -79,9 +72,9 @@
       if(screen) screen.classList.add("visible");
     }
 
-    // Conexão
+    let framesOk = false, currentPhoto=0, photos=[];
+
     socket.on("connect",()=>{
-      connected = true;
       socket.emit("join_session",{session,role:"viewer"});
     });
 
@@ -102,9 +95,8 @@
     async function countdownAndCapture(){
       if(!framesOk){
         waitingMsg.style.display="block";
-        socket.emit("request_stream",{session});
         await sleep(2000);
-        if(!framesOk) return alert("Aguardando câmera do operador...");
+        if(!framesOk){ alert("Aguardando câmera do operador..."); return; }
       }
       countdown.style.display="block";
       for(let i=3;i>0;i--){
