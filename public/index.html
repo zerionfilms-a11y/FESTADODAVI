@@ -119,9 +119,9 @@
 
   let socket = null;
   let localStream = null;
-  let streamingInterval = null;
   let lastPhotos = []; // array of data URLs (the three photos)
   let imgbbApiKey = imgbbKeyInput.value.trim();
+  let mirrorFinal = true; // envia mirror:true para que o final chegue com mesma orientação do preview
 
   function log(msg){
     const t = new Date().toLocaleTimeString();
@@ -235,6 +235,7 @@
   }
 
   // ---- Streaming (low-res preview frames to viewers) ----
+  // Apenas UMA declaração de streamingInterval (corrigido)
   let streamingInterval = null;
   function startStreamingToSession(targetSession){
     if(!localStream){ log('Webcam não iniciada para streaming'); return; }
@@ -280,22 +281,20 @@
   }
 
   // ---- Montagem logic (Stories + Print) ----
-  // Coordinates provided by you:
   const STORIES_SIZE = { w: 3375, h: 6000 };
   const STORIES_COORDS = [
-    { x: 289, y: 242,  w: 2776 - 289, h: 1809 - 242 },   // area 1
-    { x: 292, y: 2026, w: 2776 - 292, h: 3593 - 2026 },  // area 2
-    { x: 289, y: 3754, w: 2776 - 289, h: 5324 - 3754 }   // area 3
+    { x: 289, y: 242,  w: 2776 - 289, h: 1809 - 242 },
+    { x: 292, y: 2026, w: 2776 - 292, h: 3593 - 2026 },
+    { x: 289, y: 3754, w: 2776 - 289, h: 5324 - 3754 }
   ];
 
   const PRINT_SIZE = { w: 3691, h: 5536 };
   const PRINT_COORDS = [
-    { x: 267, y: 212,  w: 3010 - 267, h: 1718 - 212 },   // area 1
-    { x: 267, y: 1887, w: 3017 - 267, h: 3393 - 1887 },  // area 2
-    { x: 274, y: 3556, w: 3023 - 274, h: 5061 - 3556 }   // area 3
+    { x: 267, y: 212,  w: 3010 - 267, h: 1718 - 212 },
+    { x: 267, y: 1887, w: 3017 - 267, h: 3393 - 1887 },
+    { x: 274, y: 3556, w: 3023 - 274, h: 5061 - 3556 }
   ];
 
-  // template image filenames expected in public/
   const STORIES_TEMPLATE = 'storiesdavi.png';
   const PRINT_TEMPLATE = 'imprimirdavi.png';
 
@@ -318,7 +317,6 @@
     ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
   }
 
-  // create montages and return dataURLs
   async function createStoriesMontage(photosDataUrls){
     return new Promise((resolve, reject) => {
       const ctx = storiesCanvas.getContext('2d');
@@ -342,7 +340,6 @@
           };
           img.onerror = (e) => {
             log('Erro ao carregar photo para stories: ' + e);
-            // still count as loaded to avoid hang
             loaded++;
             if(loaded === 3){
               const dataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95);
@@ -397,12 +394,10 @@
   }
 
   // ---- IMGBB upload helper ----
-  // uses the API key provided in the UI (imgbbKeyInput.value)
   async function uploadToImgbb(dataUrl, name = 'cabine_photo'){
     try {
       const key = imgbbKeyInput.value.trim();
       if(!key) throw new Error('IMGBB key não configurada');
-      // remove header
       const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
       const form = new FormData();
       form.append('key', key);
@@ -429,7 +424,6 @@
         log('Nenhuma foto para processar');
         return;
       }
-      // ensure exactly 3 photos for montage (repeat last if less)
       const photos = photosArray.slice(0,3);
       while(photos.length < 3) photos.push(photos[photos.length-1] || photosArray[0]);
 
@@ -441,12 +435,10 @@
       const printDataUrl = await createPrintMontage(photos);
       log('Montagem impressão criada');
 
-      // upload three individual photos + stories montage (4 uploads)
       log('Iniciando upload IMGBB das 3 fotos individuais + montagem stories...');
       genVisualizadorQrBtn.disabled = true;
       testImgbbBtn.disabled = true;
 
-      // sequential upload (safer), but could be parallel.
       const uploadedUrls = [];
       for(let i=0;i<3;i++){
         log(`Upload foto ${i+1}...`);
@@ -454,22 +446,20 @@
         uploadedUrls.push(url);
         log(`Foto ${i+1} uploadada: ${url}`);
       }
-      // upload stories montage
+
       log('Upload montagem stories...');
       const storiesUrl = await uploadToImgbb(storiesDataUrl, `cabine_stories_${Date.now()}`);
       log('Stories uploadado: ' + storiesUrl);
 
-      // optionally upload print montage as well (not necessary for visualizador but keep for print archive)
       log('Upload montagem impressão (opcional)...');
       let printUrl = null;
       try {
         printUrl = await uploadToImgbb(printDataUrl, `cabine_print_${Date.now()}`);
         log('Print uploadado: ' + printUrl);
       } catch(e){
-        log('Falha ao upload print (continuando): ' + e.message);
+        log('Falha ao upload print (continuando): ' + (e.message || e));
       }
 
-      // Build payload for visualizador: 3 photos + stories
       const visualizadorPayload = {
         photos: uploadedUrls,
         stories: storiesUrl,
@@ -477,13 +467,10 @@
         createdAt: new Date().toISOString()
       };
 
-      // Create a compact base64 payload and generate a visualizador URL that decodes it
       const pStr = JSON.stringify(visualizadorPayload);
-      // base64 encode safely
       const base64 = btoa(unescape(encodeURIComponent(pStr)));
       const visualizadorUrl = `${location.origin}/visualizador.html?data=${encodeURIComponent(base64)}`;
 
-      // Put QR on screen
       qrcodeVisualizadorEl.innerHTML = '';
       const qrCanvas = document.createElement('canvas');
       QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => {
@@ -492,12 +479,10 @@
       qrcodeVisualizadorEl.appendChild(qrCanvas);
       log('Visualizador pronto: ' + visualizadorUrl);
 
-      // Enable manual button
       genVisualizadorQrBtn.disabled = false;
       testImgbbBtn.disabled = false;
       printBtn.disabled = false;
 
-      // Also, notify server to create viewer session server-side (optional)
       try {
         socket && socket.emit('create_viewer_session', { photos: photos, storiesMontage: storiesDataUrl, session: FIXED_SESSION });
         log('Solicitado ao servidor create_viewer_session (server fará upload adicional se IMGBB_KEY estiver configurada).');
@@ -505,12 +490,10 @@
         log('Erro emitir create_viewer_session: ' + (e.message || e));
       }
 
-      // show links in log
       log('Upload completo. Links: ');
       uploadedUrls.forEach((u,i)=> log(`foto ${i+1}: ${u}`));
       log('stories: ' + storiesUrl);
       if(printUrl) log('print: ' + printUrl);
-
     } catch(e){
       log('Erro no processo de montagem/upload: ' + (e.message || e));
       genVisualizadorQrBtn.disabled = false;
@@ -521,7 +504,6 @@
   // ---- Print button opens a print window with printCanvas scaled to 10x15cm ----
   printBtn.addEventListener('click', () => {
     try {
-      // convert printCanvas to dataURL (PNG)
       const data = printCanvas.toDataURL('image/png');
       const w = window.open('');
       w.document.write(`
@@ -563,7 +545,6 @@
   genQrBtn.addEventListener('click', generateQrCode);
   genVisualizadorQrBtn.addEventListener('click', () => {
     log('Gerar visualizador manual (se já houver upload, regenerando QR)...');
-    // If we have generated payload recently, regen QR (we already set qrcodeVisualizadorEl earlier)
   });
   debugBtn.addEventListener('click', () => {
     log('DEBUG: socket connected=' + (socket && socket.connected) + ' lastPhotos=' + lastPhotos.length);
@@ -589,7 +570,6 @@
   // ---- Initialize on DOM ready ----
   window.addEventListener('DOMContentLoaded', () => {
     initSocket();
-    // keep state
     genVisualizadorQrBtn.disabled = true;
     printBtn.disabled = true;
     testImgbbBtn.disabled = true;
