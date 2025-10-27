@@ -11,7 +11,6 @@
       padding: 0;
     }
     
-    /* Paleta: marca = #b07e09, texto escuro = #222222, fundo claro */
     body { 
       margin: 0; 
       display: flex; 
@@ -37,7 +36,6 @@
       max-width: 500px;
     }
     
-    /* Logo maior e acima do texto */
     .session-info img.logo1{
       height:80px;
       width:auto;
@@ -60,7 +58,7 @@
     }
     
     .expiry-info {
-      background: rgba(176,126,9,0.08); /* marca translúcida */
+      background: rgba(176,126,9,0.08);
       padding: 12px;
       border-radius: 12px;
       margin: 15px 0;
@@ -106,7 +104,6 @@
       width: 100%;
     }
     
-    /* MANTIVE A MOLDURA PRONTO-PRÓ-INSTA exata (gradient intacto) */
     .stories-container {
       background: linear-gradient(135deg, #833AB4, #C13584, #E1306C, #FD1D1D);
       padding: 25px;
@@ -201,121 +198,100 @@
       max-width: 600px;
       text-align: center;
     }
-    
-    @media (max-width: 480px) {
-      body {
-        padding: 10px;
-      }
-      
-      .session-info {
-        padding: 15px;
-        margin-bottom: 15px;
-      }
-      
-      .session-info h1 {
-        font-size: 24px;
-      }
-      
-      .download-all-btn, .instagram-btn {
-        padding: 16px 20px;
-        font-size: 16px;
-      }
-      
-      .photo-container {
-        padding: 15px;
-      }
-      
-      img {
-        max-width: 100%;
-      }
-    }
   </style>
 </head>
 <body>
   <div class="session-info">
-    <!-- logo maior e em cima do texto -->
     <img src="logo1.png" alt="Logo" class="logo1" onerror="this.style.display='none'">
     <h1>📸 Suas Fotos</h1>
     <p><strong>Sessão:</strong> <span id="viewerIdDisplay">—</span></p>
-    <div class="expiry-info">
-      ⏰ Estas fotos ficarão disponíveis por 7 dias
-    </div>
+    <div class="expiry-info">⏰ Estas fotos ficarão disponíveis por 7 dias</div>
   </div>
 
   <div id="errorContainer" style="width:100%;max-width:700px;"></div>
 
-  <button id="downloadAllBtn" class="download-all-btn" style="display:none;">
-    📥 Download Todas as Fotos
-  </button>
+  <button id="downloadAllBtn" class="download-all-btn" style="display:none;">📥 Download Todas as Fotos</button>
 
-  <div id="gallery" class="gallery">
-    <div class="loading">🔄 Carregando suas fotos...</div>
-  </div>
+  <div id="gallery" class="gallery"><div class="loading">🔄 Carregando suas fotos...</div></div>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
-    // Preservei 100% da lógica original do seu visualizador e acrescentei
-    // suporte adicional e tolerâncias ao parâmetro `data`.
     const params = new URLSearchParams(window.location.search);
     const viewerId = params.get("viewerId");
-    const dataParam = params.get("data"); // opcional: payload base64 / json
+    const dataParam = params.get("data");
     const gallery = document.getElementById("gallery");
     const downloadAllBtn = document.getElementById("downloadAllBtn");
     const viewerIdDisplay = document.getElementById("viewerIdDisplay");
     const errorContainer = document.getElementById('errorContainer');
-
-    if (viewerId) {
-      viewerIdDisplay.textContent = viewerId;
-    }
+    if (viewerId) viewerIdDisplay.textContent = viewerId;
 
     function showError(msg) {
       errorContainer.innerHTML = `<div class="error-box">❌ ${String(msg)}</div>`;
     }
 
-    // Função de download robusta (mantida)
     async function downloadImage(dataUrl, filename) {
       try {
-        let blob;
-        if (typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
-          const res = await fetch(dataUrl);
-          blob = await res.blob();
-        } else {
-          const res = await fetch(dataUrl, { mode: 'cors' });
-          if (!res.ok) throw new Error('Network response was not ok: ' + res.status);
-          blob = await res.blob();
-        }
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
       } catch (err) {
-        console.warn('downloadImage fallback, abrindo em nova aba por segurança', err);
+        console.warn('Erro no downloadImage:', err);
         window.open(dataUrl, '_blank');
       }
     }
 
-    // Renderização da galeria (mantive sua UI e funções)
+    // Função nova: tenta carregar imagem grande sem ficar preta
+    async function safeLoadImage(src) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img.src);
+        img.onerror = async () => {
+          try {
+            if (src.startsWith("data:")) {
+              const image = new Image();
+              image.onload = () => {
+                const canvas = document.createElement("canvas");
+                const ratio = 1200 / image.width;
+                canvas.width = 1200;
+                canvas.height = image.height * ratio;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL("image/jpeg", 0.85));
+              };
+              image.onerror = () => reject("Falha ao reduzir imagem.");
+              image.src = src;
+            } else reject("Erro ao carregar imagem.");
+          } catch (e) {
+            reject(e);
+          }
+        };
+        img.src = src;
+      });
+    }
+
     function renderGallery(photos, storiesMontage) {
       gallery.innerHTML = '';
-      
-      // Adicionar a moldura do stories se existir
       if (storiesMontage) {
         const storiesContainer = document.createElement("div");
         storiesContainer.className = "photo-container stories-container";
-
         const storiesTitle = document.createElement("div");
         storiesTitle.className = "stories-title";
         storiesTitle.innerHTML = "📱 Pronto para o Instagram";
         storiesContainer.appendChild(storiesTitle);
 
         const storiesImg = document.createElement("img");
-        storiesImg.src = storiesMontage;
         storiesImg.alt = "Pronto para o Instagram";
         storiesImg.loading = "lazy";
+
+        safeLoadImage(storiesMontage).then(finalSrc => {
+          storiesImg.src = finalSrc;
+        }).catch(() => {
+          storiesImg.src = storiesMontage;
+        });
 
         const instagramBtn = document.createElement("button");
         instagramBtn.className = "instagram-btn";
@@ -323,16 +299,12 @@
           <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png" alt="Instagram">
           Baixar Pronto pro Instagram
         `;
-        instagramBtn.onclick = function() {
-          downloadImage(storiesMontage, `pronto-instagram-${viewerId || 'v'}.jpg`);
-        };
-
+        instagramBtn.onclick = () => downloadImage(storiesImg.src, `pronto-instagram-${viewerId || 'v'}.jpg`);
         storiesContainer.appendChild(storiesImg);
         storiesContainer.appendChild(instagramBtn);
         gallery.appendChild(storiesContainer);
       }
 
-      // Fotos individuais
       if (!photos || photos.length === 0) {
         gallery.innerHTML += "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
         downloadAllBtn.style.display = 'none';
@@ -342,162 +314,71 @@
       photos.forEach((photoData, index) => {
         const container = document.createElement("div");
         container.className = "photo-container";
-
         const img = document.createElement("img");
         img.src = photoData;
         img.alt = `Foto ${index + 1}`;
         img.loading = "lazy";
-
         const downloadBtn = document.createElement("button");
         downloadBtn.className = "download-btn";
         downloadBtn.textContent = `📥 Download Foto ${index + 1}`;
-        downloadBtn.onclick = function() {
-          downloadImage(photoData, `foto-${index + 1}.jpg`);
-        };
-
+        downloadBtn.onclick = () => downloadImage(photoData, `foto-${index + 1}.jpg`);
         container.appendChild(img);
         container.appendChild(downloadBtn);
         gallery.appendChild(container);
       });
-
       downloadAllBtn.style.display = 'block';
     }
 
     downloadAllBtn.addEventListener('click', () => {
       const imgs = Array.from(gallery.querySelectorAll('.photo-container img'));
-      if (imgs.length === 0) return;
       imgs.forEach((img, idx) => {
-        setTimeout(() => {
-          downloadImage(img.src, `foto-${idx+1}.jpg`);
-        }, idx * 300);
+        setTimeout(() => downloadImage(img.src, `foto-${idx+1}.jpg`), idx * 300);
       });
       alert('📥 Download de todas as fotos iniciado!');
     });
 
-    // -----------------------
-    // Decodificador tolerante para `data`:
-    // Aceita:
-    // - JSON direto (uri-encoded ou não)
-    // - base64(JSON) (URI-encoded or raw)
-    // -----------------------
-    function tryParseJSON(text) {
-      try { return JSON.parse(text); } catch(e){ return null; }
-    }
-
     function decodeBase64ToUtf8(b64) {
-      // atob -> binary string (latin1) -> decodeURIComponent(escape(...)) to get UTF-8
       try {
         const binary = atob(b64);
-        try {
-          // decode utf8
-          return decodeURIComponent(escape(binary));
-        } catch (e) {
-          // If escape/decodeURIComponent fails, return binary as-is
-          return binary;
-        }
-      } catch(e) {
-        return null;
-      }
+        return decodeURIComponent(escape(binary));
+      } catch(e) { return null; }
     }
 
     function decodeDataParam(param) {
-      if (!param) return null;
-      // 1) try raw JSON (maybe URL encoded)
       try {
         const maybe = decodeURIComponent(param);
-        const parsed = tryParseJSON(maybe);
-        if (parsed) return parsed;
-      } catch (e) { /* ignore */ }
-
-      // 2) try raw JSON without decodeURIComponent
+        return JSON.parse(maybe);
+      } catch {}
       try {
-        const parsed2 = tryParseJSON(param);
-        if (parsed2) return parsed2;
-      } catch (e) {}
-
-      // 3) try base64 decode (URI-encoded or plain)
-      // remove possible whitespace
-      const p = param.replace(/\s+/g, '');
-      // attempt URI-decoded base64 then atob
-      try {
-        const uriDecoded = decodeURIComponent(p);
-        const maybeJson = decodeBase64ToUtf8(uriDecoded);
-        if (maybeJson) {
-          const parsed3 = tryParseJSON(maybeJson);
-          if (parsed3) return parsed3;
-        }
-      } catch(e){ /* ignore */ }
-
-      // attempt plain base64
-      try {
-        const maybeJson2 = decodeBase64ToUtf8(p);
-        if (maybeJson2) {
-          const parsed4 = tryParseJSON(maybeJson2);
-          if (parsed4) return parsed4;
-        }
-      } catch(e){ /* ignore */ }
-
-      // nothing worked
+        const decoded = decodeBase64ToUtf8(param);
+        if (decoded) return JSON.parse(decoded);
+      } catch {}
       return null;
     }
 
-    // If dataParam exists, try decode and render immediately (this handles index sending payload)
     if (dataParam) {
       const payload = decodeDataParam(dataParam);
       if (!payload) {
-        showError('Dados inválidos no parâmetro data. Tente reenviar a sessão pelo operador.');
-        gallery.innerHTML = "<div class='no-photos'>❌ Dados inválidos no parâmetro data.</div>";
+        showError('❌ Dados inválidos no parâmetro data.');
       } else {
-        // payload conventions: { photos: [...], stories: 'url' } or { photos: [...], storiesMontage: 'url' }
-        const photos = payload.photos || payload.photosData || payload.items || [];
-        const stories = payload.stories || payload.storiesMontage || payload.storiesImage || null;
+        const photos = payload.photos || [];
+        const stories = payload.stories || payload.storiesMontage || null;
         renderGallery(photos, stories);
       }
     }
 
-    // -----------------------
-    // Socket fallback flow (mantive o original exatamente)
-    // -----------------------
     try {
       const socket = io("https://agoraequeeuquerover-production.up.railway.app");
-
-      let currentPhotos = [];
-      let currentStoriesMontage = null;
-
       socket.on('connect', () => {
-        console.log('Socket visualizador conectado', socket.id);
         if (viewerId) socket.emit("join_viewer", { viewerId });
       });
-
       socket.on("viewer_photos_ready", (data) => {
-        console.log('📸 Dados recebidos no visualizador (socket):', data);
-        if (!data || !data.photos || !Array.isArray(data.photos)) {
-          gallery.innerHTML = "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
-          downloadAllBtn.style.display = 'none';
-          return;
-        }
-        currentPhotos = data.photos;
-        currentStoriesMontage = data.storiesMontage || data.stories || null;
-        renderGallery(currentPhotos, currentStoriesMontage);
-        if (currentPhotos.length > 0) downloadAllBtn.style.display = 'block';
-      });
-
-      // Keep a fallback message if nothing arrives
-      setTimeout(() => {
-        if ((gallery.querySelectorAll('.photo-container').length === 0) && !dataParam) {
-          gallery.innerHTML = "<div class='no-photos'>❌ Não foi possível carregar as fotos. Verifique o ID da sessão.</div>";
-        }
-      }, 5000);
-
-      socket.on('connect_error', (err) => {
-        console.warn('Visualizador socket connect_error', err);
-        // don't hide existing content; show small error if there is none
-        if (!viewerId && !dataParam) {
-          gallery.innerHTML = "<div class='no-photos'>❌ Problema ao conectar ao servidor de visualização.</div>";
-        }
+        const photos = data.photos;
+        const stories = data.storiesMontage || data.stories;
+        renderGallery(photos, stories);
       });
     } catch(e) {
-      console.warn('Erro ao inicializar socket do visualizador', e);
+      console.warn('Erro socket:', e);
     }
   </script>
 </body>
