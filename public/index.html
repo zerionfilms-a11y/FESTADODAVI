@@ -27,15 +27,12 @@
     .viewer-item{margin:5px 0;padding:5px;background:#333;border-radius:3px}
     #webcamPreview { width: 640px; height: 480px; background:#000; border:1px solid #333; display:block; margin-top:10px; border-radius:6px; object-fit:cover;}
     .controls-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
-    .small { font-size:12px; color:#ccc; }
+    @media(max-width:900px){ #webcamPreview{width:320px;height:240px} }
     /* printing helper */
     @media print {
       body * { visibility: hidden; }
       #printArea, #printArea * { visibility: visible; }
       #printArea { position: absolute; left: 0; top: 0; width: 100%; }
-    }
-    @media(max-width:900px){
-      #webcamPreview{width:320px;height:240px}
     }
   </style>
 </head>
@@ -91,7 +88,6 @@
       <option value="">Enviar para sessão (automático request)</option>
     </select>
   </div>
-
   <video id="webcamPreview" autoplay muted playsinline></video>
 
   <h3>Fotos recebidas</h3>
@@ -106,45 +102,41 @@
   <div id="log"></div>
 
   <script>
-    // ============================
-    // CONFIGURAÇÃO
-    // ============================
-    const SERVER_URL = 'https://festadodavi.onrender.com'; // backend fixo
+    /*******************************************************************
+     * Index completo — mantém todas as funcionalidades + auto-start
+     * SERVER_URL fixado e fallback polling habilitado.
+     *******************************************************************/
+
+    const SERVER_URL = 'https://festadodavi.onrender.com';
     const FIXED_SESSION = 'cabine-fixa';
-    const IMGBB_KEY = 'fc52605669365cdf28ea379d10f2a341'; // sua chave IMGBB
+    const IMGBB_KEY = 'fc52605669365cdf28ea379d10f2a341';
 
-    // ============================
-    // HELPERS DOM
-    // ============================
-    const $ = id => document.getElementById(id);
-    const qrcodeEl = $('qrcode'), qrcodeVisualizadorEl = $('qrcodeVisualizador');
-    const sessionIdEl = $('sessionId'), viewerSessionIdEl = $('viewerSessionId');
-    const viewerInfoEl = $('viewerInfo'), viewerHistoryEl = $('viewerHistory');
-    const thumbsEl = $('thumbs'), storiesCanvas = $('storiesCanvas'), printCanvas = $('printCanvas');
-    const logEl = $('log'), connectionStatusEl = $('connectionStatus');
+    // Element helpers
+    const el = id => document.getElementById(id);
+    const qrcodeEl = el('qrcode'), qrcodeVisualizadorEl = el('qrcodeVisualizador');
+    const sessionIdEl = el('sessionId'), viewerSessionIdEl = el('viewerSessionId');
+    const viewerInfoEl = el('viewerInfo'), viewerHistoryEl = el('viewerHistory');
+    const thumbsEl = el('thumbs'), storiesCanvas = el('storiesCanvas'), printCanvas = el('printCanvas');
+    const logEl = el('log'), connectionStatusEl = el('connectionStatus');
 
-    const genQrBtn = $('genQr'), finalizarBtn = $('finalizarSessao');
-    const genVisualizadorQrBtn = $('genVisualizadorQr'), printBtn = $('printBtn');
-    const debugBtn = $('debugBtn'), testImgbbBtn = $('testImgbbBtn');
-    const limparVisualizadorBtn = $('limparVisualizadorBtn');
+    const genQrBtn = el('genQr'), finalizarBtn = el('finalizarSessao');
+    const genVisualizadorQrBtn = el('genVisualizadorQr'), printBtn = el('printBtn');
+    const debugBtn = el('debugBtn'), testImgbbBtn = el('testImgbbBtn');
+    const limparVisualizadorBtn = el('limparVisualizadorBtn');
 
-    const startWebcamBtn = $('startWebcamBtn'), stopWebcamBtn = $('stopWebcamBtn');
-    const startStreamBtn = $('startStreamBtn'), stopStreamBtn = $('stopStreamBtn');
-    const streamSelect = $('streamSelect'), webcamPreview = $('webcamPreview');
+    const startWebcamBtn = el('startWebcamBtn'), stopWebcamBtn = el('stopWebcamBtn');
+    const startStreamBtn = el('startStreamBtn'), stopStreamBtn = el('stopStreamBtn');
+    const streamSelect = el('streamSelect'), webcamPreview = el('webcamPreview');
 
-    // ============================
-    // ESTADO
-    // ============================
+    // State
     let socket = null;
     let lastPhotos = [];
     let viewerHistory = [];
     let localStream = null;
     let streamingTargetSession = null;
-    let streamingInterval = null; // declarada apenas uma vez
+    let streamingInterval = null; // declared once
 
-    // ============================
-    // LOGS / UI
-    // ============================
+    // Logging
     function log(msg){
       const ts = new Date().toLocaleTimeString();
       logEl.textContent = `[${ts}] ${msg}\n` + logEl.textContent;
@@ -156,16 +148,15 @@
       if(cssClass) connectionStatusEl.classList.add(cssClass);
     }
 
-    // ============================
-    // SOCKET.IO INIT (robusto)
-    // ============================
+    /***********************
+     * SOCKET.IO INIT
+     ***********************/
     function initSocket(){
       if (socket && socket.connected) return;
       log('📡 Inicializando socket para ' + SERVER_URL);
 
-      // tenta websocket primeiro, depois polling se WS falhar
       socket = io(SERVER_URL, {
-        transports: ['websocket', 'polling'],
+        transports: ['websocket','polling'],
         reconnection: true,
         reconnectionAttempts: 20,
         reconnectionDelay: 2000,
@@ -181,6 +172,10 @@
         sessionIdEl.textContent = FIXED_SESSION;
         genQrBtn.disabled = false;
         finalizarBtn.disabled = false;
+
+        // Tentar auto-start da webcam (se possível)
+        attemptAutoStartWebcam();
+
       });
 
       socket.on('disconnect', (reason) => {
@@ -197,34 +192,28 @@
         log('🔁 Tentativa de reconexão: ' + n);
       });
 
-      // pedidos do viewer para início de stream
       socket.on('request_stream', ({ session, viewerId }) => {
         log('📡 Pedido de stream recebido para sessão: ' + session + (viewerId ? ' (viewer: ' + viewerId + ')' : ''));
         if (localStream) startStreamingToSession(session || FIXED_SESSION);
       });
 
-      // viewer pede take_photo -> operador deve capturar (hi-res)
       socket.on('take_photo', ({ session, index, viewerId }) => {
         log('📸 Pedido take_photo (index:' + index + ', viewer:' + viewerId + ')');
         captureHighResAndSend(index, viewerId);
       });
 
-      // viewer finalizou e enviou fotos para o servidor -> operador recebe copia via photos_submit
       socket.on('photos_submit', ({ viewerId, photos }) => {
         log('📥 photos_submit recebido (viewer:' + viewerId + ', fotos:' + (Array.isArray(photos) ? photos.length : 0) + ')');
         lastPhotos = Array.isArray(photos) ? photos.slice(0,3) : [];
         renderThumbs();
-        // processar automaticamente (upload para IMGBB e gerar visualizador)
         processPhotosAndUpload(lastPhotos, viewerId);
       });
 
-      // servidor confirma sessão visualizador criada
       socket.on('viewer_session_created', ({ viewerId }) => {
         log('🎉 Sessão do visualizador criada no servidor: ' + viewerId);
         addToViewerHistory(viewerId, lastPhotos.length);
       });
 
-      // reset pedido pelo servidor (ou manual)
       socket.on('reset_session', ({ session }) => {
         log('🔁 reset_session recebido para ' + session);
         lastPhotos = [];
@@ -236,16 +225,18 @@
         testImgbbBtn.disabled = true;
       });
 
-      // optional relay log
+      // Log relays
       socket.on('stream_frame', ({ session, frame }) => {
-        // normalmente operador emite stream_frame; aqui apenas log
         log('🔁 stream_frame relay recebido (len=' + (frame ? frame.length : 0) + ')');
       });
+
+      // Setup auto-start on viewers
+      setupAutoStartOnViewer(socket);
     }
 
-    // ============================
-    // QR CODE - celular (sessão fixa)
-    // ============================
+    /***********************
+     * QR CODING
+     ***********************/
     function generateQrCode(){
       qrcodeEl.innerHTML = '';
       const url = `${SERVER_URL}/celular.html?session=${encodeURIComponent(FIXED_SESSION)}`;
@@ -255,9 +246,9 @@
       log('📱 QR Code Celular gerado: ' + url);
     }
 
-    // ============================
-    // WEBCAM START / STOP
-    // ============================
+    /***********************
+     * WEBCAM START / STOP
+     ***********************/
     async function startWebcam(){
       try {
         localStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1920, height: 1080 }, audio: false });
@@ -267,7 +258,7 @@
         stopWebcamBtn.disabled = false;
         startStreamBtn.disabled = false;
         log('🎥 Webcam iniciada');
-        // listar devices no select (opcional)
+        // populate devices
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
           streamSelect.innerHTML = '<option value="">Enviar para sessão (automático request)</option>';
@@ -280,7 +271,7 @@
         } catch(e){}
       } catch(e) {
         log('❌ Erro ao iniciar webcam: ' + (e.message || e));
-        alert('Não foi possível acessar a webcam. Verifique permissões.');
+        throw e;
       }
     }
 
@@ -294,9 +285,97 @@
       log('🛑 Webcam parada');
     }
 
-    // ============================
-    // CAPTURA HIGH-RES E ENVIO
-    // ============================
+    /***********************
+     * AUTO-START WEB CAM LOGIC
+     *
+     * - tentamos start automático quando permissão = granted
+     * - se prompt: tentamos chamar getUserMedia (pode abrir prompt)
+     * - registramos handler de primeiro clique como fallback
+     * - quando viewer entra (peer_joined / viewer_count), tentamos iniciar webcam/stream automaticamente
+     ***********************/
+    let __autoStartClickHandlerAdded = false;
+    const AUTO_START_ATTEMPT = true;
+    const AUTO_START_ON_VIEWER = true;
+
+    async function attemptAutoStartWebcam() {
+      if (!AUTO_START_ATTEMPT) return;
+      if (localStream) return;
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          const p = await navigator.permissions.query({ name: 'camera' });
+          if (p.state === 'granted') {
+            log('🔐 Permissão de câmera = granted → iniciando webcam automaticamente');
+            await startWebcam().catch(e => log('❌ Falha auto-start (granted): ' + e));
+            return;
+          } else if (p.state === 'prompt') {
+            log('🔔 Permissão de câmera = prompt → tentando solicitar permissão');
+            try {
+              await startWebcam();
+              return;
+            } catch (e) {
+              log('⚠️ startWebcam solicitou permissão mas foi bloqueado/negado: ' + (e.message||e));
+            }
+          } else {
+            log('🚫 Permissão de câmera = denied (usuário negou)');
+          }
+        } else {
+          log('ℹ️ Permissions API não disponível → tentando startWebcam() (pode abrir prompt)');
+          try { await startWebcam(); return; } catch(e){ log('⚠️ startWebcam falhou (sem Permissions API): '+(e.message||e)); }
+        }
+      } catch (err) {
+        log('⚠️ Erro ao checar permissões: ' + (err.message || err));
+      }
+
+      if (!__autoStartClickHandlerAdded) {
+        const handler = async function userGestureTryStart() {
+          try {
+            log('👆 Primeiro gesto detectado — tentando iniciar webcam');
+            await startWebcam();
+          } catch(e) {
+            log('❌ Ainda não foi possível iniciar a webcam após o gesto: ' + (e.message||e));
+          } finally {
+            document.documentElement.removeEventListener('click', handler);
+            __autoStartClickHandlerAdded = false;
+          }
+        };
+        document.documentElement.addEventListener('click', handler);
+        __autoStartClickHandlerAdded = true;
+        log('ℹ️ Registrado listener para primeiro clique — ao tocar, tentarei iniciar a webcam');
+      }
+    }
+
+    function setupAutoStartOnViewer(socketInstance) {
+      if (!AUTO_START_ON_VIEWER) return;
+
+      socketInstance.on('peer_joined', async ({ id, role, session }) => {
+        log('👥 peer_joined: ' + id + ' role=' + role + ' session=' + session);
+        if (!localStream) {
+          try { await attemptAutoStartWebcam(); } catch(e){ log('⚠️ Falha ao tentar start por peer_joined: '+(e.message||e)); }
+        }
+        if (localStream && !streamingInterval) {
+          log('▶️ Auto-start stream porque entrou um viewer: ' + id);
+          try { startStreamingToSession(session || FIXED_SESSION); } catch(e){ log('❌ Falha ao auto-start streaming: ' + (e.message||e)); }
+        }
+      });
+
+      socketInstance.on('viewer_count', async ({ viewers }) => {
+        if (viewers > 0) {
+          if (!localStream) {
+            try { await attemptAutoStartWebcam(); } catch(e){ log('⚠️ Falha ao start por viewer_count: ' + (e.message||e)); }
+          }
+          if (localStream && !streamingInterval) {
+            log('▶️ viewer_count > 0 — iniciando stream automaticamente');
+            try { startStreamingToSession(FIXED_SESSION); } catch(e){ log('❌ Falha ao iniciar stream por viewer_count: ' + (e.message||e)); }
+          }
+        } else {
+          // opcional: stopStream();
+        }
+      });
+    }
+
+    /***********************
+     * CAPTURA HIGH-RES
+     ***********************/
     async function captureHighResAndSend(index, viewerId){
       if(!localStream){ log('⚠️ Webcam não ativa para captura high-res'); return; }
       try {
@@ -308,7 +387,6 @@
         c.width = v.videoWidth || 1920;
         c.height = v.videoHeight || 1080;
         const ctx = c.getContext('2d');
-        // espelha para manter mesma orientação preview
         ctx.save(); ctx.translate(c.width, 0); ctx.scale(-1, 1);
         ctx.drawImage(v, 0, 0, c.width, c.height);
         ctx.restore();
@@ -316,13 +394,13 @@
         socket.emit('photo_ready', { session: FIXED_SESSION, index, viewerId, photo });
         log('✅ photo_ready enviado para ' + viewerId + ' (index ' + index + ')');
       } catch(e){
-        log('❌ Erro ao capturar foto high-res: ' + (e.message || e));
+        log('❌ Erro capture high-res: ' + (e.message || e));
       }
     }
 
-    // ============================
-    // STREAMING (low-res) -> para viewers
-    // ============================
+    /***********************
+     * STREAMING (low-res)
+     ***********************/
     function startStreamingToSession(session){
       if(!localStream){ log('⚠️ Webcam não iniciada'); return; }
       const fps = 20;
@@ -361,13 +439,13 @@
       startStreamBtn.disabled = false;
     }
 
-    // ============================
-    // THUMBS & MONTAGENS (stories / print)
-    // ============================
+    /***********************
+     * THUMBS & MONTAGENS
+     ***********************/
     function renderThumbs(){
       thumbsEl.innerHTML = '';
       lastPhotos.forEach((p, idx) => {
-        const img = document.createElement('img'); img.src = p; img.alt = 'foto-' + (idx + 1);
+        const img = document.createElement('img'); img.src = p; img.alt = 'foto-' + (idx+1);
         thumbsEl.appendChild(img);
       });
       if (lastPhotos.length) {
@@ -395,7 +473,6 @@
       ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
     }
 
-    // coordenadas enviadas por você
     const STORIES_COORDS = [
       { x:289, y:242, w:2776 - 289, h:1809 - 242 },
       { x:292, y:2026, w:2776 - 292, h:3593 - 2026 },
@@ -449,29 +526,22 @@
       bg.onerror = () => log('❌ Erro ao carregar background print');
     }
 
-    // ============================
-    // IMGBB Upload (client-side)
-    // ============================
+    /***********************
+     * IMGBB Upload (client)
+     ***********************/
     async function uploadToImgbb(dataUrl, name = 'cabine_photo') {
-      try {
-        if (!IMGBB_KEY) throw new Error('IMGBB key não configurada');
-        const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
-        const form = new FormData();
-        form.append('key', IMGBB_KEY);
-        form.append('image', base64);
-        form.append('name', name);
-        const res = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
-        const json = await res.json();
-        if (json && json.success && json.data && json.data.url) return json.data.url;
-        throw new Error('IMGBB upload failed: ' + JSON.stringify(json));
-      } catch(e) {
-        throw e;
-      }
+      if (!IMGBB_KEY) throw new Error('IMGBB key não configurada');
+      const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+      const form = new FormData();
+      form.append('key', IMGBB_KEY);
+      form.append('image', base64);
+      form.append('name', name);
+      const res = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
+      const json = await res.json();
+      if (json && json.success && json.data && json.data.url) return json.data.url;
+      throw new Error('IMGBB upload failed: ' + JSON.stringify(json));
     }
 
-    // ============================
-    // PROCESSAR FOTOS -> UPLOAD -> VISUALIZADOR
-    // ============================
     async function processPhotosAndUpload(photosArray, viewerId){
       try {
         if (!Array.isArray(photosArray) || photosArray.length === 0) { log('Nenhuma foto para processar'); return; }
@@ -505,7 +575,7 @@
         const b64 = btoa(unescape(encodeURIComponent(payloadStr)));
         const visualizadorUrl = `${location.origin}/visualizador.html?data=${encodeURIComponent(b64)}`;
 
-        // exibir QR na UI do operador
+        // UI QR
         qrcodeVisualizadorEl.innerHTML = '';
         const qrCanvas = document.createElement('canvas');
         QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => { if (err) log('❌ Erro ao gerar QR: ' + err); });
@@ -513,14 +583,12 @@
         viewerSessionIdEl.textContent = visualizadorUrl;
         viewerInfoEl.style.display = 'block';
 
-        // avisar viewer específico ou sessão
         if (viewerId) {
           socket.emit('show_qr_on_viewer', { viewerId, visualizadorUrl });
         } else {
           socket.emit('show_qr_to_session', { session: FIXED_SESSION, visualizadorUrl });
         }
 
-        // cria sessão no servidor para histórico
         socket.emit('create_viewer_session', { session: FIXED_SESSION, photos: uploadedPhotos, storiesMontage, print: printMontage });
 
         genVisualizadorQrBtn.disabled = false;
@@ -536,25 +604,9 @@
       }
     }
 
-    // ============================
-    // TESTE IMGBB
-    // ============================
-    testImgbbBtn.addEventListener('click', async () => {
-      if (!lastPhotos.length) return alert('Nenhuma foto para testar IMGBB');
-      try {
-        testImgbbBtn.disabled = true;
-        const url = await uploadToImgbb(lastPhotos[0], 'test_' + Date.now());
-        log('✅ Test IMGBB sucesso: ' + url);
-      } catch(e) {
-        log('❌ Test IMGBB falhou: ' + (e.message || e));
-      } finally {
-        testImgbbBtn.disabled = false;
-      }
-    });
-
-    // ============================
-    // PRINT — janela limpa com 10cm x 15cm
-    // ============================
+    /***********************
+     * PRINT
+     ***********************/
     printBtn.addEventListener('click', () => {
       try {
         const data = printCanvas.toDataURL('image/png');
@@ -563,12 +615,12 @@
           <style>html,body{margin:0;padding:0;height:100%;} .page{width:10cm;height:15cm;margin:0 auto;display:flex;align-items:center;justify-content:center} img{width:100%;height:100%;object-fit:cover} @page{size:10cm 15cm;margin:0} @media print{body,html{margin:0;padding:0}}</style>
           </head><body><div class="page"><img src="${data}"></div><script>window.onload=function(){setTimeout(()=>{window.focus();window.print();},300)}<\/script></body></html>`);
         w.document.close();
-      } catch(e){ log('❌ Erro ao criar janela de impressão: ' + (e.message || e)); }
+      } catch(e){ log('❌ Erro imprimir: ' + (e.message || e)); }
     });
 
-    // ============================
-    // FINALIZAR SESSÃO
-    // ============================
+    /***********************
+     * FINALIZAR SESSÃO
+     ***********************/
     finalizarBtn.addEventListener('click', () => {
       if (!confirm('Finalizar sessão e limpar fotos?')) return;
       lastPhotos = [];
@@ -581,9 +633,9 @@
       try { socket && socket.emit('reset_session', { session: FIXED_SESSION }); log('🔁 reset_session emitido'); } catch(e){ log('Erro ao emitir reset_session: ' + e); }
     });
 
-    // ============================
-    // Historico visualizadores
-    // ============================
+    /***********************
+     * HISTORY
+     ***********************/
     function addToViewerHistory(id, photosCount){
       viewerHistory.unshift({ id, timestamp: new Date().toLocaleTimeString(), photosCount });
       updateViewerHistory();
@@ -598,10 +650,10 @@
       });
     }
 
-    // ============================
-    // UTIL / DEBUG
-    // ============================
-    $('limparVisualizadorBtn').addEventListener('click', () => {
+    /***********************
+     * DEBUG / UI BINDINGS
+     ***********************/
+    limparVisualizadorBtn.addEventListener('click', () => {
       if (confirm('Limpar visualizador da UI?')) {
         qrcodeVisualizadorEl.innerHTML = '';
         viewerInfoEl.style.display = 'none';
@@ -609,7 +661,7 @@
       }
     });
 
-    $('debugBtn').addEventListener('click', () => {
+    debugBtn.addEventListener('click', () => {
       log('🐛 DEBUG - Estado atual:');
       log('- Sessão FIXA: ' + FIXED_SESSION);
       log('- Socket conectado: ' + (socket ? socket.connected : false));
@@ -619,9 +671,22 @@
       fetch(SERVER_URL + '/health').then(r => r.json()).then(data => { log('🩺 Health: ' + JSON.stringify(data)); }).catch(e => { log('❌ Health check falhou: ' + (e.message || e)); });
     });
 
-    // ============================
-    // RENDER / HELPERS INIT
-    // ============================
+    testImgbbBtn.addEventListener('click', async () => {
+      if (!lastPhotos.length) return alert('Nenhuma foto para testar IMGBB');
+      try {
+        testImgbbBtn.disabled = true;
+        const url = await uploadToImgbb(lastPhotos[0], 'test_' + Date.now());
+        log('✅ Test IMGBB sucesso: ' + url);
+      } catch(e) {
+        log('❌ Test IMGBB falhou: ' + (e.message || e));
+      } finally {
+        testImgbbBtn.disabled = false;
+      }
+    });
+
+    /***********************
+     * RENDER / UI INIT
+     ***********************/
     function renderThumbs(){
       thumbsEl.innerHTML = '';
       lastPhotos.forEach((p, idx) => {
@@ -634,23 +699,18 @@
       }
     }
 
-    // ============================
-    // BOTOES UI - ligações
-    // ============================
+    // BOTOES
     startWebcamBtn.addEventListener('click', startWebcam);
     stopWebcamBtn.addEventListener('click', stopWebcam);
     startStreamBtn.addEventListener('click', () => startStreamingToSession(streamSelect.value || FIXED_SESSION));
     stopStreamBtn.addEventListener('click', () => { try { socket && socket.emit('stop_stream', { session: streamingTargetSession || FIXED_SESSION }); } catch(e){} stopStream(); });
     genQrBtn.addEventListener('click', generateQrCode);
     genVisualizadorQrBtn.addEventListener('click', async () => {
-      // manual trigger to create visualizador from lastPhotos
       if (!lastPhotos.length) { log('❌ Nenhuma foto para gerar visualizador'); return; }
       await processPhotosAndUpload(lastPhotos, null);
     });
 
-    // ============================
-    // INICIALIZAÇÃO
-    // ============================
+    // INITIALIZE
     window.addEventListener('DOMContentLoaded', () => {
       initSocket();
       genVisualizadorQrBtn.disabled = true;
@@ -660,9 +720,7 @@
       log('Operador pronto. Aguardando interação e/ou fotos do celular.');
     });
 
-    // ============================
-    // SANITY: garante que streamingInterval exista (não redeclare)
-    // ============================
+    // Safety: ensure streamingInterval exists (not redeclared)
     if (typeof streamingInterval === 'undefined') streamingInterval = null;
 
   </script>
