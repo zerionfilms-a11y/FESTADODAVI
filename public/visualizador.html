@@ -190,6 +190,18 @@
       padding: 20px;
     }
     
+    .error-box {
+      font-size: 14px;
+      color: #c33;
+      background: #fff6f6;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(200,0,0,0.08);
+      margin-bottom: 12px;
+      max-width: 600px;
+      text-align: center;
+    }
+    
     @media (max-width: 480px) {
       body {
         padding: 10px;
@@ -230,6 +242,8 @@
     </div>
   </div>
 
+  <div id="errorContainer" style="width:100%;max-width:700px;"></div>
+
   <button id="downloadAllBtn" class="download-all-btn" style="display:none;">
     📥 Download Todas as Fotos
   </button>
@@ -241,21 +255,24 @@
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
     // Preservei 100% da lógica original do seu visualizador e acrescentei
-    // suporte adicional para ?data=<base64> (payload gerado pelo index.html).
-    // Se data estiver presente, ele decodifica e renderiza imediatamente.
-    // Caso contrário, mantém o fluxo via socket.io exatamente como antes.
-
+    // suporte adicional e tolerâncias ao parâmetro `data`.
     const params = new URLSearchParams(window.location.search);
     const viewerId = params.get("viewerId");
-    const dataParam = params.get("data"); // se o index enviar payload base64, usamos ele
+    const dataParam = params.get("data"); // opcional: payload base64 / json
     const gallery = document.getElementById("gallery");
     const downloadAllBtn = document.getElementById("downloadAllBtn");
     const viewerIdDisplay = document.getElementById("viewerIdDisplay");
+    const errorContainer = document.getElementById('errorContainer');
 
-    // Mantive exibição do viewerId igual ao original
-    if (viewerId) viewerIdDisplay.textContent = viewerId;
+    if (viewerId) {
+      viewerIdDisplay.textContent = viewerId;
+    }
 
-    // Função de download robusta (mantida igual)
+    function showError(msg) {
+      errorContainer.innerHTML = `<div class="error-box">❌ ${String(msg)}</div>`;
+    }
+
+    // Função de download robusta (mantida)
     async function downloadImage(dataUrl, filename) {
       try {
         let blob;
@@ -346,9 +363,9 @@
       downloadAllBtn.style.display = 'block';
     }
 
-    // handler do botão baixar tudo (mantido)
     downloadAllBtn.addEventListener('click', () => {
-      const imgs = Array.from(gallery.querySelectorAll('img')).filter(i => !i.classList.contains('stories-img'));
+      const imgs = Array.from(gallery.querySelectorAll('.photo-container img'));
+      if (imgs.length === 0) return;
       imgs.forEach((img, idx) => {
         setTimeout(() => {
           downloadImage(img.src, `foto-${idx+1}.jpg`);
@@ -357,93 +374,131 @@
       alert('📥 Download de todas as fotos iniciado!');
     });
 
-    // --- Função para decodificar payload base64 vindo do index ---
-    function decodeBase64Payload(param){
+    // -----------------------
+    // Decodificador tolerante para `data`:
+    // Aceita:
+    // - JSON direto (uri-encoded ou não)
+    // - base64(JSON) (URI-encoded or raw)
+    // -----------------------
+    function tryParseJSON(text) {
+      try { return JSON.parse(text); } catch(e){ return null; }
+    }
+
+    function decodeBase64ToUtf8(b64) {
+      // atob -> binary string (latin1) -> decodeURIComponent(escape(...)) to get UTF-8
       try {
-        // param é a string base64 já URI-encoded possivelmente
-        const b64 = decodeURIComponent(param);
-        // primeira tentativa: atob direto
+        const binary = atob(b64);
         try {
-          const json = atob(b64);
-          return JSON.parse(json);
-        } catch(e) {
-          // segunda tentativa: atob e decodeURIComponent(escape(...))
-          try {
-            const step = atob(b64);
-            const decoded = decodeURIComponent(escape(step));
-            return JSON.parse(decoded);
-          } catch(err) {
-            console.warn('decode fallback failed', err);
-            return null;
-          }
+          // decode utf8
+          return decodeURIComponent(escape(binary));
+        } catch (e) {
+          // If escape/decodeURIComponent fails, return binary as-is
+          return binary;
         }
       } catch(e) {
-        console.warn('decodeBase64Payload fail', e);
         return null;
       }
     }
 
-    // Se houver parâmetro data (base64) - usamos ele e renderizamos
+    function decodeDataParam(param) {
+      if (!param) return null;
+      // 1) try raw JSON (maybe URL encoded)
+      try {
+        const maybe = decodeURIComponent(param);
+        const parsed = tryParseJSON(maybe);
+        if (parsed) return parsed;
+      } catch (e) { /* ignore */ }
+
+      // 2) try raw JSON without decodeURIComponent
+      try {
+        const parsed2 = tryParseJSON(param);
+        if (parsed2) return parsed2;
+      } catch (e) {}
+
+      // 3) try base64 decode (URI-encoded or plain)
+      // remove possible whitespace
+      const p = param.replace(/\s+/g, '');
+      // attempt URI-decoded base64 then atob
+      try {
+        const uriDecoded = decodeURIComponent(p);
+        const maybeJson = decodeBase64ToUtf8(uriDecoded);
+        if (maybeJson) {
+          const parsed3 = tryParseJSON(maybeJson);
+          if (parsed3) return parsed3;
+        }
+      } catch(e){ /* ignore */ }
+
+      // attempt plain base64
+      try {
+        const maybeJson2 = decodeBase64ToUtf8(p);
+        if (maybeJson2) {
+          const parsed4 = tryParseJSON(maybeJson2);
+          if (parsed4) return parsed4;
+        }
+      } catch(e){ /* ignore */ }
+
+      // nothing worked
+      return null;
+    }
+
+    // If dataParam exists, try decode and render immediately (this handles index sending payload)
     if (dataParam) {
-      const payload = decodeBase64Payload(dataParam);
+      const payload = decodeDataParam(dataParam);
       if (!payload) {
+        showError('Dados inválidos no parâmetro data. Tente reenviar a sessão pelo operador.');
         gallery.innerHTML = "<div class='no-photos'>❌ Dados inválidos no parâmetro data.</div>";
       } else {
-        // payload esperado: { photos: [url1, url2, ...], stories: url, print: url }
-        const photos = payload.photos || [];
-        const stories = payload.stories || payload.storiesMontage || null;
+        // payload conventions: { photos: [...], stories: 'url' } or { photos: [...], storiesMontage: 'url' }
+        const photos = payload.photos || payload.photosData || payload.items || [];
+        const stories = payload.stories || payload.storiesMontage || payload.storiesImage || null;
         renderGallery(photos, stories);
-        // não precisamos depender do socket para mostrar as imagens quando data param existe,
-        // mas não removi a lógica do socket abaixo — se viewerId existir, o socket também se conecta.
       }
     }
 
-    // --- Socket.IO flow (mantive seu código intacto) ---
-    // Conectar ao servidor que você já usava (mantive exatamente)
-    const socket = io("https://agoraequeeuquerover-production.up.railway.app");
+    // -----------------------
+    // Socket fallback flow (mantive o original exatamente)
+    // -----------------------
+    try {
+      const socket = io("https://agoraequeeuquerover-production.up.railway.app");
 
-    let currentPhotos = [];
-    let currentStoriesMontage = null;
+      let currentPhotos = [];
+      let currentStoriesMontage = null;
 
-    // Se tiver viewerId, mantém o comportamento original: emite join_viewer
-    if (viewerId) {
       socket.on('connect', () => {
         console.log('Socket visualizador conectado', socket.id);
-        socket.emit("join_viewer", { viewerId });
+        if (viewerId) socket.emit("join_viewer", { viewerId });
       });
-    } else {
-      socket.on('connect', () => {
-        console.log('Socket visualizador conectado (sem viewerId) ', socket.id);
+
+      socket.on("viewer_photos_ready", (data) => {
+        console.log('📸 Dados recebidos no visualizador (socket):', data);
+        if (!data || !data.photos || !Array.isArray(data.photos)) {
+          gallery.innerHTML = "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
+          downloadAllBtn.style.display = 'none';
+          return;
+        }
+        currentPhotos = data.photos;
+        currentStoriesMontage = data.storiesMontage || data.stories || null;
+        renderGallery(currentPhotos, currentStoriesMontage);
+        if (currentPhotos.length > 0) downloadAllBtn.style.display = 'block';
       });
+
+      // Keep a fallback message if nothing arrives
+      setTimeout(() => {
+        if ((gallery.querySelectorAll('.photo-container').length === 0) && !dataParam) {
+          gallery.innerHTML = "<div class='no-photos'>❌ Não foi possível carregar as fotos. Verifique o ID da sessão.</div>";
+        }
+      }, 5000);
+
+      socket.on('connect_error', (err) => {
+        console.warn('Visualizador socket connect_error', err);
+        // don't hide existing content; show small error if there is none
+        if (!viewerId && !dataParam) {
+          gallery.innerHTML = "<div class='no-photos'>❌ Problema ao conectar ao servidor de visualização.</div>";
+        }
+      });
+    } catch(e) {
+      console.warn('Erro ao inicializar socket do visualizador', e);
     }
-
-    socket.on("viewer_photos_ready", (data) => {
-      console.log('📸 Dados recebidos no visualizador (socket):', data);
-      
-      if (!data || !data.photos || !Array.isArray(data.photos)) {
-        gallery.innerHTML = "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
-        downloadAllBtn.style.display = 'none';
-        return;
-      }
-      
-      currentPhotos = data.photos;
-      currentStoriesMontage = data.storiesMontage || data.stories || null;
-      
-      // Se dataParam já tinha mostrado algo, decidimos sobrescrever (com dados push do server).
-      // Isso mantém compatibilidade com ambos os fluxos.
-      renderGallery(currentPhotos, currentStoriesMontage);
-      
-      if (currentPhotos.length > 0) {
-        downloadAllBtn.style.display = 'block';
-      }
-    });
-
-    // fallback: se nada aparecer em alguns segundos, mostra msg (mantido)
-    setTimeout(() => {
-      if ((gallery.querySelectorAll('.photo-container').length === 0) && !dataParam) {
-        gallery.innerHTML = "<div class='no-photos'>❌ Não foi possível carregar as fotos. Verifique o ID da sessão.</div>";
-      }
-    }, 5000);
   </script>
 </body>
 </html>
