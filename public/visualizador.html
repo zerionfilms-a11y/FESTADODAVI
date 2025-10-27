@@ -11,6 +11,7 @@
       padding: 0;
     }
     
+    /* Paleta: marca = #b07e09, texto escuro = #222222, fundo claro */
     body { 
       margin: 0; 
       display: flex; 
@@ -36,6 +37,7 @@
       max-width: 500px;
     }
     
+    /* Logo maior e acima do texto */
     .session-info img.logo1{
       height:80px;
       width:auto;
@@ -58,7 +60,7 @@
     }
     
     .expiry-info {
-      background: rgba(176,126,9,0.08);
+      background: rgba(176,126,9,0.08); /* marca translúcida */
       padding: 12px;
       border-radius: 12px;
       margin: 15px 0;
@@ -104,6 +106,7 @@
       width: 100%;
     }
     
+    /* MANTIVE A MOLDURA PRONTO-PRÓ-INSTA exata (gradient intacto) */
     .stories-container {
       background: linear-gradient(135deg, #833AB4, #C13584, #E1306C, #FD1D1D);
       padding: 25px;
@@ -138,14 +141,15 @@
       border-radius: 10px; 
       cursor: pointer; 
       font-size: 16px; 
-      font-weight: bold; 
+      font-weight: bold;
       width: 100%;
       max-width: 300px;
       box-shadow: 0 3px 6px rgba(176,126,9,0.15);
     }
     
     .instagram-btn {
-      background: linear-gradient(135deg, #405DE6, #5851DB, #833AB4, #C13584, #E1306C, #FD1D1D);
+      background: linear-gradient(135deg, #405DE6, #5851DB, #833AB4, #C13584, 
+      #E1306C, #FD1D1D);
       color: white;
       padding: 18px 25px;
       border: none;
@@ -187,97 +191,104 @@
       padding: 20px;
     }
     
-    .error-box {
-      font-size: 14px;
-      color: #c33;
-      background: #fff6f6;
-      padding: 10px;
-      border-radius: 8px;
-      border: 1px solid rgba(200,0,0,0.08);
-      margin-bottom: 12px;
-      max-width: 600px;
-      text-align: center;
+    @media (max-width: 480px) {
+      body {
+        padding: 10px;
+      }
+      
+      .session-info {
+        padding: 15px;
+        margin-bottom: 15px;
+      }
+      
+      .session-info h1 {
+        font-size: 24px;
+      }
+      
+      .download-all-btn, .instagram-btn {
+        padding: 16px 20px;
+        font-size: 16px;
+      }
+      
+      .photo-container {
+        padding: 15px;
+      }
+      
+      img {
+        max-width: 100%;
+      }
     }
   </style>
 </head>
 <body>
   <div class="session-info">
+    <!-- logo maior e em cima do texto -->
     <img src="logo1.png" alt="Logo" class="logo1" onerror="this.style.display='none'">
     <h1>📸 Suas Fotos</h1>
     <p><strong>Sessão:</strong> <span id="viewerIdDisplay">—</span></p>
-    <div class="expiry-info">⏰ Estas fotos ficarão disponíveis por 7 dias</div>
+    <div class="expiry-info">
+      ⏰ Estas fotos ficarão disponíveis por 7 dias
+    </div>
   </div>
 
-  <div id="errorContainer" style="width:100%;max-width:700px;"></div>
+  <button id="downloadAllBtn" class="download-all-btn" style="display:none;">
+    📥 Download Todas as Fotos
+  </button>
 
-  <button id="downloadAllBtn" class="download-all-btn" style="display:none;">📥 Download Todas as Fotos</button>
-
-  <div id="gallery" class="gallery"><div class="loading">🔄 Carregando suas fotos...</div></div>
+  <div id="gallery" class="gallery">
+    <div class="loading">🔄 Carregando suas fotos...</div>
+  </div>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
     const viewerId = params.get("viewerId");
-    const dataParam = params.get("data");
     const gallery = document.getElementById("gallery");
     const downloadAllBtn = document.getElementById("downloadAllBtn");
     const viewerIdDisplay = document.getElementById("viewerIdDisplay");
-    const errorContainer = document.getElementById('errorContainer');
-    if (viewerId) viewerIdDisplay.textContent = viewerId;
+    
+    const socket = io("https://agoraequeeuquerover-production.up.railway.app");
 
-    function showError(msg) {
-      errorContainer.innerHTML = `<div class="error-box">❌ ${String(msg)}</div>`;
+    // Mostrar viewerId atual
+    if (viewerId) {
+      viewerIdDisplay.textContent = viewerId;
+      
+      // Conectar ao visualizador
+      socket.emit("join_viewer", { viewerId });
+    } else {
+      gallery.innerHTML = "<div class='no-photos'>❌ ID do visualizador não encontrado na URL.</div>";
     }
 
-    async function downloadImage(dataUrl, filename) {
-      try {
-        const res = await fetch(dataUrl);
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.warn('Erro no downloadImage:', err);
-        window.open(dataUrl, '_blank');
+    let currentPhotos = [];
+    let currentStoriesMontage = null;
+
+    // Receber dados do visualizador
+    socket.on("viewer_photos_ready", (data) => {
+      console.log('📸 Dados recebidos no visualizador:', data);
+      
+      if (!data || !data.photos || !Array.isArray(data.photos)) {
+        gallery.innerHTML = "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
+        return;
       }
-    }
-
-    // Função nova: tenta carregar imagem grande sem ficar preta
-    async function safeLoadImage(src) {
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img.src);
-        img.onerror = async () => {
-          try {
-            if (src.startsWith("data:")) {
-              const image = new Image();
-              image.onload = () => {
-                const canvas = document.createElement("canvas");
-                const ratio = 1200 / image.width;
-                canvas.width = 1200;
-                canvas.height = image.height * ratio;
-                const ctx = canvas.getContext("2d");
-                ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-                resolve(canvas.toDataURL("image/jpeg", 0.85));
-              };
-              image.onerror = () => reject("Falha ao reduzir imagem.");
-              image.src = src;
-            } else reject("Erro ao carregar imagem.");
-          } catch (e) {
-            reject(e);
-          }
-        };
-        img.src = src;
-      });
-    }
+      
+      currentPhotos = data.photos;
+      currentStoriesMontage = data.storiesMontage;
+      
+      renderGallery(currentPhotos, currentStoriesMontage);
+      
+      if (currentPhotos.length > 0) {
+        downloadAllBtn.style.display = 'block';
+      }
+    });
 
     function renderGallery(photos, storiesMontage) {
       gallery.innerHTML = '';
+
+      // Adicionar a moldura do stories se existir (mantive esse bloco igual)
       if (storiesMontage) {
         const storiesContainer = document.createElement("div");
         storiesContainer.className = "photo-container stories-container";
+
         const storiesTitle = document.createElement("div");
         storiesTitle.className = "stories-title";
         storiesTitle.innerHTML = "📱 Pronto para o Instagram";
@@ -286,100 +297,120 @@
         const storiesImg = document.createElement("img");
         storiesImg.alt = "Pronto para o Instagram";
         storiesImg.loading = "lazy";
-
-        safeLoadImage(storiesMontage).then(finalSrc => {
-          storiesImg.src = finalSrc;
-        }).catch(() => {
+        storiesImg.decoding = "async";
+        storiesImg.onerror = function() {
+          const errMsg = document.createElement("div");
+          errMsg.className = "no-photos";
+          errMsg.textContent = "❌ Não foi possível carregar a imagem do Stories.";
+          storiesContainer.innerHTML = "";
+          storiesContainer.appendChild(errMsg);
+        };
+        if (typeof storiesMontage === 'string' && storiesMontage.startsWith('data:')) {
+          fetch(storiesMontage)
+            .then(res => res.blob())
+            .then(blob => {
+              const url = URL.createObjectURL(blob);
+              storiesImg.src = url;
+            })
+            .catch(err => {
+              console.error('Erro ao carregar storiesMontage:', err);
+            });
+        } else {
           storiesImg.src = storiesMontage;
-        });
+        }
 
         const instagramBtn = document.createElement("button");
         instagramBtn.className = "instagram-btn";
         instagramBtn.innerHTML = `
-          <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png" alt="Instagram">
+          <img 
+src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png" 
+alt="Instagram">
           Baixar Pronto pro Instagram
         `;
-        instagramBtn.onclick = () => downloadImage(storiesImg.src, `pronto-instagram-${viewerId || 'v'}.jpg`);
+        // agora chama a função de download robusta
+        instagramBtn.onclick = function() {
+          downloadImage(storiesMontage, `pronto-instagram-${viewerId}.jpg`);
+        };
+
         storiesContainer.appendChild(storiesImg);
         storiesContainer.appendChild(instagramBtn);
         gallery.appendChild(storiesContainer);
       }
 
-      if (!photos || photos.length === 0) {
-        gallery.innerHTML += "<div class='no-photos'>📷 Nenhuma foto disponível no momento.</div>";
-        downloadAllBtn.style.display = 'none';
-        return;
-      }
-
+      // Adicionar as fotos individuais
       photos.forEach((photoData, index) => {
         const container = document.createElement("div");
         container.className = "photo-container";
+
         const img = document.createElement("img");
         img.src = photoData;
         img.alt = `Foto ${index + 1}`;
         img.loading = "lazy";
+        img.decoding = "async";
+        img.onerror = function() { this.style.display = 'none'; };
+
         const downloadBtn = document.createElement("button");
         downloadBtn.className = "download-btn";
         downloadBtn.textContent = `📥 Download Foto ${index + 1}`;
-        downloadBtn.onclick = () => downloadImage(photoData, `foto-${index + 1}.jpg`);
+        downloadBtn.onclick = function() {
+          downloadImage(photoData, `foto-${index + 1}.jpg`);
+        };
+
         container.appendChild(img);
         container.appendChild(downloadBtn);
         gallery.appendChild(container);
       });
-      downloadAllBtn.style.display = 'block';
     }
 
+    // Download de todas as fotos
     downloadAllBtn.addEventListener('click', () => {
-      const imgs = Array.from(gallery.querySelectorAll('.photo-container img'));
-      imgs.forEach((img, idx) => {
-        setTimeout(() => downloadImage(img.src, `foto-${idx+1}.jpg`), idx * 300);
+      if (currentPhotos.length === 0) return;
+      
+      currentPhotos.forEach((photoData, index) => {
+        setTimeout(() => {
+          downloadImage(photoData, `foto-${index + 1}.jpg`);
+        }, index * 300);
       });
+      
       alert('📥 Download de todas as fotos iniciado!');
     });
 
-    function decodeBase64ToUtf8(b64) {
+    // Função para forçar download — robusta para data:URI e URLs remotas
+    async function downloadImage(dataUrl, filename) {
       try {
-        const binary = atob(b64);
-        return decodeURIComponent(escape(binary));
-      } catch(e) { return null; }
-    }
+        let blob;
+        // data: URI -> fetch it directly works in modern browsers
+        if (typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
+          const res = await fetch(dataUrl);
+          blob = await res.blob();
+        } else {
+          // remote URL: fetch as blob (may fail if the server disallows CORS)
+          const res = await fetch(dataUrl, { mode: 'cors' });
+          if (!res.ok) throw new Error('Network response was not ok: ' + res.status);
+          blob = await res.blob();
+        }
 
-    function decodeDataParam(param) {
-      try {
-        const maybe = decodeURIComponent(param);
-        return JSON.parse(maybe);
-      } catch {}
-      try {
-        const decoded = decodeBase64ToUtf8(param);
-        if (decoded) return JSON.parse(decoded);
-      } catch {}
-      return null;
-    }
-
-    if (dataParam) {
-      const payload = decodeDataParam(dataParam);
-      if (!payload) {
-        showError('❌ Dados inválidos no parâmetro data.');
-      } else {
-        const photos = payload.photos || [];
-        const stories = payload.stories || payload.storiesMontage || null;
-        renderGallery(photos, stories);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.warn('downloadImage fallback, abrindo em nova aba por segurança', err);
+        // fallback: abre a imagem em nova aba para o usuário salvar manualmente
+        window.open(dataUrl, '_blank');
       }
     }
 
-    try {
-      const socket = io("https://agoraequeeuquerover-production.up.railway.app");
-      socket.on('connect', () => {
-        if (viewerId) socket.emit("join_viewer", { viewerId });
-      });
-      socket.on("viewer_photos_ready", (data) => {
-        const photos = data.photos;
-        const stories = data.storiesMontage || data.stories;
-        renderGallery(photos, stories);
-      });
-    } catch(e) {
-      console.warn('Erro socket:', e);
-    }
+    // Mostrar mensagem se não conectar
+    setTimeout(() => {
+      if (currentPhotos.length === 0 && viewerId) {
+        gallery.innerHTML = "<div class='no-photos'>❌ Não foi possível carregar as fotos. Verifique o ID da sessão.</div>";
+      }
+    }, 5000);
   </script>
 </body>
 </html>
