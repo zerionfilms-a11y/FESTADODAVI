@@ -4,8 +4,14 @@
   <meta charset="utf-8" />
   <title>Cabine Fotográfica — Celular</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- socket + qrcode -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
   <style>
+    /* ------------------------------------------------------------
+       Estilos principais (mantive a aparência que você tinha)
+       ------------------------------------------------------------ */
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
     .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
@@ -30,16 +36,20 @@
     .hidden { display: none !important; }
     .visible { display: flex !important; }
     #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:4px;border-radius:4px;z-index:1000;white-space:pre-line;max-width:46%}
-    /* QR overlay */
-    .qr-overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:400; }
+
+    /* QR overlay (com transição e animação suave) */
+    .qr-overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:400; opacity:0; pointer-events:none; transition:opacity 280ms cubic-bezier(.2,.9,.2,1); }
+    .qr-overlay.visible { opacity:1; pointer-events:auto; }
     .qr-backdrop { position:absolute; inset:0; backdrop-filter:blur(10px); background: rgba(0,0,0,0.45); }
-    .qr-modal { position:relative; background:rgba(255,255,255,0.98); padding:18px; border-radius:12px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.4); max-width:90%; width:360px; }
-    .qr-modal img { width:260px; height:260px; object-fit:contain; display:block; margin:0 auto 12px; }
-    .qr-close { position:absolute; top:8px; right:8px; border:none; background:transparent; font-size:22px; cursor:pointer; }
+    .qr-modal { position:relative; background:rgba(255,255,255,0.98); padding:18px; border-radius:12px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.4); max-width:90%; width:360px; transform:translateY(12px) scale(.98); transition:transform 260ms cubic-bezier(.2,.9,.2,1); }
+    .qr-overlay.visible .qr-modal { transform:translateY(0) scale(1); }
+    .qr-modal canvas { width:260px; height:260px; object-fit:contain; display:block; margin:0 auto 12px; background:#fff; border-radius:6px; }
+
     @media (max-width:480px){ #countdown { font-size:84px } }
   </style>
 </head>
 <body>
+  <!-- ---------- First entry: fullscreen prompt ---------- -->
   <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#fff,#f5f5f5);">
     <div style="text-align:center;background:rgba(0,0,0,0.03);padding:20px;border-radius:15px;backdrop-filter:blur(10px);width:95%;max-width:400px">
       <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
@@ -49,6 +59,7 @@
     </div>
   </div>
 
+  <!-- ---------- Welcome screen after fullscreen ---------- -->
   <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7)">
     <div id="welcome">
       <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
@@ -58,15 +69,16 @@
     </div>
   </div>
 
-  <!-- canvasEl will display live frames from operator -->
+  <!-- Canvas for live frames from operator -->
   <canvas id="canvasEl"></canvas>
-  <!-- videoEl kept for optional local camera preview (not used by default) -->
+  <!-- keep videoEl if needed for local capture (not used by default) -->
   <video id="videoEl" autoplay playsinline muted></video>
 
   <div id="progress" class="hidden"></div>
   <div id="countdown"></div>
   <div id="msg"></div>
 
+  <!-- Preview screen (refazer / continuar) -->
   <div id="previewScreen" class="screen hidden">
     <div id="previewContainer">
       <img id="previewImage" src="" alt="Preview da foto">
@@ -77,6 +89,7 @@
     </div>
   </div>
 
+  <!-- Thank you screen (stays until operator resets) -->
   <div id="thankScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7)">
     <div id="thank">
       <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
@@ -101,420 +114,403 @@
   <audio id="inicio" src="inicio.mp3" preload="auto"></audio>
   <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
+  <!-- =================== Script =================== -->
   <script>
 /* ===========================================================
-   Celular (viewer) — versão corrigida e completa
-   - Fluxo padrão: operator-capture (celular pede take_photo, operador envia photo_ready)
-   - Stream preview: server emits stream_frame (dataURL) -> draw on canvas while capturing
-   - show_qr: server emits visualizador URL -> overlay mostrado até operador resetar
+   Celular (viewer) — versão completa e corrigida
+   - Mantive toda a lógica que você tinha e corrigi problemas:
+     * overlay QR com transição + QR gerado localmente (QRCode lib)
+     * preview normalizado (un-mirrored)
+     * fluxo operator-capture robusto (espera por photo_ready)
+     * pedido de stream na conexão (pede cached frame)
+     * overlay só é removida por 'reset_session' do operador
    ============================================================ */
 
-const SERVER_URL = "https://festadodavi.onrender.com";
-const socket = io(SERVER_URL, { transports: ['polling','websocket'], reconnection: true, reconnectionAttempts: 10, reconnectionDelay: 1000, timeout: 20000, withCredentials: true, path:'/socket.io' });
-
-const params = new URLSearchParams(location.search);
-const session = params.get('session') || 'cabine-fixa';
-
-// DOM refs
-const debugEl = document.getElementById('debugInfo');
-const enterFs = document.getElementById('enterFs');
-const enterFsBtn = document.getElementById('enterFsBtn');
-const welcomeScreen = document.getElementById('welcomeScreen');
-const startBtn = document.getElementById('startBtn');
-const canvasEl = document.getElementById('canvasEl');
-const videoEl = document.getElementById('videoEl'); // kept but not default
-const progressEl = document.getElementById('progress');
-const countdownEl = document.getElementById('countdown');
-const previewScreen = document.getElementById('previewScreen');
-const previewImage = document.getElementById('previewImage');
-const refazerBtn = document.getElementById('refazerBtn');
-const continuarBtn = document.getElementById('continuarBtn');
-const thankScreen = document.getElementById('thankScreen');
-const clack = document.getElementById('clack');
-const inicio = document.getElementById('inicio');
-const fim = document.getElementById('fim');
-const qrOverlay = document.getElementById('qrOverlay');
-const qrCanvas = document.getElementById('qrCanvas');
-
-let stream = null;               // local camera stream (not used by default)
-let photos = [];
-let currentPhotoIndex = 0;
-let currentPhotoData = null;
-let mode = 'idle';               // 'idle' | 'capturing' | 'preview' | 'thank'
-let waitingForPhotoIndex = null; // index we are awaiting from operator
-let streamImageLoader = null;    // Image loader for streaming frames
-let lastFrameTs = 0;             // timestamp of last frame drawn
-
-// debug status every second
-setInterval(()=> {
-  debugEl.textContent = `Sessão: ${session}\nSocket: ${socket.connected ? '🟢 conectado' : '🔴 desconectado'}\nModo: ${mode}\nFotos capturadas: ${photos.length}`;
-}, 900);
-
-// -----------------------------
-// Helpers UI state
-// -----------------------------
-function showScreen(screenElement){
-  [enterFs,welcomeScreen,previewScreen,thankScreen].forEach(s=>{
-    if(s){ s.classList.add('hidden'); s.classList.remove('visible'); s.style.display='none'; }
+(function(){
+  const SERVER_URL = "https://festadodavi.onrender.com";
+  const socket = io(SERVER_URL, {
+    transports: ['polling','websocket'],
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    timeout: 20000,
+    withCredentials: true,
+    path: '/socket.io'
   });
-  // hide canvas by default (canvas only visible in 'capturing' mode)
-  canvasEl.style.display = 'none';
-  countdownEl.textContent = '';
-  progressEl.classList.add('hidden');
-  if(screenElement){ screenElement.classList.remove('hidden'); screenElement.classList.add('visible'); screenElement.style.display='flex'; }
-}
-function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
-// -----------------------------
-// Stream frame drawing (operator -> viewer)
-// - optimized to draw latest frame, replacing previous image loads
-// - only draws when mode === 'capturing' (prevents showing stream early)
-// -----------------------------
-function drawFrameToCanvas(dataUrl){
-  // rate limit drawing to ~60fps, but frames will usually be lower.
-  const now = Date.now();
-  if (now - lastFrameTs < 16) { /* allow small skip */ }
-  lastFrameTs = now;
+  const params = new URLSearchParams(location.search);
+  const session = params.get('session') || 'cabine-fixa';
 
-  // Cancel previous loader if any
-  if (streamImageLoader) {
-    // allow previous to finish but we ignore it when it loads by checking src equality
-    streamImageLoader.onload = null;
-    streamImageLoader.onerror = null;
+  // DOM refs
+  const debugEl = document.getElementById('debugInfo');
+  const enterFs = document.getElementById('enterFs');
+  const enterFsBtn = document.getElementById('enterFsBtn');
+  const welcomeScreen = document.getElementById('welcomeScreen');
+  const startBtn = document.getElementById('startBtn');
+  const canvasEl = document.getElementById('canvasEl');
+  const videoEl = document.getElementById('videoEl');
+  const progressEl = document.getElementById('progress');
+  const countdownEl = document.getElementById('countdown');
+  const previewScreen = document.getElementById('previewScreen');
+  const previewImage = document.getElementById('previewImage');
+  const refazerBtn = document.getElementById('refazerBtn');
+  const continuarBtn = document.getElementById('continuarBtn');
+  const thankScreen = document.getElementById('thankScreen');
+  const clack = document.getElementById('clack');
+  const inicio = document.getElementById('inicio');
+  const fim = document.getElementById('fim');
+  const qrOverlay = document.getElementById('qrOverlay');
+  const qrCanvas = document.getElementById('qrCanvas');
+
+  // state
+  let stream = null;               // optional local camera
+  let photos = [];
+  let currentPhotoIndex = 0;
+  let currentPhotoData = null;
+  let mode = 'idle';               // 'idle' | 'capturing' | 'preview' | 'thank'
+  let streamImageLoader = null;
+  let lastFrameTs = 0;
+
+  // debug status update
+  setInterval(()=> {
+    debugEl.textContent = `Sessão: ${session}\nSocket: ${socket.connected ? '🟢 conectado' : '🔴 desconectado'}\nModo: ${mode}\nFotos capturadas: ${photos.length}`;
+  }, 900);
+
+  // -----------------------------
+  // UI helpers
+  // -----------------------------
+  function showScreen(screenElement){
+    [enterFs,welcomeScreen,previewScreen,thankScreen].forEach(s=>{
+      if(s){ s.classList.add('hidden'); s.classList.remove('visible'); s.style.display='none'; }
+    });
+    canvasEl.style.display = 'none';
+    countdownEl.textContent = '';
+    progressEl.classList.add('hidden');
+    if(screenElement){ screenElement.classList.remove('hidden'); screenElement.classList.add('visible'); screenElement.style.display='flex'; }
   }
-  const img = new Image();
-  streamImageLoader = img;
-  img.onload = () => {
-    // only draw if still in capturing mode
-    if (mode !== 'capturing') return;
-    const ctx = canvasEl.getContext('2d');
-    canvasEl.width = window.innerWidth;
-    canvasEl.height = window.innerHeight;
-    // cover scaling
-    const scale = Math.max(canvasEl.width / img.width, canvasEl.height / img.height);
-    const w = img.width * scale, h = img.height * scale;
-    ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
-    ctx.drawImage(img, (canvasEl.width - w)/2, (canvasEl.height - h)/2, w, h);
-    canvasEl.style.display = 'block';
-  };
-  img.onerror = () => {
-    // ignore
-  };
-  img.src = dataUrl;
-}
+  function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+  showScreen(enterFs);
 
-// Socket: receive streamed frames (dataURL)
-socket.on('stream_frame', ({ session: s, frame }) => {
-  // ignore frames for other sessions (server should send only appropriate, but safe-check)
-  if (s && s !== session) return;
-  // draw only when capturing (or you might want to show behind welcome; kept to capturing)
-  if (mode === 'capturing') {
-    try { drawFrameToCanvas(frame); } catch(e) { console.warn('drawFrame err', e); }
-  }
-});
+  // -----------------------------
+  // Draw streaming frame to canvas
+  // - uses latest image only, cancels previous onload handlers
+  // -----------------------------
+  function drawFrameToCanvas(dataUrl){
+    if(!dataUrl) return;
+    const now = Date.now();
+    // throttle a bit (allow drawing up to ~60fps)
+    if (now - lastFrameTs < 12) {/* small skip allowed */}
+    lastFrameTs = now;
 
-// -----------------------------
-// QR Overlay: server sends visualizador URL
-// - show overlay and DO NOT allow user to close (operator must finalize session to hide)
-// -----------------------------
-socket.on('show_qr', ({ visualizadorUrl }) => {
-  try {
-    // render QR into qrCanvas. Use Google Charts QR quick renderer as fallback.
-    const qrImg = new Image();
-    qrImg.crossOrigin = "anonymous";
-    qrImg.onload = () => {
-      const ctx = qrCanvas.getContext('2d');
-      ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height);
-      ctx.drawImage(qrImg, 0, 0, qrCanvas.width, qrCanvas.height);
-      qrOverlay.classList.remove('hidden');
-      qrOverlay.classList.add('visible');
-      qrOverlay.setAttribute('aria-hidden','false');
-      // ensure user cannot close overlay — hide close button if present
-      // (we purposely don't add a close button)
-    };
-    qrImg.onerror = () => {
-      // fallback: draw text
-      const ctx = qrCanvas.getContext('2d');
-      ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height);
-      ctx.fillStyle = '#000'; ctx.fillRect(0,0,qrCanvas.width,qrCanvas.height);
-      ctx.fillStyle = '#fff'; ctx.font = '12px Arial';
-      ctx.fillText('Abra o link', 10, 20);
-      qrOverlay.classList.remove('hidden'); qrOverlay.classList.add('visible'); qrOverlay.setAttribute('aria-hidden','false');
-    };
-    // use google chart -> stable and simple, server may also send dataURL in future
-    qrImg.src = `https://chart.googleapis.com/chart?cht=qr&chs=260x260&chl=${encodeURIComponent(visualizadorUrl)}`;
-  } catch(e) { console.warn('show_qr erro', e); }
-});
-
-// Server instructs reset_session -> return to welcome and hide qr overlay
-socket.on('reset_session', ({ session: s }) => {
-  photos = []; currentPhotoIndex = 0; currentPhotoData = null; waitingForPhotoIndex = null;
-  mode = 'idle';
-  qrOverlay.classList.add('hidden'); qrOverlay.classList.remove('visible'); qrOverlay.setAttribute('aria-hidden','true');
-  showScreen(welcomeScreen);
-});
-
-// server may send photo_ready directed to this viewer (operator captured)
-socket.on('photo_ready', ({ index, photo, viewerId }) => {
-  // only process if this socket is the intended viewer (server should send directly to viewer socket)
-  if (mode !== 'capturing') {
-    // if user is not in capturing mode, still accept but show preview immediately
-    currentPhotoData = photo;
-    showPhotoPreview(photo);
-    return;
-  }
-
-  // If we are awaiting a particular index, resolve that expectation by emitting a custom event
-  document.dispatchEvent(new CustomEvent('operator_photo_ready', { detail: { index, photo } }));
-});
-
-// option: server can send a 'stream_pending' to indicate no frames yet
-socket.on('stream_pending', ({ session: s }) => {
-  // show message while waiting for operator to start streaming
-  if (mode === 'capturing') {
-    progressEl.textContent = 'Aguardando câmera do operador...'; progressEl.classList.remove('hidden');
-  }
-});
-
-// -----------------------------
-// Local camera functions (kept but NOT used by default)
-// -----------------------------
-async function startCamera(){
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio:false });
-    videoEl.srcObject = stream;
-    videoEl.style.display = 'block';
-    videoEl.style.transform = 'scaleX(-1)';
-    await videoEl.play();
-  } catch(e) {
-    console.warn('startCamera err', e);
-    alert('Não foi possível acessar a câmera. Verifique permissões.');
-    showScreen(welcomeScreen);
-  }
-}
-function stopCamera(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } videoEl.style.display='none'; }
-
-// -----------------------------
-// Preview handling and normalization
-// - previewImage shows unmirrored photo (we unflip horizontally to correct mirrored operator captures)
-// -----------------------------
-function normalizeAndShowPreview(photoDataUrl) {
-  // create image -> draw flipped to unmirror (operator photos were mirrored)
-  const img = new Image();
-  img.onload = () => {
-    // draw into offscreen canvas to un-flip
-    const c = document.createElement('canvas');
-    c.width = img.width; c.height = img.height;
-    const ctx = c.getContext('2d');
-    // unflip by drawing mirrored horizontally
-    ctx.save();
-    ctx.translate(c.width, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(img, 0, 0);
-    ctx.restore();
-    const normalized = c.toDataURL('image/jpeg', 0.95);
-    previewImage.src = normalized;
-    showScreen(previewScreen);
-    mode = 'preview';
-  };
-  img.onerror = () => {
-    // fallback direct
-    previewImage.src = photoDataUrl;
-    showScreen(previewScreen);
-    mode = 'preview';
-  };
-  img.src = photoDataUrl;
-}
-function showPhotoPreview(photoData) {
-  currentPhotoData = photoData;
-  // normalize + show
-  normalizeAndShowPreview(photoData);
-}
-
-// -----------------------------
-// Capture flow (operator-capture)
-// - startSequence: emits request_stream, then for each index does countdown then emit take_photo
-// - uses Document event 'operator_photo_ready' to receive photo and continue
-// -----------------------------
-function requestOperatorCapture(index){
-  socket.emit('take_photo', { session, index, viewerId: socket.id });
-}
-
-async function takeOneAndWait(index, timeoutMs = 10000) {
-  // show countdown overlay on top of live canvas
-  progressEl.textContent = `${index+1}/3`; progressEl.classList.remove('hidden');
-
-  for(let t=5; t>0; t--){
-    if (t <= 2) {
-      countdownEl.textContent = 'SORRIA!';
-      countdownEl.style.color = '#ffd600';
-      if (t === 2) { try { clack.currentTime = 0; clack.play().catch(()=>{}); } catch(e){} }
-    } else {
-      countdownEl.textContent = String(t);
-      countdownEl.style.color = '#fff';
+    if (streamImageLoader) {
+      // detach previous onload/onerror
+      try { streamImageLoader.onload = null; streamImageLoader.onerror = null; } catch(e){}
     }
-    await sleep(1000);
+    const img = new Image();
+    streamImageLoader = img;
+    img.onload = () => {
+      if (mode !== 'capturing') return;
+      const ctx = canvasEl.getContext('2d');
+      canvasEl.width = window.innerWidth;
+      canvasEl.height = window.innerHeight;
+      const scale = Math.max(canvasEl.width / img.width, canvasEl.height / img.height);
+      const w = img.width * scale, h = img.height * scale;
+      ctx.clearRect(0,0,canvasEl.width,canvasEl.height);
+      ctx.drawImage(img, (canvasEl.width - w)/2, (canvasEl.height - h)/2, w, h);
+      canvasEl.style.display = 'block';
+    };
+    img.onerror = () => { /* ignore */ };
+    img.src = dataUrl;
   }
 
-  // clear countdown
-  countdownEl.textContent = '';
-  // emit take_photo
-  requestOperatorCapture(index);
-
-  // wait for operator_photo_ready event for this index
-  return new Promise((resolve, reject) => {
-    const onReady = (ev) => {
-      const { index: idx, photo } = ev.detail || {};
-      if (typeof idx === 'undefined') return;
-      if (idx !== index) return; // ignore other indexes
-      document.removeEventListener('operator_photo_ready', onReady);
-      resolve(photo);
-    };
-    document.addEventListener('operator_photo_ready', onReady);
-
-    // timeout fallback
-    const to = setTimeout(() => {
-      document.removeEventListener('operator_photo_ready', onReady);
-      reject(new Error('Timeout aguardando photo_ready do operador'));
-    }, timeoutMs);
-    // wrap resolve to clear timeout
-    const originalResolve = resolve;
-    resolve = (val) => { clearTimeout(to); originalResolve(val); };
+  // -----------------------------
+  // Socket handlers
+  // -----------------------------
+  socket.on('connect', () => {
+    logDebug('connected to server: ' + socket.id);
+    socket.emit('join_session', { session, role: 'viewer' });
+    // ask for cached frame (if any)
+    socket.emit('request_stream', { session, viewerId: socket.id });
   });
-}
 
-async function startCaptureSequenceUsingOperator(){
-  // ensure we request stream preview
-  socket.emit('request_stream', { session, viewerId: socket.id });
-  // set mode so frames draw
-  mode = 'capturing';
-  photos = []; currentPhotoIndex = 0; currentPhotoData = null;
-  canvasEl.style.display = 'block';
-  // small delay to allow initial frame to arrive if cached
-  await sleep(200);
+  socket.on('disconnect', (reason) => {
+    logDebug('socket disconnected: ' + reason);
+  });
 
-  try {
+  socket.on('stream_frame', ({ session: s, frame }) => {
+    if (s && s !== session) return;
+    if (mode === 'capturing') {
+      try { drawFrameToCanvas(frame); } catch(e) { console.warn('draw err', e); }
+    }
+  });
+
+  socket.on('stream_pending', ({ session: s }) => {
+    if (s && s !== session) return;
+    if (mode === 'capturing') {
+      progressEl.textContent = 'Aguardando câmera do operador...';
+      progressEl.classList.remove('hidden');
+    }
+  });
+
+  // photo_ready may be emitted to viewer socket directly
+  socket.on('photo_ready', ({ index, photo }) => {
+    // dispatch custom document event to decouple waiting logic
+    document.dispatchEvent(new CustomEvent('operator_photo_ready', { detail: { index, photo } }));
+    // if not currently capturing, immediately show preview
+    if (mode !== 'capturing') {
+      currentPhotoData = photo;
+      normalizeAndShowPreview(photo);
+    }
+  });
+
+  // Show QR overlay when server emits visualizadorUrl
+  socket.on('show_qr', ({ visualizadorUrl }) => {
+    if (!visualizadorUrl) return;
+    try {
+      // Use QRCode lib to render locally (no CORS)
+      QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 260 }, (err) => {
+        if (err) {
+          // fallback to drawing via image (google charts) if QR lib fails
+          const ctx = qrCanvas.getContext('2d');
+          ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height);
+          ctx.fillStyle = '#000'; ctx.fillRect(0,0,qrCanvas.width,qrCanvas.height);
+          ctx.fillStyle = '#fff'; ctx.font = '12px Arial';
+          ctx.fillText('Abrir: ' + visualizadorUrl.substring(0,30), 8, 20);
+        }
+        qrOverlay.classList.add('visible');
+        qrOverlay.classList.remove('hidden');
+        qrOverlay.setAttribute('aria-hidden','false');
+      });
+    } catch(e) {
+      // fallback strategy (image from google charts)
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const ctx = qrCanvas.getContext('2d');
+        ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height);
+        ctx.drawImage(img,0,0,qrCanvas.width,qrCanvas.height);
+        qrOverlay.classList.add('visible');
+        qrOverlay.classList.remove('hidden');
+        qrOverlay.setAttribute('aria-hidden','false');
+      };
+      img.onerror = () => {
+        const ctx = qrCanvas.getContext('2d');
+        ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height);
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,qrCanvas.width,qrCanvas.height);
+        ctx.fillStyle = '#fff'; ctx.font = '12px Arial';
+        ctx.fillText('Abra o link: ' + visualizadorUrl.substring(0,30), 8, 20);
+        qrOverlay.classList.add('visible');
+        qrOverlay.classList.remove('hidden');
+        qrOverlay.setAttribute('aria-hidden','false');
+      };
+      img.src = `https://chart.googleapis.com/chart?cht=qr&chs=260x260&chl=${encodeURIComponent(visualizadorUrl)}`;
+    }
+  });
+
+  // server instructs reset_session -> hide overlay + go to welcome
+  socket.on('reset_session', ({ session: s }) => {
+    if (s && s !== session) return;
+    photos = []; currentPhotoIndex = 0; currentPhotoData = null;
+    mode = 'idle';
+    qrOverlay.classList.add('hidden');
+    qrOverlay.classList.remove('visible');
+    qrOverlay.setAttribute('aria-hidden','true');
+    showScreen(welcomeScreen);
+  });
+
+  // -----------------------------
+  // Local camera helpers (kept for optional local capture)
+  // -----------------------------
+  async function startCamera(){
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio:false });
+      videoEl.srcObject = stream;
+      videoEl.style.display = 'block';
+      videoEl.style.transform = 'scaleX(-1)';
+      await videoEl.play();
+    } catch(e) {
+      console.warn('startCamera err', e);
+      alert('Não foi possível acessar a câmera. Verifique permissões.');
+      showScreen(welcomeScreen);
+    }
+  }
+  function stopCamera(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } videoEl.style.display='none'; }
+
+  // -----------------------------
+  // Preview normalization (un-mirror)
+  // -----------------------------
+  function normalizeAndShowPreview(photoDataUrl) {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.width; c.height = img.height;
+      const ctx = c.getContext('2d');
+      ctx.save();
+      // unflip horizontally
+      ctx.translate(c.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(img, 0, 0);
+      ctx.restore();
+      const normalized = c.toDataURL('image/jpeg', 0.95);
+      previewImage.src = normalized;
+      showScreen(previewScreen);
+      mode = 'preview';
+    };
+    img.onerror = () => {
+      previewImage.src = photoDataUrl;
+      showScreen(previewScreen);
+      mode = 'preview';
+    };
+    img.src = photoDataUrl;
+  }
+
+  function showPhotoPreview(photoData) {
+    currentPhotoData = photoData;
+    normalizeAndShowPreview(photoData);
+  }
+
+  // -----------------------------
+  // Operator capture flow
+  // -----------------------------
+  function requestOperatorCapture(index){
+    socket.emit('take_photo', { session, index, viewerId: socket.id });
+    logDebug('take_photo pedido (index ' + index + ')');
+  }
+
+  async function takeOneAndWait(index, timeoutMs = 12000) {
+    progressEl.textContent = `${index+1}/3`;
+    progressEl.classList.remove('hidden');
+
+    for (let t=5; t>0; t--) {
+      if (t <= 2) {
+        countdownEl.textContent = 'SORRIA!';
+        countdownEl.style.color = '#ffd600';
+        if (t === 2) { try { clack.currentTime = 0; clack.play().catch(()=>{}); } catch(e){} }
+      } else {
+        countdownEl.textContent = String(t);
+        countdownEl.style.color = '#fff';
+      }
+      await sleep(1000);
+    }
+    countdownEl.textContent = '';
+
+    // request operator to capture high-res photo
+    requestOperatorCapture(index);
+
+    // wait for the operator_photo_ready event for this index
+    return new Promise((resolve, reject) => {
+      const onReady = (ev) => {
+        const detail = ev.detail || {};
+        if (typeof detail.index === 'undefined') return;
+        if (detail.index !== index) return;
+        document.removeEventListener('operator_photo_ready', onReady);
+        clearTimeout(timer);
+        resolve(detail.photo);
+      };
+      document.addEventListener('operator_photo_ready', onReady);
+
+      const timer = setTimeout(() => {
+        document.removeEventListener('operator_photo_ready', onReady);
+        reject(new Error('Timeout aguardando photo_ready do operador'));
+      }, timeoutMs);
+    });
+  }
+
+  async function startCaptureSequenceUsingOperator(){
+    // ask server to start streaming preview to this viewer
+    socket.emit('request_stream', { session, viewerId: socket.id });
+    mode = 'capturing';
+    photos = []; currentPhotoIndex = 0; currentPhotoData = null;
+    canvasEl.style.display = 'block';
+    await sleep(200); // allow frame to arrive
+
     for (let i = 0; i < 3; i++) {
       try {
-        const photo = await takeOneAndWait(i, 12000); // 12s timeout
-        // on success store and show preview
+        const photo = await takeOneAndWait(i, 15000);
+        // store and present preview
         photos.push(photo);
         currentPhotoIndex = photos.length;
-        // show preview to user (preview screen), they will either refazer or continuar
         showPhotoPreview(photo);
 
-        // Wait for user's decision (refazer/continuar) — return a promise that resolves when they choose
+        // wait for decision
         const decision = await new Promise((resolve) => {
-          const onRefazer = async () => {
-            // reset state for same index
-            refazerBtn.removeEventListener('click', onRefazer);
-            continuarBtn.removeEventListener('click', onContinuar);
-            resolve({ action: 'refazer' });
-          };
-          const onContinuar = async () => {
-            refazerBtn.removeEventListener('click', onRefazer);
-            continuarBtn.removeEventListener('click', onContinuar);
-            resolve({ action: 'continuar' });
-          };
-          refazerBtn.addEventListener('click', onRefazer);
-          continuarBtn.addEventListener('click', onContinuar);
+          const onRef = () => { refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); resolve('refazer'); };
+          const onCont = () => { refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); resolve('continuar'); };
+          refazerBtn.addEventListener('click', onRef);
+          continuarBtn.addEventListener('click', onCont);
         });
 
-        if (decision.action === 'refazer') {
-          // remove last stored photo (operator will be requested again for same index)
+        if (decision === 'refazer') {
+          // remove last and redo same index
           photos.pop();
           currentPhotoIndex = photos.length;
           currentPhotoData = null;
-          // return to capturing mode (canvas visible) and loop will re-run same index
-          mode = 'capturing';
-          showScreen(null); // show no front screen; canvas visible
-          await sleep(200);
-          i = i - 1; // redo this index
-          continue;
-        } else {
-          // continuar -> proceed to next index
           mode = 'capturing';
           showScreen(null);
-          await sleep(300);
+          await sleep(250);
+          i = i - 1;
+          continue;
+        } else {
+          // continuar -> next
+          mode = 'capturing';
+          showScreen(null);
+          await sleep(250);
           continue;
         }
       } catch (err) {
-        // timeout or error waiting for operator photo
-        console.warn('Erro / timeout aguardando photo from operator:', err);
-        logDebug('Erro/timeout aguardando foto do operador: ' + (err.message || err));
-        // notify user and allow retry
-        countdownEl.textContent = '';
+        // timeout or other error — retry same index
+        logDebug('Erro/timeout aguardando foto do operador: ' + (err && err.message ? err.message : err));
         progressEl.textContent = 'Erro ao capturar. Tentando novamente...';
+        progressEl.classList.remove('hidden');
         await sleep(1200);
-        i = i - 1; // retry same index
+        i = i - 1;
         continue;
       }
     }
 
-    // all 3 photos captured and accepted
+    // all photos done
     mode = 'thank';
     showScreen(thankScreen);
-    // send photos to server
     socket.emit('photos_submit', { session, viewerId: socket.id, photos });
-    try { fim.currentTime = 0; fim.play().catch(()=>{}); } catch(e){}
-  } catch(e){
-    logDebug('Erro na sequência: ' + (e.message || e));
-    // fallback: go to thank and send whatever photos we have
-    mode = 'thank'; showScreen(thankScreen);
-    if (photos.length) socket.emit('photos_submit', { session, viewerId: socket.id, photos });
+    try{ fim.currentTime = 0; fim.play().catch(()=>{}); } catch(e){}
   }
-}
 
-// -----------------------------
-// Event wiring: start button, fullscreen flow
-// -----------------------------
-showScreen(enterFs);
+  // -----------------------------
+  // UI / event wiring
+  // -----------------------------
+  enterFsBtn.addEventListener('click', async () => {
+    try { await document.documentElement.requestFullscreen(); } catch(e){}
+    showScreen(welcomeScreen);
+    socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
+  });
 
-enterFsBtn.addEventListener('click', async () => {
-  try { await document.documentElement.requestFullscreen(); } catch(e){}
-  showScreen(welcomeScreen);
-  socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
-});
+  startBtn.addEventListener('click', async () => {
+    startBtn.disabled = true;
+    startBtn.textContent = '🎵 Preparando...';
+    await inicio.play().catch(()=>{});
+    startBtn.disabled = false;
+    startBtn.textContent = '🎬 Iniciar Sessão de Fotos';
+    showScreen(null);
+    await startCaptureSequenceUsingOperator();
+  });
 
-startBtn.addEventListener('click', async () => {
-  startBtn.disabled = true;
-  startBtn.textContent = '🎵 Preparando...';
-  await inicio.play().catch(()=>{});
-  startBtn.disabled = false;
-  startBtn.textContent = '🎬 Iniciar Sessão de Fotos';
-  // Begin operator-capture flow
-  showScreen(null); // hide front screens, show canvas in capturing mode
-  await startCaptureSequenceUsingOperator();
-});
+  // small helper log
+  function logDebug(msg){
+    const t = new Date().toLocaleTimeString();
+    debugEl.textContent = `[${t}] ${msg}\n` + debugEl.textContent;
+    console.log(msg);
+  }
 
-// -----------------------------
-// small helper for logging to debug panel
-// -----------------------------
-function logDebug(msg){
-  const t = new Date().toLocaleTimeString();
-  debugEl.textContent = `[${t}] ${msg}\n` + debugEl.textContent;
-  console.log(msg);
-}
+  // dispatch mapping from socket photo_ready to document event (already handled above)
+  // but keep explicit handler to log
+  document.addEventListener('operator_photo_ready', (ev) => {
+    logDebug('operator_photo_ready event received index=' + (ev.detail && ev.detail.index));
+  });
 
-// -----------------------------
-// Final notes:
-// - QR overlay will remain until operator emits reset_session (which brings user back to welcome)
-// - The client will not auto-start its local camera; local capture functions remain available in code
-// -----------------------------
+  // safety: expose for debugging
+  window._cabine = { socket, startCaptureSequenceUsingOperator, photos };
 
-// ensure socket connection sends join/identify
-socket.on('connect', () => {
-  logDebug('connected to server: ' + socket.id);
-  // join fixed session as viewer
-  socket.emit('join_session', { session, role: 'viewer' });
-  // request cached stream frame to show immediately if available
-  socket.emit('request_stream', { session, viewerId: socket.id });
-});
-socket.on('disconnect', (reason) => { logDebug('socket disconnected: ' + reason); });
-
-// expose some globals for debugging in the console
-window._cabine = { socket, startCaptureSequenceUsingOperator };
-
+})(); // IIFE end
   </script>
 </body>
 </html>
