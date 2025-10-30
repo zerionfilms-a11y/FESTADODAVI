@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Cabine Fotográfica — Operador (Webcam + IMGBB)</title>
+  <title>Cabine Fotográfica — Operador (Web + IMGBB)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="icon" href="/favicon.ico">
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
@@ -18,7 +18,7 @@
     #thumbs{display:flex;flex-wrap:wrap;gap:8px}
     #thumbs img{width:170px;height:auto;border-radius:6px;border:2px solid #222}
     canvas{max-width:100%;display:block;margin-top:12px;border:1px solid #333;background:#000}
-    #log{color:#9f9;margin-top:12px;white-space:pre-wrap;font-family:monospace;font-size:12px;max-height:300px;overflow-y:auto}
+    #log{color:#9f9;margin-top:12px;white-space:pre-wrap;font-family:monospace;font-size:12px;max-height:240px;overflow-y:auto}
     .status{background:#333;padding:8px;border-radius:4px;margin:8px 0;display:inline-block}
     .connected{color:#4CAF50;}
     .disconnected{color:#f44336;}
@@ -103,14 +103,15 @@
 
   <script>
     /*******************************************************************
-     * Index completo — mantém todas as funcionalidades + auto-start
-     * SERVER_URL fixado e fallback polling habilitado.
-     * Corrigido: espera de carregamento das imagens antes de gerar montagens.
+     * Index completo — versão corrigida para:
+     * - backend: festadodavi-production-0591.up.railway.app
+     * - não auto-startar webcam (mantém controles)
+     * - monta stories/print com promises para evitar imagem preta
      *******************************************************************/
 
-    const SERVER_URL = 'https://festadodavi-production.up.railway.app';
+    const SERVER_URL = 'https://festadodavi-production-0591.up.railway.app';
     const FIXED_SESSION = 'cabine-fixa';
-    const IMGBB_KEY = 'fc52605669365cdf28ea379d10f2a341'; // você forneceu
+    const IMGBB_KEY = 'fc52605669365cdf28ea379d10f2a341';
 
     // Element helpers
     const el = id => document.getElementById(id);
@@ -131,27 +132,11 @@
 
     // State
     let socket = null;
-    let lastPhotos = [];            // dataURLs (viewer-submitted) kept locally
+    let lastPhotos = [];
     let viewerHistory = [];
     let localStream = null;
     let streamingTargetSession = null;
-    let streamingInterval = null;   // declared once
-
-    // Templates (must be in public/)
-    const STORIES_TEMPLATE = 'storiesdavi.png';
-    const PRINT_TEMPLATE = 'imprimirdavi.png';
-
-    // Coordinates (for 3375x6000 and 3691x5536 as you provided)
-    const STORIES_COORDS = [
-      { x:289, y:242, w:2776 - 289, h:1809 - 242 },
-      { x:292, y:2026, w:2776 - 292, h:3593 - 2026 },
-      { x:289, y:3754, w:2776 - 289, h:5324 - 3754 }
-    ];
-    const PRINT_COORDS = [
-      { x:267, y:212, w:3010 - 267, h:1718 - 212 },
-      { x:267, y:1887, w:3017 - 267, h:3393 - 1887 },
-      { x:274, y:3556, w:3023 - 274, h:5061 - 3556 }
-    ];
+    let streamingInterval = null; // declared once
 
     // Logging
     function log(msg){
@@ -190,8 +175,8 @@
         genQrBtn.disabled = false;
         finalizarBtn.disabled = false;
 
-        // Tentar auto-start da webcam (se possível)
-        attemptAutoStartWebcam();
+        // NOTA: não auto-start da webcam (você disse que removeu a webcam),
+        // mas deixamos attemptAutoStartWebcam() disponível se quiser reativar.
       });
 
       socket.on('disconnect', (reason) => {
@@ -208,27 +193,30 @@
         log('🔁 Tentativa de reconexão: ' + n);
       });
 
-      // Viewer requests stream -> if localStream available, start streaming to that session
+      // If a viewer requests stream, we (optionally) start streaming if webcam available
       socket.on('request_stream', ({ session, viewerId }) => {
         log('📡 Pedido de stream recebido para sessão: ' + session + (viewerId ? ' (viewer: ' + viewerId + ')' : ''));
         if (localStream) startStreamingToSession(session || FIXED_SESSION);
       });
 
-      // Operator should capture high-res when receive take_photo
+      // operator receives take_photo: this is when the viewer asks operator to capture
       socket.on('take_photo', ({ session, index, viewerId }) => {
         log('📸 Pedido take_photo (index:' + index + ', viewer:' + viewerId + ')');
+        // If you have a webcam and want to capture high-res, captureHighResAndSend does that.
+        // Otherwise ignore (viewer flow expects operator to respond with photo_ready)
         captureHighResAndSend(index, viewerId);
       });
 
-      // Viewer submits photos array (dataURLs) -> operator receives, shows thumbs, generates montage + upload
+      // When viewer submits photos (from celular), we receive them here and process them
       socket.on('photos_submit', ({ viewerId, photos }) => {
         log('📥 photos_submit recebido (viewer:' + viewerId + ', fotos:' + (Array.isArray(photos) ? photos.length : 0) + ')');
         lastPhotos = Array.isArray(photos) ? photos.slice(0,3) : [];
         renderThumbs();
-        // process and upload (will create visualizador)
+        // process montages + upload to IMGBB (if desired) - when viewer sends, we still generate visualizador
         processPhotosAndUpload(lastPhotos, viewerId);
       });
 
+      // server may notify viewer session creation
       socket.on('viewer_session_created', ({ viewerId }) => {
         log('🎉 Sessão do visualizador criada no servidor: ' + viewerId);
         addToViewerHistory(viewerId, lastPhotos.length);
@@ -245,12 +233,11 @@
         testImgbbBtn.disabled = true;
       });
 
-      // Log relays
+      // stream_frame relays (operator can optionally log)
       socket.on('stream_frame', ({ session, frame }) => {
         log('🔁 stream_frame relay recebido (len=' + (frame ? frame.length : 0) + ')');
       });
 
-      // Setup auto-start on viewers
       setupAutoStartOnViewer(socket);
     }
 
@@ -259,16 +246,21 @@
      ***********************/
     function generateQrCode(){
       qrcodeEl.innerHTML = '';
-      // full link to celular with session param
       const url = `${SERVER_URL.replace(/^https?:\/\//,'https://')}/celular.html?session=${encodeURIComponent(FIXED_SESSION)}`;
+      // create canvas and draw QR
       const canvas = document.createElement('canvas');
-      QRCode.toCanvas(canvas, url, { width: 220 }, (err) => { if(err) log('❌ Erro ao gerar QR Code: ' + err); });
-      qrcodeEl.appendChild(canvas);
-      log('📱 QR Code Celular gerado: ' + url);
+      try {
+        QRCode.toCanvas(canvas, url, { width: 220 }, (err) => { if(err) log('❌ Erro ao gerar QR Code: ' + err); });
+        qrcodeEl.appendChild(canvas);
+        log('📱 QR Code Celular gerado: ' + url);
+      } catch(e) {
+        log('❌ Erro QR fallback: ' + e);
+        qrcodeEl.textContent = url;
+      }
     }
 
     /***********************
-     * WEBCAM START / STOP
+     * WEBCAM START / STOP (kept but NOT auto-started)
      ***********************/
     async function startWebcam(){
       try {
@@ -307,10 +299,10 @@
     }
 
     /***********************
-     * AUTO-START WEB CAM LOGIC
+     * AUTO-START WEB CAM LOGIC (available but not forced)
      ***********************/
     let __autoStartClickHandlerAdded = false;
-    const AUTO_START_ATTEMPT = true;
+    const AUTO_START_ATTEMPT = false; // set false so we don't auto-start; keep logic if you want to re-enable
     const AUTO_START_ON_VIEWER = true;
 
     async function attemptAutoStartWebcam() {
@@ -456,8 +448,7 @@
     }
 
     /***********************
-     * THUMBS & MONTAGENS
-     * Important: we WAIT images load before calling toDataURL()
+     * THUMBS & MONTAGENS (PROMISE-based)
      ***********************/
     function renderThumbs(){
       thumbsEl.innerHTML = '';
@@ -466,9 +457,9 @@
         thumbsEl.appendChild(img);
       });
       if (lastPhotos.length) {
-        // draw previews asynchronously
-        drawStories(lastPhotos).catch(e => log('❌ drawStories fail: ' + e));
-        drawPrint(lastPhotos).catch(e => log('❌ drawPrint fail: ' + e));
+        // draw but do not block UI
+        drawStories(lastPhotos).catch(e => log('⚠️ drawStories erro: ' + e));
+        drawPrint(lastPhotos).catch(e => log('⚠️ drawPrint erro: ' + e));
       }
     }
 
@@ -491,99 +482,98 @@
       ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
     }
 
-    // small helper: load an image and return Promise<HTMLImageElement>
-    function loadImage(src, crossOrigin = 'anonymous') {
+    const STORIES_COORDS = [
+      { x:289, y:242, w:2776 - 289, h:1809 - 242 },
+      { x:292, y:2026, w:2776 - 292, h:3593 - 2026 },
+      { x:289, y:3754, w:2776 - 289, h:5324 - 3754 }
+    ];
+    const PRINT_COORDS = [
+      { x:267, y:212, w:3010 - 267, h:1718 - 212 },
+      { x:267, y:1887, w:3017 - 267, h:3393 - 1887 },
+      { x:274, y:3556, w:3023 - 274, h:5061 - 3556 }
+    ];
+    const STORIES_TEMPLATE = 'storiesdavi.png';
+    const PRINT_TEMPLATE = 'imprimirdavi.png';
+
+    // Returns a Promise that resolves when the stories canvas is fully drawn
+    function drawStories(photos){
       return new Promise((resolve, reject) => {
-        const img = new Image();
-        if (!src.startsWith('data:')) {
-          img.crossOrigin = crossOrigin; // try to use anonymous to avoid taint if possible
+        try {
+          const ctx = storiesCanvas.getContext('2d');
+          ctx.clearRect(0,0,storiesCanvas.width,storiesCanvas.height);
+          const bg = new Image();
+          bg.crossOrigin = 'anonymous';
+          bg.src = STORIES_TEMPLATE;
+          bg.onload = () => {
+            ctx.drawImage(bg, 0, 0, storiesCanvas.width, storiesCanvas.height);
+            // load all photos and draw them in order; wait until all images loaded
+            const loaders = photos.slice(0,3).map((p, i) => {
+              return new Promise((res, rej) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                  const c = STORIES_COORDS[i] || STORIES_COORDS[0];
+                  drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
+                  log(`✅ Foto ${i+1} posicionada no stories: ${c.x},${c.y} ${c.w}x${c.h}`);
+                  res();
+                };
+                img.onerror = (err) => {
+                  log('⚠️ Erro ao carregar foto para stories: ' + p);
+                  res(); // we resolve to continue drawing others
+                };
+                img.src = p;
+              });
+            });
+            Promise.all(loaders).then(() => resolve()).catch(e => resolve());
+          };
+          bg.onerror = () => {
+            log('❌ Erro ao carregar background stories');
+            reject(new Error('Erro ao carregar background stories'));
+          };
+        } catch(e){
+          reject(e);
         }
-        img.onload = () => resolve(img);
-        img.onerror = (e) => reject(new Error('Erro carregando imagem: ' + src));
-        img.src = src;
       });
     }
 
-    // drawStories: return Promise that resolves when draw complete
-    async function drawStories(photos){
-      const ctx = storiesCanvas.getContext('2d');
-      ctx.clearRect(0,0,storiesCanvas.width,storiesCanvas.height);
-
-      try {
-        const bg = await loadImage(STORIES_TEMPLATE, null); // template is same-origin; set null to avoid CORS
-        ctx.drawImage(bg, 0, 0, storiesCanvas.width, storiesCanvas.height);
-      } catch(e) {
-        log('❌ Erro ao carregar background stories: ' + e.message);
-        // still try to proceed with photos (will draw on black bg)
-      }
-
-      // ensure we load all photos (use dataURLs from viewer or fallback)
-      const imgs = [];
-      for (let i = 0; i < 3; i++) {
-        const src = photos[i] || photos[photos.length - 1] || photos[0];
+    // Returns a Promise that resolves when the print canvas is fully drawn
+    function drawPrint(photos){
+      return new Promise((resolve, reject) => {
         try {
-          const img = await loadImage(src);
-          imgs.push(img);
-        } catch(err) {
-          log('⚠️ Falha ao carregar foto ' + (i+1) + ': ' + err.message);
-          // create dummy transparent image to keep positions
-          const dummy = document.createElement('canvas');
-          dummy.width = 100; dummy.height = 100;
-          imgs.push(dummy);
-        }
-      }
-
-      // Now draw the loaded imgs into positions
-      imgs.forEach((img, i) => {
-        const c = STORIES_COORDS[i] || STORIES_COORDS[0];
-        try {
-          drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
-          log(`✅ Foto ${i+1} posicionada no stories: ${c.x},${c.y} ${c.w}x${c.h}`);
+          const ctx = printCanvas.getContext('2d');
+          ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
+          const bg = new Image();
+          bg.crossOrigin = 'anonymous';
+          bg.src = PRINT_TEMPLATE;
+          bg.onload = () => {
+            ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
+            const loaders = photos.slice(0,3).map((p, i) => {
+              return new Promise((res, rej) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => {
+                  const c = PRINT_COORDS[i] || PRINT_COORDS[0];
+                  drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
+                  log(`✅ Foto ${i+1} posicionada no print: ${c.x},${c.y} ${c.w}x${c.h}`);
+                  res();
+                };
+                img.onerror = () => {
+                  log('⚠️ Erro ao carregar foto para print: ' + p);
+                  res();
+                };
+                img.src = p;
+              });
+            });
+            Promise.all(loaders).then(() => resolve()).catch(e => resolve());
+          };
+          bg.onerror = () => {
+            log('❌ Erro ao carregar background print');
+            reject(new Error('Erro ao carregar background print'));
+          };
         } catch(e){
-          log('⚠️ Erro desenhando foto no stories: ' + e.message);
+          reject(e);
         }
       });
-
-      return Promise.resolve();
-    }
-
-    // drawPrint: same approach
-    async function drawPrint(photos){
-      const ctx = printCanvas.getContext('2d');
-      ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
-
-      try {
-        const bg = await loadImage(PRINT_TEMPLATE, null);
-        ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
-      } catch(e) {
-        log('❌ Erro ao carregar background print: ' + e.message);
-      }
-
-      const imgs = [];
-      for (let i = 0; i < 3; i++) {
-        const src = photos[i] || photos[photos.length - 1] || photos[0];
-        try {
-          const img = await loadImage(src);
-          imgs.push(img);
-        } catch(err){
-          log('⚠️ Falha ao carregar foto print ' + (i+1) + ': ' + err.message);
-          const dummy = document.createElement('canvas');
-          dummy.width = 100; dummy.height = 100;
-          imgs.push(dummy);
-        }
-      }
-
-      imgs.forEach((img, i) => {
-        const c = PRINT_COORDS[i] || PRINT_COORDS[0];
-        try {
-          drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
-          log(`✅ Foto ${i+1} posicionada no print: ${c.x},${c.y} ${c.w}x${c.h}`);
-        } catch(e){
-          log('⚠️ Erro desenhando foto no print: ' + e.message);
-        }
-      });
-
-      return Promise.resolve();
     }
 
     /***********************
@@ -602,26 +592,23 @@
       throw new Error('IMGBB upload failed: ' + JSON.stringify(json));
     }
 
-    // processPhotosAndUpload: draw montages, wait for them, then upload photos & montages
+    // processPhotosAndUpload now awaits the drawStories/drawPrint promises
     async function processPhotosAndUpload(photosArray, viewerId){
       try {
         if (!Array.isArray(photosArray) || photosArray.length === 0) { log('Nenhuma foto para processar'); return; }
         const photos = photosArray.slice(0,3);
         while (photos.length < 3) photos.push(photos[photos.length - 1] || photosArray[0]);
 
-        log('🔄 Gerando montagem stories e print (aguardando imagens carregarem)...');
-        // Wait for drawing to finish (these functions load images and draw synchronously using await)
+        log('🔄 Gerando montagem stories e print...');
+        // wait for canvases to be fully composed before getting dataURL
         await drawStories(photos);
-        // storiesCanvas now contains the full montage
-        const storiesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95);
-
+        const storiesMontage = storiesCanvas.toDataURL('image/jpeg', 0.95);
         await drawPrint(photos);
-        const printMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
+        const printMontage = printCanvas.toDataURL('image/jpeg', 0.95);
 
         genVisualizadorQrBtn.disabled = true;
         testImgbbBtn.disabled = true;
 
-        // Upload original photos first
         const uploadedPhotos = [];
         for (let i = 0; i < 3; i++){
           log('⏫ Upload foto ' + (i+1));
@@ -630,33 +617,17 @@
           log('✅ foto ' + (i+1) + ' uploadada: ' + url);
         }
 
-        // Upload montages
-        let storiesUrl = null;
-        try {
-          log('⏫ Upload montagem stories...');
-          storiesUrl = await uploadToImgbb(storiesMontageDataUrl, `cabine_stories_${Date.now()}`);
-          log('✅ stories upload: ' + storiesUrl);
-        } catch(e){
-          log('⚠️ Falha upload stories: ' + (e.message || e));
-        }
-
+        log('⏫ Upload montagem stories...');
+        const storiesUrl = await uploadToImgbb(storiesMontage, `cabine_stories_${Date.now()}`);
         let printUrl = null;
-        try {
-          log('⏫ Upload montagem print...');
-          printUrl = await uploadToImgbb(printMontageDataUrl, `cabine_print_${Date.now()}`);
-          log('✅ print upload: ' + printUrl);
-        } catch(e){
-          log('⚠️ Falha upload print: ' + (e.message || e));
-        }
+        try { printUrl = await uploadToImgbb(printMontage, `cabine_print_${Date.now()}`); } catch(e){ log('⚠️ Falha upload print: ' + (e.message || e)); }
 
-        // prepare payload for visualizador (we keep data param approach)
         const viewerPayload = { photos: uploadedPhotos, storiesMontage: storiesUrl, print: printUrl, createdAt: new Date().toISOString() };
         const payloadStr = JSON.stringify(viewerPayload);
         const b64 = btoa(unescape(encodeURIComponent(payloadStr)));
-        // full visualizadorUrl (uses origin so it works locally)
         const visualizadorUrl = `${location.origin}/visualizador.html?data=${encodeURIComponent(b64)}`;
 
-        // show QR UI
+        // UI QR
         qrcodeVisualizadorEl.innerHTML = '';
         const qrCanvas = document.createElement('canvas');
         QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => { if (err) log('❌ Erro ao gerar QR: ' + err); });
@@ -664,19 +635,13 @@
         viewerSessionIdEl.textContent = visualizadorUrl;
         viewerInfoEl.style.display = 'block';
 
-        // Notify viewer (if viewerId present) to show QR overlay, or broadcast to session
-        try {
-          if (viewerId) {
-            socket.emit('show_qr_on_viewer', { viewerId, visualizadorUrl });
-          } else {
-            socket.emit('show_qr_to_session', { session: FIXED_SESSION, visualizadorUrl });
-          }
-        } catch(e){ log('⚠️ Falha emit show_qr: ' + e.message); }
+        if (viewerId) {
+          socket.emit('show_qr_on_viewer', { viewerId, visualizadorUrl });
+        } else {
+          socket.emit('show_qr_to_session', { session: FIXED_SESSION, visualizadorUrl });
+        }
 
-        // create viewer session record on server (optional)
-        try {
-          socket.emit('create_viewer_session', { session: FIXED_SESSION, photos: uploadedPhotos, storiesMontage: storiesUrl, print: printUrl });
-        } catch(e){ log('⚠️ Falha emitir create_viewer_session: ' + (e.message || e)); }
+        socket.emit('create_viewer_session', { session: FIXED_SESSION, photos: uploadedPhotos, storiesMontage: storiesUrl, print: printUrl });
 
         genVisualizadorQrBtn.disabled = false;
         testImgbbBtn.disabled = false;
@@ -684,9 +649,8 @@
 
         addToViewerHistory(visualizadorUrl, uploadedPhotos.length);
         log('🎉 Visualizador criado: ' + visualizadorUrl);
-
       } catch(e){
-        log('❌ ERRO no processo IMGBB: ' + (e && e.message ? e.message : e));
+        log('❌ ERRO no processo IMGBB: ' + (e.message || e));
         genVisualizadorQrBtn.disabled = false;
         testImgbbBtn.disabled = false;
       }
@@ -701,7 +665,7 @@
         const w = window.open('', '_blank', 'toolbar=0,location=0,menubar=0');
         w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Impressão 10x15</title>
           <style>html,body{margin:0;padding:0;height:100%;} .page{width:10cm;height:15cm;margin:0 auto;display:flex;align-items:center;justify-content:center} img{width:100%;height:100%;object-fit:cover} @page{size:10cm 15cm;margin:0} @media print{body,html{margin:0;padding:0}}</style>
-          </head><body><div class="page" id="printArea"><img src="${data}"></div><script>window.onload=function(){setTimeout(()=>{window.focus();window.print();},300)}<\/script></body></html>`);
+          </head><body><div class="page"><img src="${data}"></div><script>window.onload=function(){setTimeout(()=>{window.focus();window.print();},300)}<\/script></body></html>`);
         w.document.close();
       } catch(e){ log('❌ Erro imprimir: ' + (e.message || e)); }
     });
@@ -775,7 +739,17 @@
     /***********************
      * RENDER / UI INIT
      ***********************/
-    // renderThumbs function kept above
+    function renderThumbs(){
+      thumbsEl.innerHTML = '';
+      lastPhotos.forEach((p, idx) => {
+        const img = document.createElement('img'); img.src = p; img.alt = 'foto-' + (idx+1);
+        thumbsEl.appendChild(img);
+      });
+      if (lastPhotos.length) {
+        drawStories(lastPhotos).catch(e => log('⚠️ drawStories erro: ' + e));
+        drawPrint(lastPhotos).catch(e => log('⚠️ drawPrint erro: ' + e));
+      }
+    }
 
     // BOTOES
     startWebcamBtn.addEventListener('click', startWebcam);
