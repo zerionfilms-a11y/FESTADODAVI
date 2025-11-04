@@ -2,489 +2,744 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Cabine Fotográfica — Celular (Fotos + Boomerang)</title>
+  <title>Cabine Fotográfica — Celular</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    html,body{height:100%;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
-    .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-    .hidden{display:none!important}
-    .visible{display:flex!important}
-    /* Buttons & cards */
-    #enterFsBtn{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:320px}
-    #startBtn{padding:14px 20px;border-radius:12px;border:none;background:#0b84ff;color:#fff;font-weight:800;cursor:pointer;font-size:18px;margin-top:12px}
-    .logo{max-width:140px;margin-bottom:12px;border-radius:8px}
-    .mode-buttons{display:flex;gap:18px;justify-content:center;margin-top:14px}
-    .mode-btn{width:92px;height:92px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;font-size:30px;cursor:pointer}
-    .mode-btn.boom{background:linear-gradient(135deg,#4f92ff,#0077cc);color:#fff}
-    .mode-btn.three{background:linear-gradient(135deg,#ffd54a,#d18a00);color:#111}
-    /* Camera and preview */
-    #videoEl{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;transform:scaleX(-1)}
-    #canvasEl{position:fixed;inset:0;z-index:2;display:none;pointer-events:none}
-    #cropFrame{position:absolute;border:3px dashed rgba(255,255,255,0.95);z-index:30;border-radius:8px;box-shadow:0 0 0 20000px rgba(0,0,0,0.25);pointer-events:none}
-    #countdown{position:fixed;top:24%;left:0;right:0;text-align:center;font-size:120px;font-weight:900;z-index:60;color:#fff;text-shadow:0 0 40px #000}
-    #recDot{position:fixed;top:14px;left:14px;padding:8px 12px;border-radius:999px;background:rgba(0,0,0,0.5);z-index:60;color:#fff;display:flex;gap:8px;align-items:center}
-    .blink{animation: blink 800ms infinite}
-    @keyframes blink { 0%{opacity:1}50%{opacity:0.15}100%{opacity:1} }
+    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
+    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
+    .center-card{max-width:440px;width:95%;text-align:center;background:rgba(255,255,255,0.03);padding:22px;border-radius:14px;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.04)}
+    button{cursor:pointer;border:none;border-radius:12px;padding:14px 18px;font-weight:700}
+    #enterFsBtn{background:#ffd600;color:#000;font-size:18px;width:100%}
+    #startBtn{background:#0b84ff;color:#fff;font-size:18px;width:100%}
+    .mode-btn{width:92px;height:92px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin:10px}
+    .mode-btn.boom{background:linear-gradient(135deg,#2a9df4,#0b6fb3);color:white}
+    .mode-btn.three{background:linear-gradient(135deg,#ffd34d,#d18a00);color:#111}
+    .logo{max-width:160px;margin-bottom:16px}
+    /* live preview */
+    #videoEl{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;display:none;transform:scaleX(-1)} /* mirrored preview */
+    #canvasEl{position:fixed;inset:0;width:100%;height:100%;z-index:2;display:none;pointer-events:none}
+    #cropOverlay{position:absolute;z-index:3;pointer-events:none;border:2px dashed rgba(255,255,255,0.95);box-shadow:0 0 0 20000px rgba(0,0,0,0.25);display:none}
+    #countdown{position:fixed;top:22%;left:0;right:0;text-align:center;font-size:110px;font-weight:900;z-index:40;color:#fff;text-shadow:0 0 30px rgba(0,0,0,0.7);display:none}
+    #msg{position:fixed;bottom:18%;left:0;right:0;text-align:center;font-size:18px;z-index:40}
     /* preview modal */
-    #previewScreen{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.95)}
-    #previewHolder{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
-    #previewHolder img, #previewHolder video{max-width:100%;max-height:100%;object-fit:contain}
-    .previewButtons{position:absolute;bottom:28px;left:0;right:0;display:flex;gap:12px;justify-content:center;z-index:90;padding:0 20px}
-    .btn{padding:12px 16px;border-radius:10px;border:none;background:rgba(255,255,255,0.06);color:#fff;font-weight:700;cursor:pointer}
-    /* small UI */
-    #progress{position:fixed;top:12px;right:12px;background:rgba(0,0,0,0.65);padding:8px 12px;border-radius:10px;z-index:60}
-    #qrOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:120;opacity:0;pointer-events:none;transition:opacity 220ms}
-    #qrOverlay.visible{opacity:1;pointer-events:auto}
-    #qrModal{background:#fff;padding:18px;border-radius:12px;color:#000;box-shadow:0 10px 30px rgba(0,0,0,0.35)}
-    #debugInfo{position:fixed;bottom:8px;left:8px;font-size:12px;color:#ddd;z-index:130;background:rgba(0,0,0,0.45);padding:6px;border-radius:6px}
-    #fullscreenFail{position:fixed;top:8px;left:50%;transform:translateX(-50%);background:#ffcccb;color:#000;padding:8px 12px;border-radius:8px;z-index:200;display:none}
-    @media(max-width:480px){ #countdown{font-size:72px} .mode-btn{width:72px;height:72px;font-size:22px} }
+    #previewScreen{position:fixed;inset:0;display:none;z-index:80;align-items:center;justify-content:center;background:rgba(0,0,0,0.92)}
+    #previewImage{max-width:92%;max-height:78%;object-fit:contain;border-radius:8px}
+    .preview-buttons{display:flex;gap:12px;margin-top:18px}
+    .preview-btn{padding:12px 18px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);color:#fff}
+    /* QR overlay */
+    .qr-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:200;background:rgba(0,0,0,0.5)}
+    .qr-modal{background:#fff;padding:18px;border-radius:10px;color:#111;text-align:center}
+    #debugInfo{position:fixed;left:10px;bottom:8px;font-size:11px;color:#ddd;z-index:300;max-width:46%;white-space:pre-line}
+    /* responsive */
+    @media(max-width:480px){ #countdown{font-size:72px} .mode-btn{width:76px;height:76px;font-size:22px} }
   </style>
 </head>
 <body>
-  <!-- Fullscreen page (only enter button) -->
+  <!-- === SCREEN 1: ONLY 'ENTRAR EM TELA CHEIA' (no other controls) === -->
   <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#fff,#f5f5f5);">
-    <div style="text-align:center;width:95%;max-width:420px">
-      <img src="logo1.png" class="logo" onerror="this.style.display='none'">
-      <h1 style="color:#222;margin-bottom:10px">📸 Cabine Fotográfica</h1>
-      <p style="color:#444;margin-bottom:16px">Clique para entrar em tela cheia</p>
+    <div class="center-card">
+      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+      <h2 style="color:#222;margin-bottom:8px">📸 Cabine Fotográfica</h2>
+      <p style="color:#444;margin-bottom:16px">Para melhor experiência, entre em tela cheia</p>
       <button id="enterFsBtn">🎬 Entrar em Tela Cheia</button>
-      <div id="fullscreenFail">Não foi possível entrar em tela cheia — abrindo normalmente.</div>
     </div>
   </div>
 
-  <!-- Welcome (after fullscreen or fallback) -->
+  <!-- === SCREEN 2: Welcome (logo + Iniciar Sessão) shown AFTER fullscreen === -->
   <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7)">
-    <div style="text-align:center;padding:18px;border-radius:12px;background:rgba(0,0,0,0.02)">
-      <img src="logo1.png" class="logo" onerror="this.style.display='none'">
-      <h2 style="color:#222;margin-bottom:8px">Preparado?</h2>
-      <p style="color:#444;margin-bottom:12px">Toque em Iniciar Sessão</p>
+    <div class="center-card">
+      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+      <h2 style="color:#222;margin-bottom:6px">📸 Bem-vindo à Cabine</h2>
+      <p style="color:#444;margin-bottom:16px">Toque em Iniciar Sessão para começar</p>
       <button id="startBtn">▶️ Iniciar Sessão</button>
     </div>
   </div>
 
-  <!-- Mode selection -->
-  <div id="selectionScreen" class="screen hidden" style="background:linear-gradient(135deg,#000,#111)">
-    <div style="text-align:center">
-      <img src="logo1.png" class="logo" onerror="this.style.display='none'">
-      <h2 style="margin-bottom:6px">Escolha o modo</h2>
-      <div class="mode-buttons">
-        <div style="text-align:center">
-          <button id="btnBoom" class="mode-btn boom" title="Boomerang">&infin;</button>
-          <div style="color:#ddd;margin-top:6px">Boomerang</div>
-        </div>
-        <div style="text-align:center">
-          <button id="btnThree" class="mode-btn three" title="3 Fotos">☰</button>
-          <div style="color:#ddd;margin-top:6px">3 Fotos</div>
-        </div>
+  <!-- === SCREEN 3: MODE CHOICE (appears AFTER Iniciar Sessão) === -->
+  <div id="modeScreen" class="screen hidden" style="background:linear-gradient(135deg,#000,#111);">
+    <div class="center-card" style="background:transparent;">
+      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+      <h3 style="margin-bottom:6px">Escolha o modo</h3>
+      <div>
+        <button id="chooseBoom" class="mode-btn boom" title="Boomerang">&infin;</button>
+        <button id="chooseThree" class="mode-btn three" title="3 Fotos">☰</button>
       </div>
-      <p style="color:#ccc;margin-top:14px">Será usada a câmera frontal do celular. Posicione-se dentro do quadro.</p>
+      <p style="margin-top:12px;color:#ddd">Boomerang = vídeo vertical para stories. 3 Fotos = impressão.</p>
     </div>
   </div>
 
-  <!-- Live camera preview -->
+  <!-- === VIDEO (front camera preview) and canvas overlays === -->
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="canvasEl"></canvas>
-  <div id="cropFrame" style="display:none"></div>
+  <div id="cropOverlay"></div>
 
-  <!-- Countdown / REC / progress -->
   <div id="countdown"></div>
-  <div id="recDot" style="display:none"><span id="recIndicator"></span>&nbsp;<strong id="recLabel">REC</strong></div>
-  <div id="progress" style="display:none"></div>
+  <div id="msg"></div>
 
-  <!-- Preview modal -->
-  <div id="previewScreen" class="hidden">
-    <div id="previewHolder"></div>
-    <div class="previewButtons">
-      <button id="refazerBtn" class="btn">🔄 Refazer</button>
-      <button id="continuarBtn" class="btn">✅ Continuar</button>
+  <!-- Preview / Refazer | Continuar -->
+  <div id="previewScreen">
+    <div style="text-align:center">
+      <img id="previewImage" src="" alt="Preview">
+      <div class="preview-buttons">
+        <button id="refazerBtn" class="preview-btn">🔄 Refazer</button>
+        <button id="continuarBtn" class="preview-btn">✅ Continuar</button>
+      </div>
     </div>
   </div>
 
   <!-- Thank you -->
   <div id="thankScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7)">
-    <div style="text-align:center">
-      <img src="logo1.png" class="logo" onerror="this.style.display='none'">
-      <h2 style="color:#222">✨ Obrigado!</h2>
-      <p style="color:#444">Aguarde o operador, suas fotos serão processadas.</p>
+    <div class="center-card">
+      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+      <h2 style="color:#222;margin-bottom:6px">✨ Obrigado!</h2>
+      <p style="color:#444">Aguarde o operador finalizar a sessão.</p>
     </div>
   </div>
 
-  <!-- QR overlay -->
-  <div id="qrOverlay">
-    <div id="qrModal" style="display:none">
-      <canvas id="qrCanvas" width="260" height="260"></canvas>
-      <div style="margin-top:8px;font-size:14px;color:#222">Escaneie o QR para ver suas fotos</div>
+  <!-- QR overlay when server sends visualizador URL -->
+  <div id="qrOverlay" class="qr-overlay">
+    <div class="qr-modal">
+      <div style="font-weight:700;margin-bottom:8px">Escaneie o QR para ver suas fotos</div>
+      <canvas id="qrCanvas" width="260" height="260" style="background:#fff;border-radius:6px"></canvas>
+      <div style="font-size:13px;color:#444;margin-top:8px">As fotos ficarão disponíveis por 7 dias</div>
     </div>
   </div>
 
-  <div id="debugInfo" style="display:none"></div>
+  <div id="debugInfo"></div>
+
+  <audio id="beep" src="clack.mp3" preload="auto"></audio>
+  <audio id="inicio" src="inicio.mp3" preload="auto"></audio>
+  <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
 <script>
-/*
-  Versão atualizada — fullscreen resilient, não remove funcionalidades.
-  Backend: https://festadodavi-production-0591.up.railway.app
-  Funcionalidades:
-   - Entrar em tela cheia (tenta vários métodos). Se falha, ainda assim avança.
-   - Tela de boas-vindas -> seleção -> captura (boomerang & 3 fotos).
-   - Usa sempre câmera frontal do celular (getUserMedia facingMode:'user').
-   - Boomerang grava direto da stream (MediaRecorder) 2s, cria loop forward+reverse -> ~15s.
-   - Preview ao vivo não congela. Preview final com Refazer/Continuar.
-   - Envia 'photos_submit' (array dataURL) para o server; envia 'boomerang_ready' (binary ArrayBuffer) com metadata.
+/* celular.html — fluxo completo
+   - Backend: https://festadodavi-production-0591.up.railway.app
+   - Fluxo:
+     1) enter fullscreen (only button on initial page)
+     2) welcome (logo + iniciar sessão)
+     3) mode selection (boom / 3x)
+     4a) 3x photos: use front camera live preview (mirrored), countdowns, capture 3 photos, per-photo preview (refazer/continuar), then emit 'photos_submit' with array of dataURLs
+     4b) boomerang: use front camera, countdown, record 2s short clip (cropped to BOOM_AREA mapped to camera), generate boomerang by repeating forward+reverse to ~15s (canvas+MediaRecorder), emit 'boomerang_ready' (ArrayBuffer) and 'photo_ready' with thumbnail
+   - Important: all captures use camera frontal do celular (no webcam do PC)
 */
 
 (function(){
   const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
   const socket = io(SERVER_URL, { transports:['polling','websocket'], reconnection:true, path:'/socket.io' });
 
-  // TEMPLATE & BOOM area (coords relative to 3375x6000)
+  // TEMPLATE and BOOM area (relative to template 3375x6000)
   const TEMPLATE_W = 3375, TEMPLATE_H = 6000;
-  const BOOM_AREA = { x:295, y:272, w:2785, h:4159 };
-  const BOOM_RECORD_MS = 2000;
-  const BOOM_LOOP_MS = 15000;
-  const BOOM_TARGET_W = 720; // ajuste se quiser 1080
+  const BOOM_AREA = { x:295, y:272, w:2785, h:4159 }; // coords you provided
+  const BOOM_TARGET_W = 1080;
+  const BOOM_TARGET_H = Math.round(BOOM_TARGET_W * (BOOM_AREA.h / BOOM_AREA.w));
 
   // DOM refs
   const enterFs = document.getElementById('enterFs');
   const enterFsBtn = document.getElementById('enterFsBtn');
-  const fullscreenFail = document.getElementById('fullscreenFail');
   const welcomeScreen = document.getElementById('welcomeScreen');
   const startBtn = document.getElementById('startBtn');
-  const selectionScreen = document.getElementById('selectionScreen');
-  const btnBoom = document.getElementById('btnBoom');
-  const btnThree = document.getElementById('btnThree');
+  const modeScreen = document.getElementById('modeScreen');
+  const chooseBoom = document.getElementById('chooseBoom');
+  const chooseThree = document.getElementById('chooseThree');
+
   const videoEl = document.getElementById('videoEl');
   const canvasEl = document.getElementById('canvasEl');
-  const cropFrame = document.getElementById('cropFrame');
+  const cropOverlay = document.getElementById('cropOverlay');
   const countdownEl = document.getElementById('countdown');
-  const recDot = document.getElementById('recDot');
-  const recIndicator = document.getElementById('recIndicator');
-  const recLabel = document.getElementById('recLabel');
-  const progressEl = document.getElementById('progress');
+  const msgEl = document.getElementById('msg');
+
   const previewScreen = document.getElementById('previewScreen');
-  const previewHolder = document.getElementById('previewHolder');
+  const previewImage = document.getElementById('previewImage');
   const refazerBtn = document.getElementById('refazerBtn');
   const continuarBtn = document.getElementById('continuarBtn');
-  const thankScreen = document.getElementById('thankScreen');
+
   const qrOverlay = document.getElementById('qrOverlay');
-  const qrModal = document.getElementById('qrModal');
   const qrCanvas = document.getElementById('qrCanvas');
-  const debugInfo = document.getElementById('debugInfo');
+  const debugEl = document.getElementById('debugInfo');
 
+  const thankScreen = document.getElementById('thankScreen');
+
+  // State
   let session = (new URLSearchParams(location.search)).get('session') || 'cabine-fixa';
-  let stream = null;
-  let previewRaf = null;
-  let photos = [];
+  let mode = null; // 'three' | 'boom'
+  let stream = null; // MediaStream from front camera
+  let photos = []; // collected dataURLs for 3-photo flow
+  let currentCaptured = null;
+  let isCapturing = false;
 
-  function debug(msg){ debugInfo.style.display='block'; debugInfo.textContent = '['+new Date().toLocaleTimeString()+'] '+msg+"\n"+debugInfo.textContent; console.log(msg); }
+  // Debug updater
+  setInterval(()=> {
+    debugEl.textContent = `Sessão: ${session}\nModo: ${mode || '-'}\nFotos capturadas: ${photos.length}\nSocket: ${socket.connected ? '🟢 conectado' : '🔴 desconectado'}`;
+  }, 800);
 
-  // Socket events
-  socket.on('connect', ()=> { debug('socket conectado: ' + socket.id); socket.emit('join_session', { session, role: 'viewer' }); });
-  socket.on('show_qr', ({ visualizadorUrl }) => {
-    if(!visualizadorUrl) return;
-    qrModal.style.display = 'block';
-    try { QRCode.toCanvas(qrCanvas, visualizadorUrl, { width:260 }, (err)=>{ if(err) debug('QR error: '+err); qrOverlay.classList.add('visible'); }); } catch(e){ qrOverlay.classList.add('visible'); }
+  // Helper: show/hide screens
+  function showScreen(el){
+    [enterFs, welcomeScreen, modeScreen, previewScreen, thankScreen].forEach(s => {
+      if(!s) return;
+      s.classList.add('hidden');
+      s.style.display = 'none';
+    });
+    // hide video/canvas unless needed
+    videoEl.style.display = 'none';
+    canvasEl.style.display = 'none';
+    cropOverlay.style.display = 'none';
+    countdownEl.style.display = 'none';
+    msgEl.textContent = '';
+
+    if(el){
+      el.classList.remove('hidden');
+      el.style.display = 'flex';
+    }
+  }
+
+  showScreen(enterFs); // initial screen
+
+  // -------------------------
+  // SOCKET handlers
+  // -------------------------
+  socket.on('connect', () => {
+    log('Conectado ao servidor socket: ' + socket.id);
+    socket.emit('join_session', { session, role: 'viewer' });
+    // ask server for a cached operator frame (optional) — but we don't use PC webcam for captures
+    socket.emit('request_stream', { session, viewerId: socket.id });
   });
-  socket.on('reset_session', ()=> { photos = []; showScreen(welcomeScreen); });
 
-  // Fullscreen attempt with fallbacks; always advance to welcome screen even if fullscreen fails.
-  enterFsBtn.addEventListener('click', async (e) => {
-    e.preventDefault();
-    let ok = false;
+  socket.on('disconnect', (r) => log('Socket desconectado: ' + r));
+
+  socket.on('show_qr', ({ visualizadorUrl }) => {
+    if (!visualizadorUrl) return;
     try {
-      // standard
-      if (document.fullscreenEnabled && document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen();
-        ok = true;
-      } else if (document.documentElement.webkitRequestFullscreen) {
-        // Safari / older
-        await document.documentElement.webkitRequestFullscreen();
-        ok = true;
-      } else if (document.documentElement.msRequestFullscreen) {
-        await document.documentElement.msRequestFullscreen();
-        ok = true;
-      }
-    } catch(err){
-      debug('requestFullscreen failed: ' + (err && err.message ? err.message : err));
-      ok = false;
+      QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 260 }, (err) => {
+        if (err) log('Erro gerar QR: '+err);
+        qrOverlay.style.display = 'flex';
+      });
+    } catch(e){
+      qrOverlay.style.display = 'flex';
     }
-    if(!ok){
-      // maybe blocked due to iframe / policies. Show small banner and continue anyway.
-      fullscreenFail.style.display = 'block';
-      setTimeout(()=> fullscreenFail.style.display = 'none', 3500);
-      debug('Fullscreen não disponível. Avançando mesmo assim.');
-    } else {
-      debug('Entrou em fullscreen com sucesso.');
-    }
+  });
+
+  socket.on('reset_session', ({ session: s }) => {
+    if (s && s !== session) return;
+    // back to start state
+    photos = [];
+    currentCaptured = null;
+    stopStreamSilently();
+    showScreen(welcomeScreen);
+    qrOverlay.style.display = 'none';
+  });
+
+  // -------------------------
+  // Fullscreen / UI flow
+  // -------------------------
+  enterFsBtn.addEventListener('click', async () => {
+    try { await document.documentElement.requestFullscreen(); } catch(e){ /* ignore */ }
     showScreen(welcomeScreen);
     socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
   });
 
-  startBtn.addEventListener('click', ()=> {
-    showScreen(selectionScreen);
+  startBtn.addEventListener('click', async () => {
+    // After clicking 'Iniciar Sessão', show the mode selection (buttons)
+    showScreen(modeScreen);
+    await playAudioSafe('inicio');
   });
 
-  btnThree.addEventListener('click', ()=> beginThreePhotosFlow());
-  btnBoom.addEventListener('click', ()=> beginBoomerangFlow());
-
-  function showScreen(el){
-    [enterFs, welcomeScreen, selectionScreen, previewScreen, thankScreen].forEach(s => { if(s){ s.classList.add('hidden'); s.classList.remove('visible'); } });
+  chooseThree.addEventListener('click', async () => {
+    mode = 'three';
+    // start front camera preview live
+    await ensureFrontCameraStream();
+    // show live preview and overlay appropriate crop for print areas (we'll draw crop to indicate area)
+    videoEl.style.display = 'block';
     canvasEl.style.display = 'none';
-    videoEl.style.display = 'none';
-    cropFrame.style.display = 'none';
-    countdownEl.textContent = '';
-    if(el){ el.classList.remove('hidden'); el.classList.add('visible'); }
-  }
+    cropOverlay.style.display = 'none'; // no single crop for printing (we guide by preview framing)
+    showScreen(null); // hide central cards, keep video visible
+    // start capture sequence for 3 photos
+    await startThreePhotosSequence();
+  });
 
-  // ensure front camera
-  async function ensureFrontCamera(){
-    if(stream) return stream;
+  chooseBoom.addEventListener('click', async () => {
+    mode = 'boom';
+    await ensureFrontCameraStream();
+    // show live preview and overlay the BOOM area (mapped on screen)
+    videoEl.style.display = 'block';
+    drawBoomOverlay(); // position cropOverlay to show exact boomerang area
+    cropOverlay.style.display = 'block';
+    showScreen(null);
+    await startBoomerangSequence();
+  });
+
+  // -------------------------
+  // Camera helpers (front camera)
+  // -------------------------
+  async function ensureFrontCameraStream(){
+    if (stream) return stream;
     try {
-      const constraints = { video: { facingMode: { ideal: "user" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false };
+      const constraints = {
+        video: {
+          facingMode: { ideal: "user" },
+          width: { ideal: 1080 }, // high resolution but not insane; avoids 600x400 limitation
+          height: { ideal: 1920 }
+        },
+        audio: false
+      };
       stream = await navigator.mediaDevices.getUserMedia(constraints);
       videoEl.srcObject = stream;
-      videoEl.style.display = 'block';
-      videoEl.style.transform = 'scaleX(-1)';
+      videoEl.style.transform = 'scaleX(-1)'; // mirrored preview so user sees themselves like a mirror
       await videoEl.play().catch(()=>{});
       return stream;
     } catch(e){
-      debug('getUserMedia error: ' + (e && e.message ? e.message : e));
+      log('Erro ao acessar câmera frontal: ' + (e.message || e));
+      alert('Não foi possível acessar a câmera frontal. Verifique permissões.');
       throw e;
     }
   }
 
-  function startPreviewLoop(){
-    canvasEl.style.display = 'block';
-    videoEl.style.display = 'block';
-    function step(){
-      drawPreview();
-      previewRaf = requestAnimationFrame(step);
-    }
-    if(!previewRaf) step();
-  }
-  function stopPreviewLoop(){ if(previewRaf){ cancelAnimationFrame(previewRaf); previewRaf = null; } }
-
-  function drawPreview(){
-    if(!videoEl.videoWidth) return;
-    const vw = videoEl.videoWidth, vh = videoEl.videoHeight;
-    const cw = window.innerWidth, ch = window.innerHeight;
-    canvasEl.width = cw; canvasEl.height = ch;
-    const ctx = canvasEl.getContext('2d');
-    const scale = Math.max(cw / vw, ch / vh);
-    const w = vw * scale, h = vh * scale;
-    const dx = (cw - w)/2, dy = (ch - h)/2;
-    ctx.save(); ctx.translate(cw,0); ctx.scale(-1,1);
-    try { ctx.drawImage(videoEl, 0,0, vw, vh, 0, dy, w, h); } catch(e){}
-    ctx.restore();
-    // compute crop rectangle on canvas
-    const sx = w / TEMPLATE_W;
-    const sy = h / TEMPLATE_H;
-    const cx = dx + BOOM_AREA.x * sx, cy = dy + BOOM_AREA.y * sy;
-    const cwCrop = BOOM_AREA.w * sx, chCrop = BOOM_AREA.h * sy;
-    cropFrame.style.left = cx + 'px';
-    cropFrame.style.top = cy + 'px';
-    cropFrame.style.width = cwCrop + 'px';
-    cropFrame.style.height = chCrop + 'px';
-    cropFrame.style.display = 'block';
+  function stopStreamSilently(){
+    if (!stream) return;
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+    videoEl.srcObject = null;
+    videoEl.style.display = 'none';
   }
 
-  /* 3-FOTOS flow */
-  async function beginThreePhotosFlow(){
-    try { await ensureFrontCamera(); } catch(e){ alert('Erro ao acessar câmera: ' + (e.message||e)); showScreen(selectionScreen); return; }
+  // -------------------------
+  // Overlay mapping: BOOM area shown on screen
+  // -------------------------
+  function drawBoomOverlay(){
+    // Map BOOM_AREA (template coords) -> screen coords where the video is drawn
+    // We assume video is cover-fitted into the viewport (object-fit:cover)
+    const vw = videoEl.clientWidth || window.innerWidth;
+    const vh = videoEl.clientHeight || window.innerHeight;
+    // video videoEl.videoWidth/videoHeight give actual stream resolution
+    const vidW = videoEl.videoWidth || 1080;
+    const vidH = videoEl.videoHeight || 1920;
+    // Compute scale for cover
+    const scale = Math.max(vw / vidW, vh / vidH);
+    const drawW = vidW * scale, drawH = vidH * scale;
+    const dx = (vw - drawW) / 2, dy = (vh - drawH) / 2;
+
+    // Map template->video coordinate scale factor: assume template was intended to map to camera area similarly
+    // We'll approximate by mapping TEMPLATE_W/TEMPLATE_H -> vidW/vidH
+    const sx = drawW / TEMPLATE_W;
+    const sy = drawH / TEMPLATE_H;
+    // compute crop rect on screen
+    const cx = dx + BOOM_AREA.x * sx;
+    const cy = dy + BOOM_AREA.y * sy;
+    const cw = BOOM_AREA.w * sx;
+    const ch = BOOM_AREA.h * sy;
+
+    // position cropOverlay absolutely relative to viewport
+    cropOverlay.style.left = `${cx}px`;
+    cropOverlay.style.top = `${cy}px`;
+    cropOverlay.style.width = `${cw}px`;
+    cropOverlay.style.height = `${ch}px`;
+  }
+
+  // keep overlay updated on resize / orientation
+  window.addEventListener('resize', ()=> { if (mode === 'boom' && stream) drawBoomOverlay(); });
+
+  // -------------------------
+  // THREE PHOTOS SEQUENCE
+  // -------------------------
+  async function startThreePhotosSequence(){
     photos = [];
-    startPreviewLoop();
-    await sleep(200);
-    for(let i=0;i<3;i++){
+    isCapturing = true;
+    // we will take 3 photos, with countdown per photo
+    for (let i=0;i<3;i++){
       try {
-        await showCountdown(4);
-        const dataUrl = await capturePhoto();
-        const keep = await showImagePreviewForDecision(dataUrl);
-        if(!keep){ i--; continue; }
-        photos.push(dataUrl);
+        // show live preview during countdown (video element visible)
+        await runCountdownForPhoto(i+1, 5); // 5-second countdown like before
+        // capture image from front camera, mirrored (so user sees same)
+        const dataUrl = capturePhotoFromVideoMirrored();
+        // show preview and wait for refazer/continuar
+        const decision = await showPreviewAndWait(dataUrl);
+        if (decision === 'refazer') {
+          // repeat same index
+          i = i - 1;
+          continue;
+        } else {
+          // continue to next
+          photos.push(dataUrl);
+        }
       } catch(e){
-        debug('Erro captura: ' + (e && e.message ? e.message : e));
-        i--; await sleep(300);
+        log('Erro durante captura 3x: ' + (e.message || e));
+        i = i - 1;
+        await sleep(800);
+        continue;
       }
     }
-    // send photos_submit to server
-    showProgress('Enviando fotos...');
+    // after 3 photos, send photos array to server together
     try {
       socket.emit('photos_submit', { session, viewerId: socket.id, photos });
-      debug('photos_submit emitido ('+photos.length+' fotos)');
-      showScreen(thankScreen);
+      log('photos_submit enviado com ' + photos.length + ' fotos.');
     } catch(e){
-      debug('Erro envio photos_submit: '+e);
-      alert('Erro enviando fotos ao servidor.');
-      showScreen(selectionScreen);
-    } finally { hideProgress(); stopPreviewLoop(); }
+      log('Erro enviando photos_submit: ' + e);
+    }
+    // show thank you screen
+    isCapturing = false;
+    showScreen(thankScreen);
+    try { playAudioSafe('fim'); } catch(e){}
   }
 
-  async function capturePhoto(){
-    const vw = videoEl.videoWidth || 1280, vh = videoEl.videoHeight || 720;
-    const c = document.createElement('canvas'); c.width = vw; c.height = vh;
+  function capturePhotoFromVideoMirrored(){
+    // capture highest resolution available from video element
+    const v = videoEl;
+    const w = v.videoWidth || 1080;
+    const h = v.videoHeight || 1920;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
     const ctx = c.getContext('2d');
-    ctx.save(); ctx.translate(c.width,0); ctx.scale(-1,1);
-    ctx.drawImage(videoEl, 0,0, vw, vh);
+
+    // Draw mirrored to keep same orientation as user saw
+    ctx.save();
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+    try {
+      ctx.drawImage(v, 0, 0, w, h);
+    } catch(e){ log('drawImage error: ' + e); }
     ctx.restore();
     return c.toDataURL('image/jpeg', 0.95);
   }
 
-  function showImagePreviewForDecision(dataUrl){
+  function showPreviewAndWait(dataUrl){
     return new Promise((resolve) => {
-      previewHolder.innerHTML = '';
-      const img = document.createElement('img'); img.src = dataUrl;
-      previewHolder.appendChild(img);
-      previewScreen.classList.remove('hidden'); previewScreen.classList.add('visible');
-      const onRef = () => { cleanup(); resolve(false); };
-      const onCont = () => { cleanup(); resolve(true); };
-      function cleanup(){ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); previewScreen.classList.add('hidden'); previewScreen.classList.remove('visible'); }
+      previewImage.src = dataUrl;
+      previewScreen.style.display = 'flex';
+      // attach temporary handlers
+      function onRef(){
+        cleanup();
+        resolve('refazer');
+      }
+      function onCont(){
+        cleanup();
+        resolve('continuar');
+      }
+      function cleanup(){
+        previewScreen.style.display = 'none';
+        refazerBtn.removeEventListener('click', onRef);
+        continuarBtn.removeEventListener('click', onCont);
+      }
       refazerBtn.addEventListener('click', onRef);
       continuarBtn.addEventListener('click', onCont);
-    }).then(async (keep) => { await sleep(200); startPreviewLoop(); return keep; });
-  }
-
-  /* BOOMERANG flow */
-  async function beginBoomerangFlow(){
-    try { await ensureFrontCamera(); } catch(e){ alert('Erro ao acessar câmera: ' + (e.message||e)); showScreen(selectionScreen); return; }
-    startPreviewLoop();
-    await sleep(200);
-    await showCountdown(3);
-    showRec(true); showProgress('Gravando boomerang...');
-    const shortBlob = await recordRawClipFromStream(BOOM_RECORD_MS);
-    showRec(false); hideProgress();
-    if(!shortBlob){ alert('Falha ao gravar. Tente novamente.'); showScreen(selectionScreen); return; }
-    debug('Short clip gravado, bytes: ' + (shortBlob.size || 0));
-    // generate boomerang final
-    showProgress('Processando boomerang...');
-    stopPreviewLoop();
-    const finalBlob = await generateBoomerangFromShortClip(shortBlob, { loopMs: BOOM_LOOP_MS, targetW: BOOM_TARGET_W });
-    hideProgress();
-    if(!finalBlob){ alert('Erro ao processar boomerang'); showScreen(selectionScreen); startPreviewLoop(); return; }
-    const videoUrl = URL.createObjectURL(finalBlob);
-    const keep = await showVideoPreviewDecision(videoUrl);
-    if(!keep){ startPreviewLoop(); return; }
-    // send boomerang to server (binary)
-    showProgress('Enviando boomerang...');
-    try {
-      const ab = await finalBlob.arrayBuffer();
-      socket.emit('boomerang_ready', { session, viewerId: socket.id, filename: `boomerang_${Date.now()}.webm`, size: ab.byteLength }, ab);
-      const thumb = await blobToDataURL(finalBlob, true).catch(()=>null);
-      if(thumb) socket.emit('photo_ready', { session, index: 0, viewerId: socket.id, photo: thumb });
-      if(thumb) socket.emit('photos_submit', { session, viewerId: socket.id, photos: [thumb] });
-      debug('boomerang_ready enviado.');
-      showScreen(thankScreen);
-    } catch(e){
-      debug('Erro envio boomerang: ' + e);
-      window.open(videoUrl, '_blank');
-      showScreen(selectionScreen);
-    } finally { hideProgress(); }
-  }
-
-  // record raw clip directly from stream (fast)
-  function recordRawClipFromStream(msDuration){
-    return new Promise(async (resolve) => {
-      if(!stream){ try { await ensureFrontCamera(); } catch(e){ resolve(null); return; } }
-      let recorder; const chunks = [];
-      try { recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' }); } catch(e) {
-        try { recorder = new MediaRecorder(stream); } catch(err){ debug('MediaRecorder não disponível'); resolve(null); return; }
-      }
-      recorder.ondataavailable = ev => { if(ev.data && ev.data.size) chunks.push(ev.data); };
-      recorder.start();
-      setTimeout(()=>{ if(recorder && recorder.state === 'recording') recorder.stop(); }, msDuration);
-      recorder.onstop = () => { resolve(new Blob(chunks, { type:'video/webm' })); };
-      setTimeout(()=>{ if(recorder && recorder.state === 'recording') recorder.stop(); }, msDuration + 4000);
     });
   }
 
-  // generate boomerang by replaying short clip forward+reverse onto canvas and recording
-  async function generateBoomerangFromShortClip(shortBlob, opts = { loopMs:15000, targetW:720 }){
-    const loopMs = opts.loopMs || 15000; const targetW = opts.targetW || 720;
-    const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.src = URL.createObjectURL(shortBlob);
-    await new Promise((res,rej)=>{ v.onloadedmetadata = res; v.onerror = ()=> rej(new Error('Erro carregar clip')); });
-    const aspect = (v.videoWidth && v.videoHeight) ? (v.videoWidth / v.videoHeight) : (9/16);
-    const targetH = Math.round(targetW / aspect);
-    const canvas = document.createElement('canvas'); canvas.width = targetW; canvas.height = targetH;
-    const ctx = canvas.getContext('2d');
-    const template = new Image(); template.crossOrigin = 'anonymous'; template.src = 'bomerang.png';
-    await new Promise(r => { template.onload = r; template.onerror = r; });
-    const scaleFactor = targetW / TEMPLATE_W;
-    const area = { x: Math.round(BOOM_AREA.x * scaleFactor), y: Math.round(BOOM_AREA.y * scaleFactor), w: Math.round(BOOM_AREA.w * scaleFactor), h: Math.round(BOOM_AREA.h * scaleFactor) };
-    const streamCap = canvas.captureStream(30);
-    const chunks = []; let rec;
-    try { rec = new MediaRecorder(streamCap, { mimeType: 'video/webm;codecs=vp8' }); } catch(e) { try { rec = new MediaRecorder(streamCap); } catch(e){ debug('MediaRecorder canvas fail'); return null; } }
-    rec.ondataavailable = ev => { if(ev.data && ev.data.size) chunks.push(ev.data); };
-    rec.start();
-    const startTime = performance.now();
-    function drawFrame(){
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      if(template && template.complete && template.naturalWidth) ctx.drawImage(template, 0,0, TEMPLATE_W, TEMPLATE_H, 0,0, canvas.width, canvas.height);
-      else { ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height); }
-      try { ctx.drawImage(v, 0,0, v.videoWidth, v.videoHeight, area.x, area.y, area.w, area.h); } catch(e){}
-    }
-    async function playForward(){ return new Promise(res => { v.currentTime = 0; v.play().catch(()=>{}); const onTick = () => { drawFrame(); if(v.ended || v.currentTime >= v.duration - 0.001){ v.pause(); v.removeEventListener('timeupdate', onTick); res(); } }; v.addEventListener('timeupdate', onTick); drawFrame(); }); }
-    async function playReverse(){ return new Promise(res => { v.pause(); v.currentTime = v.duration; function step(){ const stepSec = 1/30; v.currentTime = Math.max(0, v.currentTime - stepSec); drawFrame(); if(v.currentTime > 0.02) requestAnimationFrame(step); else res(); } step(); }); }
-    while(performance.now() - startTime < loopMs){ await playForward(); if(performance.now() - startTime >= loopMs) break; await playReverse(); }
-    await sleep(120); await new Promise(res => { rec.onstop = res; rec.stop(); });
-    return new Blob(chunks, { type:'video/webm' });
-  }
-
-  // video preview decision
-  function showVideoPreviewDecision(videoUrl){
-    return new Promise((resolve) => {
-      previewHolder.innerHTML = '';
-      const v = document.createElement('video'); v.src = videoUrl; v.loop = true; v.autoplay = true; v.controls = true;
-      previewHolder.appendChild(v);
-      previewScreen.classList.remove('hidden'); previewScreen.classList.add('visible');
-      const onRef = () => { cleanup(); resolve(false); };
-      const onCont = () => { cleanup(); resolve(true); };
-      function cleanup(){ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); previewScreen.classList.add('hidden'); previewScreen.classList.remove('visible'); }
-      refazerBtn.addEventListener('click', onRef);
-      continuarBtn.addEventListener('click', onCont);
-    }).then(async (keep)=>{ await sleep(200); return keep; });
-  }
-
-  // image preview decision (three photos) implemented earlier; reused
-  // blob -> dataURL (optionally first frame)
-  function blobToDataURL(blob, firstFrame=false){
-    return new Promise((res,rej) => {
-      if(!firstFrame){
-        const reader = new FileReader(); reader.onload = ()=> res(reader.result); reader.onerror = rej; reader.readAsDataURL(blob);
+  async function runCountdownForPhoto(index, seconds = 5){
+    // show countdown overlay and allow live video behind it
+    countdownEl.style.display = 'block';
+    for (let t = seconds; t > 0; t--){
+      if (t <= 2){
+        countdownEl.textContent = 'SORRIA!';
+        countdownEl.style.color = '#ffd600';
+        if (t === 2) { try { document.getElementById('beep').currentTime = 0; document.getElementById('beep').play().catch(()=>{}); } catch(e){} }
       } else {
-        const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.src = URL.createObjectURL(blob);
-        v.onloadeddata = async () => {
-          try { v.currentTime = Math.min(0.05, v.duration/2 || 0.05); await sleep(80); const c = document.createElement('canvas'); c.width = v.videoWidth || 640; c.height = v.videoHeight || 480; const ctx = c.getContext('2d'); ctx.drawImage(v,0,0,c.width,c.height); res(c.toDataURL('image/jpeg', 0.85)); } catch(e){ rej(e); }
-        };
-        v.onerror = rej;
+        countdownEl.textContent = String(t);
+        countdownEl.style.color = '#fff';
       }
-    });
-  }
-
-  // Countdown UI
-  async function showCountdown(seconds = 3){
-    for(let t=seconds; t>0; t--){
-      countdownEl.textContent = (t <= 1) ? 'SORRIA!' : String(t);
       await sleep(1000);
     }
-    countdownEl.textContent = '';
+    countdownEl.style.display = 'none';
   }
 
-  function showRec(on){
-    if(on){ recDot.style.display = 'flex'; recIndicator.classList.add('blink'); recLabel.textContent = 'REC'; }
-    else { recDot.style.display = 'none'; recIndicator.classList.remove('blink'); }
+  // -------------------------
+  // BOOMERANG SEQUENCE (client-side)
+  // -------------------------
+  async function startBoomerangSequence(){
+    isCapturing = true;
+    // show small countdown then record short clip
+    await runShortCountdown(3); // 3s to position
+    // record a short 2 second cropped clip from front camera mapped to BOOM_AREA
+    const shortBlob = await recordCroppedShortClip(2000);
+    if (!shortBlob) {
+      log('Não foi possível gravar clipe curto do boomerang');
+      isCapturing = false;
+      showScreen(welcomeScreen);
+      return;
+    }
+    // create thumbnail
+    let thumb = null;
+    try { thumb = await blobToDataURL(shortBlob, true); } catch(e){ log('Erro gerar thumb: '+e); }
+
+    // generate final boomerang by repeating forward+reverse onto canvas and recording ~15s
+    const finalBlob = await generateBoomerangFromShortClip(shortBlob, { loopMs:15000, targetW:BOOM_TARGET_W, targetH:BOOM_TARGET_H });
+    if (!finalBlob) {
+      log('Falha ao gerar boomerang final.');
+      isCapturing = false;
+      showScreen(welcomeScreen);
+      return;
+    }
+
+    // send boomerang to server (ArrayBuffer) and send thumbnail as photo_ready
+    try {
+      const ab = await finalBlob.arrayBuffer();
+      socket.emit('boomerang_ready', { session, viewerId: socket.id, filename: `boomerang_${Date.now()}.webm`, data: ab });
+      log('boomerang_ready emitido (ArrayBuffer).');
+      if (thumb) {
+        socket.emit('photo_ready', { session, index: 0, viewerId: socket.id, photo: thumb });
+        log('photo_ready (thumbnail) emitido.');
+      }
+      // also keep server's photos flow consistent: emit photos_submit with single thumb
+      socket.emit('photos_submit', { session, viewerId: socket.id, photos: [thumb] });
+    } catch(e){
+      log('Erro ao enviar boomerang: ' + (e.message||e));
+      // fallback: open blob in new tab for manual download
+      const url = URL.createObjectURL(finalBlob);
+      window.open(url, '_blank');
+    }
+
+    isCapturing = false;
+    showScreen(thankScreen);
+    try { playAudioSafe('fim'); } catch(e){}
   }
 
-  function showProgress(txt){ progressEl.style.display = 'block'; progressEl.textContent = txt || ''; }
-  function hideProgress(){ progressEl.style.display = 'none'; progressEl.textContent = ''; }
+  async function runShortCountdown(seconds = 3){
+    countdownEl.style.display = 'block';
+    for (let t = seconds; t > 0; t--){
+      countdownEl.textContent = String(t);
+      await sleep(700);
+    }
+    countdownEl.style.display = 'none';
+  }
+
+  // record a short crop (BOOM_AREA) for msDuration milliseconds
+  async function recordCroppedShortClip(msDuration = 2000){
+    try {
+      if (!stream) await ensureFrontCameraStream();
+    } catch(e){
+      return null;
+    }
+    // ensure video has metadata to know videoWidth/videoHeight
+    if (!videoEl.videoWidth || !videoEl.videoHeight) {
+      // try to play to populate
+      try { await videoEl.play().catch(()=>{}); } catch(e){}
+    }
+    const actualVw = videoEl.videoWidth || 1080;
+    const actualVh = videoEl.videoHeight || 1920;
+
+    // Map TEMPLATE -> camera (center-cover mapping)
+    const scale = Math.max(actualVw / TEMPLATE_W, actualVh / TEMPLATE_H);
+    const drawW = TEMPLATE_W * scale, drawH = TEMPLATE_H * scale;
+    const dx = (actualVw - drawW) / 2;
+    const dy = (actualVh - drawH) / 2;
+    const cropX = Math.round(dx + BOOM_AREA.x * scale);
+    const cropY = Math.round(dy + BOOM_AREA.y * scale);
+    const cropW = Math.round(BOOM_AREA.w * scale);
+    const cropH = Math.round(BOOM_AREA.h * scale);
+    log(`Crop on camera pixels: x=${cropX},y=${cropY},w=${cropW},h=${cropH}`);
+
+    // We will scale the crop to BOOM_TARGET_W x BOOM_TARGET_H for performance
+    const outW = BOOM_TARGET_W, outH = BOOM_TARGET_H;
+    const off = document.createElement('canvas');
+    off.width = outW; off.height = outH;
+    const offCtx = off.getContext('2d');
+
+    // capture frames into off canvas, then record that canvas.stream()
+    const captureStream = off.captureStream(30);
+    const recorded = [];
+    let options = { mimeType: 'video/webm;codecs=vp8' };
+    const recorder = new MediaRecorder(captureStream, options);
+    recorder.ondataavailable = e => { if (e.data && e.data.size) recorded.push(e.data); };
+    recorder.start();
+
+    const start = performance.now();
+    await new Promise(resolve => {
+      function drawFrame(){
+        try {
+          // draw mirrored crop? We want final boomerang to be mirrored like photos (user expectation).
+          offCtx.save();
+          offCtx.fillStyle = '#000'; offCtx.fillRect(0,0,outW,outH);
+          // drawImage(source, sx, sy, sw, sh, dx, dy, dw, dh)
+          // videoEl is mirrored in UI (scaleX(-1)). For capture, we draw as mirrored so final matches preview.
+          // To mirror: translate + scale
+          offCtx.translate(outW, 0);
+          offCtx.scale(-1, 1);
+          // We need to draw the crop region from video but mirrored: easiest is to draw normally then apply mirroring by transforming destination
+          // However drawImage with mirroring applied above expects source coordinates; we'll draw using drawImage with source region:
+          offCtx.drawImage(videoEl, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
+          offCtx.restore();
+        } catch(e){}
+        if (performance.now() - start < msDuration) {
+          requestAnimationFrame(drawFrame);
+        } else {
+          setTimeout(()=>{ recorder.stop(); resolve(); }, 60);
+        }
+      }
+      drawFrame();
+    });
+
+    await new Promise(res => recorder.onstop = res);
+    const blob = new Blob(recorded, { type: 'video/webm' });
+    return blob;
+  }
+
+  // generate boomerang final clip: plays short clip forward+reverse repeatedly onto a canvas which includes template underlay
+  async function generateBoomerangFromShortClip(shortBlob, opts = { loopMs:15000, targetW:1080, targetH:1857 }){
+    const loopMs = opts.loopMs || 15000;
+    const targetW = opts.targetW || BOOM_TARGET_W;
+    const targetH = opts.targetH || BOOM_TARGET_H;
+
+    const v = document.createElement('video');
+    v.src = URL.createObjectURL(shortBlob);
+    v.muted = true;
+    v.playsInline = true;
+    await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = rej; });
+
+    // canvas for final boomerang composition
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW; canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+
+    // load template image if available
+    const template = new Image();
+    template.crossOrigin = 'anonymous';
+    template.src = 'bomerang.png';
+    await new Promise((res) => { template.onload = res; template.onerror = res; });
+
+    // compute area on canvas for video from template scaling (we scale whole template to canvas)
+    const scaleFactor = targetW / TEMPLATE_W;
+    const area = {
+      x: Math.round(BOOM_AREA.x * scaleFactor),
+      y: Math.round(BOOM_AREA.y * scaleFactor),
+      w: Math.round(BOOM_AREA.w * scaleFactor),
+      h: Math.round(BOOM_AREA.h * scaleFactor)
+    };
+
+    const stream = canvas.captureStream(30);
+    const chunks = [];
+    const rec = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+    rec.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    rec.start();
+
+    const startTime = performance.now();
+
+    // helper to draw current v frame and template
+    function drawFrame() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if (template && template.complete && template.naturalWidth) {
+        ctx.drawImage(template, 0, 0, TEMPLATE_W, TEMPLATE_H, 0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      }
+      try {
+        ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, area.x, area.y, area.w, area.h);
+      } catch(e){}
+    }
+
+    // play forward
+    async function playForward() {
+      return new Promise(res => {
+        v.currentTime = 0;
+        v.play().catch(()=>{});
+        const tick = () => {
+          drawFrame();
+          if (v.ended || v.currentTime >= v.duration - 0.001) {
+            v.pause();
+            res();
+          } else {
+            requestAnimationFrame(tick);
+          }
+        };
+        tick();
+      });
+    }
+    // play reverse (manual stepping)
+    async function playReverse() {
+      return new Promise(res => {
+        v.pause();
+        v.currentTime = v.duration;
+        function step(){
+          const stepSec = 1/30;
+          v.currentTime = Math.max(0, v.currentTime - stepSec);
+          drawFrame();
+          if (v.currentTime > 0.02) {
+            requestAnimationFrame(step);
+          } else {
+            res();
+          }
+        }
+        step();
+      });
+    }
+
+    while (performance.now() - startTime < loopMs) {
+      await playForward();
+      if (performance.now() - startTime >= loopMs) break;
+      await playReverse();
+    }
+
+    // stop recorder
+    await sleep(120);
+    await new Promise(res => { rec.onstop = res; rec.stop(); });
+
+    const finalBlob = new Blob(chunks, { type: 'video/webm' });
+    return finalBlob;
+  }
+
+  // -------------------------
+  // Utilities: blob->dataURL (with first frame thumbnail)
+  // -------------------------
+  function blobToDataURL(blob, firstFrame=false){
+    return new Promise((resolve, reject) => {
+      if (!firstFrame) {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      } else {
+        const v = document.createElement('video');
+        v.muted = true; v.playsInline = true;
+        v.src = URL.createObjectURL(blob);
+        v.onloadeddata = async () => {
+          try {
+            v.currentTime = 0.05;
+          } catch(e){}
+          await sleep(80);
+          const c = document.createElement('canvas');
+          c.width = v.videoWidth || 640;
+          c.height = v.videoHeight || 480;
+          const ctx = c.getContext('2d');
+          try {
+            ctx.drawImage(v, 0, 0, c.width, c.height);
+            resolve(c.toDataURL('image/jpeg', 0.85));
+          } catch(e){ reject(e); }
+        };
+        v.onerror = (e) => reject(e);
+      }
+    });
+  }
+
+  // -------------------------
+  // small helpers
+  // -------------------------
   function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-  // expose for debug
-  window._cabine_mobile = { socket, ensureFrontCamera, startPreviewLoop: () => startPreviewLoop(), stopPreviewLoop: () => stopPreviewLoop() };
+  function log(msg){
+    const t = new Date().toLocaleTimeString();
+    debugEl.textContent = `[${t}] ${msg}\n` + debugEl.textContent;
+    console.log(msg);
+  }
 
-  // initial screen already visible (enter fullscreen). nothing else to do.
-})();
+  async function playAudioSafe(id){
+    try { const a = document.getElementById(id); if (a) { a.currentTime = 0; await a.play().catch(()=>{}); } } catch(e){}
+  }
+
+  // -------------------------
+  // Utilities: convert blob to arrayBuffer safely for socket emit
+  // -------------------------
+  async function blobToArrayBuffer(blob){
+    return await blob.arrayBuffer();
+  }
+
+  // expose _cabine for quick debug
+  window._cabine = { socket, ensureFrontCameraStream, stopStreamSilently, startThreePhotosSequence, startBoomerangSequence };
+
+  // finalize
+  log('Cliente pronto (celular).');
+
+})(); // IIFE end
 </script>
 </body>
 </html>
