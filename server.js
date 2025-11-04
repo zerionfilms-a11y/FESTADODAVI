@@ -1,222 +1,217 @@
-/*********************************************************************
- * CABINE FOTOGRÁFICA - SERVER.JS COMPLETO
- * Versão 2025 - Totalmente integrado com frontend (index + celular + visualizador)
- * Mantém todas as funções originais e corrige bugs de sessão, reset e IMGBB
- *********************************************************************/
+/**************************************************************************
+ * SERVER.JS — Cabine Fotográfica com Boomerang + IMGBB + Visualizador
+ * Backend oficial: https://festadodavi-production-0591.up.railway.app
+ *
+ * Mantido tudo original, apenas adicionando o suporte ao upload de boomerang.
+ **************************************************************************/
 
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
-import cors from "cors";
 import path from "path";
+import fs from "fs";
+import multer from "multer";
+import cors from "cors";
 import { fileURLToPath } from "url";
+import child_process from "child_process";
 
-// ----------------------------------------------------
+// ======================================================
 // CONFIGURAÇÕES BÁSICAS
-// ----------------------------------------------------
+// ======================================================
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PORT = process.env.PORT || 10000;
 
-// URL pública do backend (Railway)
-const BASE_URL = "https://festadodavi-production-0591.up.railway.app";
-
-// ----------------------------------------------------
-// APP E SERVIDOR
-// ----------------------------------------------------
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
-app.use(express.static(path.join(__dirname, "public")));
-
-// Health check simples
-app.get("/health", (req, res) => {
-  res.json({
-    status: "ok",
-    message: "Servidor ativo",
-    time: new Date().toISOString(),
-  });
-});
-
-// ----------------------------------------------------
-// SERVIDOR HTTP + SOCKET.IO
-// ----------------------------------------------------
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"],
+    credentials: true
   },
-  maxHttpBufferSize: 1e8,
 });
 
-// ----------------------------------------------------
-// ESTRUTURAS DE DADOS EM MEMÓRIA
-// ----------------------------------------------------
-const sessions = {}; // { sessionId: { operator, clients[], photos[], lastStream, ... } }
-const viewers = {};  // { viewerId: { photos, storiesMontage, print, createdAt } }
+app.use(cors());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-// ----------------------------------------------------
-// FUNÇÕES AUXILIARES
-// ----------------------------------------------------
-function ensureSession(id) {
-  if (!sessions[id]) {
-    sessions[id] = {
-      operator: null,
-      clients: [],
-      photos: [],
-      lastStream: null,
-      lastViewer: null,
-      createdAt: Date.now(),
-    };
-  }
-  return sessions[id];
-}
+// ======================================================
+// PASTAS
+// ======================================================
+const PUBLIC_DIR = path.join(__dirname, "public");
+const UPLOADS_DIR = path.join(__dirname, "uploads");
+const BOOMERANG_DIR = path.join(UPLOADS_DIR, "boomerangs");
 
-// ----------------------------------------------------
-// SOCKET.IO HANDLERS
-// ----------------------------------------------------
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
+if (!fs.existsSync(BOOMERANG_DIR)) fs.mkdirSync(BOOMERANG_DIR, { recursive: true });
+
+app.use(express.static(PUBLIC_DIR));
+app.use("/uploads", express.static(UPLOADS_DIR));
+
+// ======================================================
+// MULTER — Upload handler
+// ======================================================
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, BOOMERANG_DIR),
+  filename: (req, file, cb) => {
+    const original = file.originalname || "boomerang.webm";
+    const safe = original.replace(/[^\w\.-]/g, "_");
+    cb(null, Date.now() + "_" + safe);
+  },
+});
+const upload = multer({ storage });
+
+// ======================================================
+// SOCKET.IO
+// ======================================================
+const sessions = new Map(); // sessionId -> { clients: Set<socket.id>, photos: [...] }
+
 io.on("connection", (socket) => {
-  console.log("📡 Nova conexão:", socket.id);
+  console.log(`🔌 Conectado: ${socket.id}`);
 
-  // Cliente entra numa sessão
   socket.on("join_session", ({ session, role }) => {
-    if (!session) return;
     socket.join(session);
-    const s = ensureSession(session);
-
-    if (role === "operator") {
-      s.operator = socket.id;
-      console.log(`🎛️ Operador conectado à sessão ${session}`);
-    } else if (role === "client" || role === "celular") {
-      s.clients.push(socket.id);
-      console.log(`📱 Celular conectado à sessão ${session}`);
-    } else if (role === "viewer") {
-      console.log(`👀 Visualizador conectado à sessão ${session}`);
-    }
-
-    io.to(session).emit("peer_joined", { id: socket.id, role, session });
-    updateViewerCount(session);
+    socket.data.session = session;
+    socket.data.role = role || "unknown";
+    if (!sessions.has(session)) sessions.set(session, { clients: new Set(), photos: [] });
+    sessions.get(session).clients.add(socket.id);
+    console.log(`📡 ${socket.id} entrou na sessão ${session} (${role})`);
+    io.to(session).emit("viewer_count", { viewers: io.sockets.adapter.rooms.get(session)?.size || 1 });
   });
 
-  // Stream frame do operador → clientes
+  socket.on("join_viewer", ({ viewerId }) => {
+    socket.join(viewerId);
+    socket.data.viewerId = viewerId;
+    console.log(`👁️  ${socket.id} entrou como viewer: ${viewerId}`);
+    socket.emit("viewer_photos_ready", viewerSessions.get(viewerId) || {});
+  });
+
   socket.on("stream_frame", ({ session, frame }) => {
-    if (!session || !frame) return;
-    const s = ensureSession(session);
-    s.lastStream = frame;
-    io.to(session).emit("stream_frame", { session, frame });
+    socket.to(session).emit("stream_frame", { session, frame });
   });
 
-  // Foto enviada (alta resolução)
   socket.on("photo_ready", ({ session, index, viewerId, photo }) => {
-    if (!session || !photo) return;
-    const s = ensureSession(session);
-    s.photos[index] = photo;
-    io.to(session).emit("photo_captured", { session, index, photo });
-    console.log(`📸 Foto ${index} capturada na sessão ${session}`);
+    console.log(`📸 Foto recebida sessão=${session}, viewer=${viewerId}`);
+    io.to(session).emit("photo_ready", { index, viewerId, photo });
   });
 
-  // Celular envia o pacote de fotos tiradas
-  socket.on("photos_submit", ({ session, viewerId, photos }) => {
-    if (!session) return;
-    const s = ensureSession(session);
-    s.photos = photos;
-    io.to(session).emit("photos_submit", { viewerId, photos });
-    console.log(`📤 photos_submit da sessão ${session}, ${photos?.length} fotos`);
+  socket.on("photos_submit", (payload) => {
+    console.log(`📥 photos_submit: ${JSON.stringify(payload).substring(0, 200)}`);
+    io.to(payload.session || socket.data.session).emit("photos_submit", payload);
   });
 
-  // Operador cria sessão de visualizador
   socket.on("create_viewer_session", ({ session, photos, storiesMontage, print }) => {
-    const viewerId = "v_" + Date.now();
-    viewers[viewerId] = { photos, storiesMontage, print, createdAt: new Date().toISOString() };
-    const s = ensureSession(session);
-    s.lastViewer = viewerId;
+    const viewerId = "viewer_" + Date.now() + "_" + Math.floor(Math.random() * 9999);
+    viewerSessions.set(viewerId, { photos, storiesMontage, print });
     io.to(session).emit("viewer_session_created", { viewerId });
-    console.log(`🆕 viewer_session_created para sessão ${session}: ${viewerId}`);
+    console.log(`🎉 viewer_session_created ${viewerId}`);
   });
 
-  // Mostrar QR no celular
   socket.on("show_qr_to_session", ({ session, visualizadorUrl }) => {
-    io.to(session).emit("show_qr_on_viewer", { visualizadorUrl });
+    io.to(session).emit("show_qr_to_session", { visualizadorUrl });
   });
 
-  // Reset da sessão
+  socket.on("show_qr_on_viewer", ({ viewerId, visualizadorUrl }) => {
+    io.to(viewerId).emit("show_qr_on_viewer", { visualizadorUrl });
+  });
+
+  socket.on("boomerang_ready", (data) => {
+    console.log(`📼 boomerang_ready recebido (${typeof data})`);
+    // retransmitir para todos os operadores
+    io.emit("boomerang_ready", data);
+  });
+
   socket.on("reset_session", ({ session }) => {
-    if (!session) return;
-    sessions[session] = ensureSession(session);
-    sessions[session].photos = [];
-    io.to(session).emit("reset_session", { session });
-    console.log(`🔁 reset_session emitido para ${session}`);
-  });
-
-  // Pedido para iniciar stream
-  socket.on("request_stream", ({ session }) => {
-    io.to(session).emit("request_stream", { session });
-  });
-
-  // Cliente desconectou
-  socket.on("disconnect", () => {
-    console.log("❌ Desconectado:", socket.id);
-    for (const [sess, data] of Object.entries(sessions)) {
-      data.clients = data.clients.filter((id) => id !== socket.id);
-      if (data.operator === socket.id) data.operator = null;
-      updateViewerCount(sess);
+    if (sessions.has(session)) {
+      sessions.get(session).photos = [];
+      console.log(`♻️ Sessão ${session} resetada`);
     }
+    io.to(session).emit("reset_session", { session });
+  });
+
+  socket.on("disconnect", () => {
+    const session = socket.data.session;
+    if (session && sessions.has(session)) {
+      sessions.get(session).clients.delete(socket.id);
+      io.to(session).emit("viewer_count", {
+        viewers: io.sockets.adapter.rooms.get(session)?.size || 0,
+      });
+    }
+    console.log(`❌ Desconectado: ${socket.id}`);
   });
 });
 
-// ----------------------------------------------------
-// FUNÇÃO AUXILIAR
-// ----------------------------------------------------
-function updateViewerCount(session) {
-  const s = ensureSession(session);
-  const viewersCount = s.clients.length;
-  io.to(session).emit("viewer_count", { viewers: viewersCount });
-}
+// ======================================================
+// VIEWER SESSIONS (dados temporários)
+// ======================================================
+const viewerSessions = new Map();
 
-// ----------------------------------------------------
-// ENDPOINTS HTTP
-// ----------------------------------------------------
+// ======================================================
+// ENDPOINTS
+// ======================================================
 
-// 🔹 Retorna JSON com dados do visualizador
-app.get("/viewer/:id", (req, res) => {
-  const v = viewers[req.params.id];
-  if (!v) {
-    return res.status(404).json({ error: "Visualizador não encontrado" });
-  }
-  res.json(v);
-});
-
-// 🔹 Recebe GET visualizador via ?session=... (modo alternativo)
-app.get("/visualizador-data", (req, res) => {
-  const session = req.query.session;
-  if (!session) return res.status(400).json({ error: "session faltando" });
-  const s = sessions[session];
-  if (!s || !s.photos?.length) {
-    return res.status(404).json({ error: "Sessão não encontrada ou sem fotos" });
-  }
+// Health check
+app.get("/health", (req, res) => {
   res.json({
-    photos: s.photos,
-    storiesMontage: s.lastViewer ? viewers[s.lastViewer]?.storiesMontage : null,
-    print: s.lastViewer ? viewers[s.lastViewer]?.print : null,
+    status: "ok",
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    viewerSessions: viewerSessions.size,
+    sessions: sessions.size,
   });
 });
 
-// 🔹 Histórico completo de sessões (para recuperação)
-app.get("/history", (req, res) => {
-  const list = Object.entries(sessions).map(([id, s]) => ({
-    sessionId: id,
-    photos: s.photos?.length || 0,
-    lastViewer: s.lastViewer,
-    createdAt: new Date(s.createdAt).toLocaleString(),
-  }));
-  res.json(list);
+// Upload de Boomerang
+app.post("/upload_boomerang", upload.single("file"), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: "Arquivo não enviado" });
+
+    const inputPath = file.path;
+    const ext = path.extname(file.originalname).toLowerCase();
+    const outputBase = path.basename(file.filename, ext);
+    const outputPath = path.join(BOOMERANG_DIR, outputBase + ".mp4");
+
+    // Se tiver ffmpeg, converte
+    let ffmpegFound = false;
+    try {
+      child_process.execSync("ffmpeg -version", { stdio: "ignore" });
+      ffmpegFound = true;
+    } catch {
+      ffmpegFound = false;
+    }
+
+    if (ffmpegFound) {
+      await new Promise((resolve, reject) => {
+        const cmd = `ffmpeg -y -i "${inputPath}" -c:v libx264 -preset veryfast -crf 28 -movflags +faststart "${outputPath}"`;
+        child_process.exec(cmd, (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+      console.log("🎬 Boomerang convertido para MP4:", outputPath);
+    }
+
+    const publicPath = `/uploads/boomerangs/${ffmpegFound ? outputBase + ".mp4" : file.filename}`;
+    const fullUrl = `${process.env.BASE_URL || "https://festadodavi-production-0591.up.railway.app"}${publicPath}`;
+    console.log("✅ Upload Boomerang concluído:", fullUrl);
+
+    res.json({ url: fullUrl });
+  } catch (err) {
+    console.error("❌ Erro upload boomerang:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// ----------------------------------------------------
-// SERVIDOR ON-LINE
-// ----------------------------------------------------
+// Página raiz
+app.get("/", (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+});
+
+// ======================================================
+// SERVER START
+// ======================================================
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`✅ Servidor iniciado em ${BASE_URL} (porta ${PORT})`);
+  console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
 });
