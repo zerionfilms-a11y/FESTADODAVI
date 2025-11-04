@@ -46,7 +46,7 @@ try {
 /* --------------------------
    Configuration & stores
    -------------------------- */
-const IMGBB_KEY = process.env.IMGBB_KEY || ''; // set this in your environment
+const IMGBB_KEY = process.env.IMGBB_KEY || 'fc52605669365cdf28ea379d10f2a341'; // set this in your environment
 const PORT = process.env.PORT || 3000;
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
 
