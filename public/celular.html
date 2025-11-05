@@ -18,7 +18,7 @@
     #startBtn{padding:18px 25px;border-radius:12px;border:none;background:#fff;color:#0b84ff;font-weight:700;cursor:pointer;font-size:20px;margin-top:5px;box-shadow:0 4px 15px rgba(0,0,0,0.3);width:100%;max-width:300px;transition:all 0.3s ease}
     .logo{max-width:180px;margin-bottom:20px;border-radius:10px}
     /* video & canvas */
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:block; transform: scaleX(-1); opacity:0.0001; z-index:0;} /* quase invisível mas renderiza frames */
+    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:block; transform: scaleX(-1); opacity:0.0001; z-index:0;}
     #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:10}
     #progress{position:fixed;top:20px;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:150;color:#fff;text-shadow:0 0 10px #000;background:rgba(0,0,0,0.5);padding:10px;backdrop-filter:blur(5px)}
     #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000, 0 0 30px #000;z-index:100;color:#fff}
@@ -42,22 +42,24 @@
   </style>
 </head>
 <body>
+  <!-- Tela inicial com botão amarelo -->
   <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
     <div style="text-align:center;background:rgba(0,0,0,0.3);padding:20px;border-radius:15px;backdrop-filter:blur(10px);width:95%;max-width:400px">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <h1 style="font-size:24px;margin-bottom:20px">📸 Cabine Fotográfica</h1>
-      <p style="font-size:16px;margin-bottom:20px">Para melhor experiência, entre em tela cheia</p>
-      <button id="enterFsBtn" tabindex="0">🎬 Entrar em Tela Cheia</button>
+      <p style="font-size:16px;margin-bottom:20px">Clique abaixo para começar</p>
+      <button id="enterFsBtn" tabindex="0">🚀 Iniciar Experiência</button>
     </div>
   </div>
 
+  <!-- Tela de escolha entre Fotos e Boomerang -->
   <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
     <div id="welcome">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
-      <p>Clique abaixo para iniciar</p>
+      <h1>📸 Escolha seu estilo</h1>
+      <p>Selecione uma opção abaixo</p>
       <div style="width:100%;max-width:320px">
-        <button id="startBtn" style="width:100%">🎬 Iniciar Sessão de Fotos (3x)</button>
+        <button id="startBtn" style="width:100%">🎬 Sessão de Fotos (3x)</button>
       </div>
       <div style="margin-top:12px;width:100%;max-width:320px">
         <button id="startBoomBtn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#2a9df4,#0b6fb3);color:#fff;padding:14px;border-radius:12px;border:none;font-weight:700;cursor:pointer">🔁 Fazer Boomerang</button>
@@ -170,73 +172,50 @@
     function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
     function log(txt){ const t=(new Date()).toLocaleTimeString(); debugEl.textContent = `[${t}] ${txt}\n` + debugEl.textContent; console.log(txt); }
 
-    // Fullscreen helper - muito robusto e com feedback ao usuário
-    async function attemptFullscreen() {
+    // Função simplificada - apenas vai para a tela de escolha
+    async function goToWelcomeScreen() {
       if (fullscreenAttempting) return;
       fullscreenAttempting = true;
       enterFsBtn.disabled = true;
       enterFsBtn.textContent = 'Carregando...';
       
-      log('Tentando entrar em tela cheia...');
+      log('Indo para tela de escolha...');
       
       try {
-        // Tenta fullscreen no documentElement (melhor compatibilidade)
+        // Tenta entrar em tela cheia primeiro (opcional)
         const el = document.documentElement;
         
         if (el.requestFullscreen) {
-          await el.requestFullscreen();
+          await el.requestFullscreen().catch(() => {});
         } else if (el.webkitRequestFullscreen) {
-          await el.webkitRequestFullscreen();
-        } else if (el.mozRequestFullScreen) {
-          await el.mozRequestFullScreen();
-        } else if (el.msRequestFullscreen) {
-          await el.msRequestFullscreen();
-        } else {
-          throw new Error('Fullscreen não suportado');
+          await el.webkitRequestFullscreen().catch(() => {});
         }
         
-        log('Fullscreen ativado com sucesso');
         isFullscreen = true;
-        
-        // Pequeno delay para estabilizar
-        await sleep(500);
-        
-        // Inicia a câmera antes de mostrar welcome
-        try {
-          await startCamera();
-          showScreen(welcomeScreen);
-          if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
-        } catch (cameraError) {
-          log('Câmera falhou: ' + cameraError);
-          showScreen(welcomeScreen);
-        }
+        log('Tela cheia ativada');
         
       } catch (err) {
-        log('Erro fullscreen: ' + (err.message || err));
-        
-        // Fallback: tenta entrar em tela cheia de forma diferente
-        try {
-          // Tenta no body como fallback
-          const body = document.body;
-          if (body.webkitRequestFullscreen) {
-            body.webkitRequestFullscreen();
-          }
-          
-          // Mostra welcome mesmo sem fullscreen
-          await startCamera();
-          showScreen(welcomeScreen);
-          
-        } catch (fallbackError) {
-          log('Fallback também falhou: ' + fallbackError);
-          alert('Para melhor experiência, use Chrome, Edge ou Safari. O modo tela cheia pode não estar disponível neste navegador.');
-          await startCamera();
-          showScreen(welcomeScreen);
-        }
-      } finally {
-        fullscreenAttempting = false;
-        enterFsBtn.disabled = false;
-        enterFsBtn.textContent = '🎬 Entrar em Tela Cheia';
+        log('Tela cheia não disponível: ' + (err.message || err));
       }
+      
+      // Pequeno delay para estabilizar
+      await sleep(300);
+      
+      // Mostra a tela de escolha (welcomeScreen)
+      showScreen(welcomeScreen);
+      
+      // Tenta iniciar a câmera em background
+      try {
+        await startCamera();
+        if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
+      } catch (cameraError) {
+        log('Câmera falhou: ' + cameraError);
+        // Continua mesmo sem câmera, o usuário verá erro quando tentar usar
+      }
+      
+      fullscreenAttempting = false;
+      enterFsBtn.disabled = false;
+      enterFsBtn.textContent = '🚀 Iniciar Experiência';
     }
 
     // Detecta mudanças de fullscreen
@@ -250,8 +229,6 @@
       
       if (!isFullscreen && !welcomeScreen.classList.contains('hidden')) {
         log('Saiu do modo tela cheia');
-        // Se saiu do fullscreen e está na welcome, volta para a tela inicial
-        showScreen(enterFs);
       }
     }
 
@@ -609,16 +586,16 @@
     // Verificar se já está em fullscreen ao carregar
     setTimeout(checkFullscreenOnLoad, 1000);
 
-    // Robust fullscreen attempt
+    // Botão amarelo agora vai direto para a tela de escolha
     enterFsBtn.addEventListener('click', async (e)=>{
       e.preventDefault();
-      try { await attemptFullscreen(); } catch(err){ log('attemptFullscreen throw: '+err); }
+      try { await goToWelcomeScreen(); } catch(err){ log('goToWelcomeScreen throw: '+err); }
     });
 
     startBtn.addEventListener('click', async ()=>{
       startBtn.disabled = true; startBtn.textContent = '🎵 Preparando...';
       await inicio.play().catch(()=>{});
-      startBtn.disabled = false; startBtn.textContent = '🎬 Iniciar Sessão de Fotos';
+      startBtn.disabled = false; startBtn.textContent = '🎬 Sessão de Fotos (3x)';
       showScreen(null);
       try { await startCamera(); } catch(e){ return; }
       currentPhotoIndex = 0; photos = [];
