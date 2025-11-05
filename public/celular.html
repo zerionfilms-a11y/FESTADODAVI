@@ -8,18 +8,82 @@
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
-    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-    #enterFsBtn{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px;transition: all 0.3s ease;box-shadow: 0 4px 15px rgba(0,0,0,0.3);}
+    
+    /* CORREÇÃO: Garantir que as telas tenham z-index adequado */
+    .screen{
+      position:fixed;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      padding:15px;
+      z-index: 100;
+    }
+    
+    #enterFs {
+      background:linear-gradient(135deg,#001e3c,#0b84ff);
+      z-index: 200;
+    }
+    
+    #enterFsBtn{
+      padding:18px 25px;
+      border-radius:12px;
+      border:none;
+      background:#ffd600;
+      color:#000;
+      font-weight:700;
+      cursor:pointer;
+      font-size:20px;
+      margin:15px;
+      width:90%;
+      max-width:300px;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      position: relative;
+      z-index: 210;
+    }
+    
     #enterFsBtn:hover{background:#ffed4a;transform:translateY(-2px)}
+    #enterFsBtn:active{transform:translateY(0)}
     #enterFsBtn:disabled{background:#ccc;cursor:not-allowed;transform:none}
+
     #welcome{background:rgba(255,255,255,0.15);padding:25px;text-align:center;border-radius:15px;width:95%;max-width:400px;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
     #welcome h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
     #welcome p{font-size:18px;margin-bottom:15px}
     #startBtn{padding:18px 25px;border-radius:12px;border:none;background:#fff;color:#0b84ff;font-weight:700;cursor:pointer;font-size:20px;margin-top:5px;box-shadow:0 4px 15px rgba(0,0,0,0.3);width:100%;max-width:300px;transition:all 0.3s ease}
     .logo{max-width:180px;margin-bottom:20px;border-radius:10px}
+    
     /* video & canvas */
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:block; transform: scaleX(-1); opacity:0.0001; z-index:0;}
-    #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:10}
+    #videoEl{
+      position:fixed;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:block; 
+      transform: scaleX(-1); 
+      opacity:0.0001; 
+      z-index: 1;
+      pointer-events: none;
+    }
+    
+    #canvasEl{
+      position:fixed;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:none;
+      z-index: 2;
+      pointer-events: none;
+    }
+
     #progress{position:fixed;top:20px;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:150;color:#fff;text-shadow:0 0 10px #000;background:rgba(0,0,0,0.5);padding:10px;backdrop-filter:blur(5px)}
     #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000, 0 0 30px #000;z-index:100;color:#fff}
     #msg{position:fixed;top:50%;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:100;color:#fff;text-shadow:0 0 10px #000}
@@ -33,18 +97,34 @@
     #thank { background: rgba(255,255,255,0.15); padding: 25px; border-radius: 15px; width:95%;max-width:400px;text-align:center;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
     #thank h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
     #thank p{font-size:18px}
-    .hidden { display: none; }
-    .visible { display: flex; }
-    #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:6px;border-radius:6px;z-index:1000;white-space:pre-line;max-width:46%}
-    /* Boomerang preview screen placed above */
+    .hidden { display: none !important; }
+    .visible { display: flex !important; }
+    
+    /* Boomerang preview screen */
     #boomPreviewScreen{background:rgba(0,0,0,0.92);z-index:130;display:none;align-items:center;justify-content:center;flex-direction:column;padding:12px}
     #boomPreviewVideo{max-width:100%;max-height:80%;border-radius:8px;background:#000}
+
+    /* Debug mais visível */
+    #debugInfo {
+      position:fixed;
+      bottom:10px;
+      left:10px;
+      font-size:12px;
+      color:#fff;
+      background:rgba(0,0,0,0.8);
+      padding:10px;
+      border-radius:6px;
+      z-index:1000;
+      white-space:pre-line;
+      max-width:90%;
+      border: 1px solid #ffd600;
+    }
   </style>
 </head>
 <body>
-  <!-- Tela inicial com botão amarelo -->
-  <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
-    <div style="text-align:center;background:rgba(0,0,0,0.3);padding:20px;border-radius:15px;backdrop-filter:blur(10px);width:95%;max-width:400px">
+  <!-- Tela inicial -->
+  <div id="enterFs" class="screen visible">
+    <div style="text-align:center;background:rgba(0,0,0,0.3);padding:20px;border-radius:15px;backdrop-filter:blur(10px);width:95%;max-width:400px;position:relative;z-index:205">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <h1 style="font-size:24px;margin-bottom:20px">📸 Cabine Fotográfica</h1>
       <p style="font-size:16px;margin-bottom:20px">Clique abaixo para começar</p>
@@ -53,7 +133,7 @@
   </div>
 
   <!-- Tela de escolha entre Fotos e Boomerang -->
-  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
+  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff);z-index:150">
     <div id="welcome">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <h1>📸 Escolha seu estilo</h1>
@@ -67,7 +147,7 @@
     </div>
   </div>
 
-  <!-- video (kept visible for rendering frames but nearly invisible) -->
+  <!-- Video e Canvas -->
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="canvasEl"></canvas>
 
@@ -75,7 +155,7 @@
   <div id="countdown"></div>
   <div id="msg"></div>
 
-  <!-- preview for photos -->
+  <!-- Preview para fotos -->
   <div id="previewScreen" class="screen hidden">
     <div id="previewContainer">
       <img id="previewImage" src="" alt="Preview da foto">
@@ -86,7 +166,7 @@
     </div>
   </div>
 
-  <!-- boomerang preview modal -->
+  <!-- Boomerang preview modal -->
   <div id="boomPreviewScreen" class="screen hidden">
     <video id="boomPreviewVideo" controls playsinline></video>
     <div class="preview-buttons" style="position:relative;margin-top:12px;max-width:720px">
@@ -103,7 +183,7 @@
     </div>
   </div>
 
-  <div id="debugInfo"></div>
+  <div id="debugInfo">Carregando...</div>
 
   <audio id="clack" src="clack.mp3" preload="auto"></audio>
   <audio id="inicio" src="inicio.mp3" preload="auto"></audio>
@@ -112,7 +192,14 @@
   <script>
     // Config
     const SERVER_URL = "festadodavi-production-0591.up.railway.app";
-    const socket = io(SERVER_URL, { transports:["websocket","polling"], reconnection:true, reconnectionAttempts:5, reconnectionDelay:1000, timeout:20000, forceNew:true });
+    const socket = io(SERVER_URL, { 
+      transports:["websocket","polling"], 
+      reconnection:true, 
+      reconnectionAttempts:5, 
+      reconnectionDelay:1000, 
+      timeout:20000, 
+      forceNew:true 
+    });
 
     const params = new URLSearchParams(location.search);
     const session = params.get('session') || 'cabine-fixa';
@@ -150,9 +237,12 @@
     let rafId=null;
     let fullscreenAttempting = false;
     let isFullscreen = false;
+    let isInitialized = false;
 
     // debug status
-    setInterval(()=>{ debugEl.textContent = `Sessão: ${session} | Socket: ${socket.connected?'🟢':'🔴'}\nFotos pendentes: ${photos.length}\nFullscreen: ${isFullscreen?'✅':'❌'}`; }, 900);
+    setInterval(()=>{ 
+      debugEl.textContent = `Sessão: ${session} | Socket: ${socket.connected?'🟢':'🔴'}\nFotos pendentes: ${photos.length}\nFullscreen: ${isFullscreen?'✅':'❌'}\nInicializado: ${isInitialized?'✅':'❌'}`; 
+    }, 900);
 
     // helpers
     function showScreen(el){ 
@@ -170,89 +260,71 @@
     }
     
     function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-    function log(txt){ const t=(new Date()).toLocaleTimeString(); debugEl.textContent = `[${t}] ${txt}\n` + debugEl.textContent; console.log(txt); }
+    
+    function log(txt){ 
+      const t = (new Date()).toLocaleTimeString();
+      const newDebug = `[${t}] ${txt}\n` + debugEl.textContent;
+      debugEl.textContent = newDebug.split('\n').slice(0, 10).join('\n');
+      console.log(txt);
+    }
 
-    // Função simplificada - apenas vai para a tela de escolha
-    async function goToWelcomeScreen() {
-      if (fullscreenAttempting) return;
-      fullscreenAttempting = true;
-      enterFsBtn.disabled = true;
-      enterFsBtn.textContent = 'Carregando...';
+    // Verificação de elementos sobrepostos
+    function checkElementOverlap() {
+      const btnRect = enterFsBtn.getBoundingClientRect();
+      const elements = document.elementsFromPoint(btnRect.left + btnRect.width/2, btnRect.top + btnRect.height/2);
       
-      log('Indo para tela de escolha...');
-      
-      try {
-        // Tenta entrar em tela cheia primeiro (opcional)
-        const el = document.documentElement;
-        
-        if (el.requestFullscreen) {
-          await el.requestFullscreen().catch(() => {});
-        } else if (el.webkitRequestFullscreen) {
-          await el.webkitRequestFullscreen().catch(() => {});
+      log(`Elementos no ponto do botão: ${elements.length}`);
+      elements.forEach((el, i) => {
+        if (el !== enterFsBtn && el !== enterFs && !enterFs.contains(el)) {
+          log(`⚠️ Elemento sobrepondo [${i}]: ${el.tagName} ${el.id || el.className}`);
         }
-        
-        isFullscreen = true;
-        log('Tela cheia ativada');
-        
-      } catch (err) {
-        log('Tela cheia não disponível: ' + (err.message || err));
-      }
+      });
+    }
+
+    // Inicialização segura
+    function initializeApp() {
+      if (isInitialized) return;
+      isInitialized = true;
       
-      // Pequeno delay para estabilizar
-      await sleep(300);
+      log('🔧 Inicializando aplicação...');
       
-      // Mostra a tela de escolha (welcomeScreen)
-      showScreen(welcomeScreen);
+      // Verificar se há elementos bloqueando
+      checkElementOverlap();
       
-      // Tenta iniciar a câmera em background
-      try {
-        await startCamera();
-        if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
-      } catch (cameraError) {
-        log('Câmera falhou: ' + cameraError);
-        // Continua mesmo sem câmera, o usuário verá erro quando tentar usar
-      }
-      
-      fullscreenAttempting = false;
+      // Garantir que o botão está clicável
+      enterFsBtn.style.pointerEvents = 'auto';
       enterFsBtn.disabled = false;
-      enterFsBtn.textContent = '🚀 Iniciar Experiência';
+      
+      log('✅ Aplicação inicializada - botão deve estar clicável');
     }
 
-    // Detecta mudanças de fullscreen
-    function handleFullscreenChange() {
-      const fullscreenElement = document.fullscreenElement || 
-                               document.webkitFullscreenElement ||
-                               document.mozFullScreenElement ||
-                               document.msFullscreenElement;
+    // Função simplificada para ir para welcome screen
+    function goToWelcomeScreen() {
+      log('🎯 Indo para tela de escolha...');
       
-      isFullscreen = !!fullscreenElement;
+      // Verificar se há elementos bloqueando antes da transição
+      checkElementOverlap();
       
-      if (!isFullscreen && !welcomeScreen.classList.contains('hidden')) {
-        log('Saiu do modo tela cheia');
-      }
-    }
-
-    // Verificar se já está em fullscreen ao carregar
-    function checkFullscreenOnLoad() {
-      const fullscreenElement = document.fullscreenElement || 
-                               document.webkitFullscreenElement ||
-                               document.mozFullScreenElement ||
-                               document.msFullscreenElement;
+      // Transição simples entre telas
+      enterFs.classList.remove('visible');
+      enterFs.classList.add('hidden');
       
-      if (fullscreenElement) {
-        log('Já estava em fullscreen');
-        isFullscreen = true;
-        showScreen(welcomeScreen);
-        startCamera();
-      }
+      welcomeScreen.classList.remove('hidden');
+      welcomeScreen.classList.add('visible');
+      
+      log('✅ Tela de escolha carregada');
     }
 
     // Start camera front
     async function startCamera(){
       try{
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width:{ideal:1080}, height:{ideal:1920} }, audio:false });
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: "user", width:{ideal:1080}, height:{ideal:1920} }, 
+          audio:false 
+        });
         videoEl.srcObject = stream;
         videoEl.style.display = 'block';
+        
         // ensure video plays and metadata available
         await new Promise(res => {
           const t = setTimeout(()=>res(), 1000);
@@ -260,8 +332,9 @@
           videoEl.play().catch(()=>{ clearTimeout(t); res(); });
         });
         startPreviewLoop();
+        log('📷 Câmera iniciada com sucesso');
       }catch(e){
-        log('Erro camera: ' + e);
+        log('❌ Erro camera: ' + e);
         alert('Permissão da câmera negada ou indisponível. Verifique as permissões.');
         showScreen(welcomeScreen);
         throw e;
@@ -269,15 +342,25 @@
     }
 
     function stopCamera(){
-      try{ if(stream) { stream.getTracks().forEach(t=>t.stop()); stream=null; } } catch(e){}
-      try{ videoEl.pause(); videoEl.srcObject = null; } catch(e){}
+      try{ 
+        if(stream) { 
+          stream.getTracks().forEach(t=>t.stop()); 
+          stream=null; 
+        } 
+      } catch(e){}
+      try{ 
+        videoEl.pause(); 
+        videoEl.srcObject = null; 
+      } catch(e){}
       stopPreviewLoop();
+      log('📷 Câmera parada');
     }
 
     // preview loop draws from video to canvas continuously to avoid freezes
     function startPreviewLoop(){
       if(rafId) return;
       const dpr = window.devicePixelRatio || 1;
+      
       function resize(){
         const w = window.innerWidth, h = window.innerHeight;
         canvasEl.width = Math.floor(w * dpr);
@@ -287,54 +370,92 @@
         const ctx = canvasEl.getContext('2d');
         ctx.setTransform(dpr,0,0,dpr,0,0);
       }
+      
       resize();
       window.addEventListener('resize', resize);
       canvasEl.style.display = 'block';
+      
       function loop(){
         const ctx = canvasEl.getContext('2d');
         const vw = videoEl.videoWidth || 720, vh = videoEl.videoHeight || 1280;
         const cw = canvasEl.clientWidth, ch = canvasEl.clientHeight;
+        
         // cover scaling
         const scale = Math.max(cw / vw, ch / vh);
         const drawW = vw * scale, drawH = vh * scale;
         const dx = (cw - drawW) / 2, dy = (ch - drawH) / 2;
+        
         ctx.save();
         ctx.clearRect(0,0,cw,ch);
-        ctx.translate(cw,0); ctx.scale(-1,1); // mirror
-        try { ctx.drawImage(videoEl, 0,0,vw,vh, cw - (dx + drawW), dy, drawW, drawH); } catch(e){}
+        ctx.translate(cw,0); 
+        ctx.scale(-1,1); // mirror
+        
+        try { 
+          ctx.drawImage(videoEl, 0,0,vw,vh, cw - (dx + drawW), dy, drawW, drawH); 
+        } catch(e){}
+        
         ctx.restore();
         rafId = requestAnimationFrame(loop);
       }
       loop();
     }
     
-    function stopPreviewLoop(){ if(rafId) cancelAnimationFrame(rafId); rafId=null; canvasEl.style.display='none'; }
+    function stopPreviewLoop(){ 
+      if(rafId) cancelAnimationFrame(rafId); 
+      rafId=null; 
+      canvasEl.style.display='none'; 
+    }
 
     // capture mirrored photo from video (high-res)
     function capturePhotoFromVideo(){
       const vw = videoEl.videoWidth || 1080;
       const vh = videoEl.videoHeight || 1920;
-      const cap = document.createElement('canvas'); cap.width = vw; cap.height = vh;
+      const cap = document.createElement('canvas'); 
+      cap.width = vw; 
+      cap.height = vh;
       const cctx = cap.getContext('2d');
+      
       cctx.save();
-      cctx.translate(cap.width,0); cctx.scale(-1,1);
-      try { cctx.drawImage(videoEl, 0,0,cap.width,cap.height); } catch(e){
-        try { cctx.drawImage(canvasEl, 0,0,cap.width,cap.height); } catch(e){}
+      cctx.translate(cap.width,0); 
+      cctx.scale(-1,1);
+      
+      try { 
+        cctx.drawImage(videoEl, 0,0,cap.width,cap.height); 
+      } catch(e){
+        try { 
+          cctx.drawImage(canvasEl, 0,0,cap.width,cap.height); 
+        } catch(e){}
       }
+      
       cctx.restore();
       return cap.toDataURL('image/jpeg', 0.95);
     }
 
-    // ---- 3-photo flow (preserve original) ----
+    // ---- 3-photo flow ----
     async function captureSinglePhoto(){
-      progressEl.textContent = `${currentPhotoIndex+1}/3`; progressEl.classList.remove('hidden');
-      for(let t=5;t>0;t--){
-        if(t<=2){ countdownEl.textContent='SORRIA!'; countdownEl.style.color='#ffd600'; if(t===2){ try{ clack.currentTime=0; clack.play().catch(()=>{}); }catch(e){} } }
-        else{ countdownEl.textContent=String(t); countdownEl.style.color='#fff'; }
+      progressEl.textContent = `${currentPhotoIndex+1}/3`; 
+      progressEl.classList.remove('hidden');
+      
+      for(let t=5; t>0; t--){
+        if(t<=2){ 
+          countdownEl.textContent='SORRIA!'; 
+          countdownEl.style.color='#ffd600'; 
+          if(t===2){ 
+            try{ 
+              clack.currentTime=0; 
+              clack.play().catch(()=>{}); 
+            }catch(e){} 
+          } 
+        } else { 
+          countdownEl.textContent=String(t); 
+          countdownEl.style.color='#fff'; 
+        }
         await sleep(1000);
       }
+      
       countdownEl.textContent='';
       const data = capturePhotoFromVideo();
+      log(`📸 Foto ${currentPhotoIndex+1} capturada`);
       return data;
     }
 
@@ -348,115 +469,194 @@
         stopCamera();
         progressEl.classList.add('hidden');
         showScreen(thankScreen);
-        // send raw photos to server (Index will build montages)
+        
+        // send raw photos to server
         sendPhotosToServer();
         return;
       }
+      
       currentPhotoData = await captureSinglePhoto();
       showPhotoPreview(currentPhotoData);
     }
 
-    refazerBtn.addEventListener('click', async ()=>{
-      showScreen(null);
-      await runCaptureSequence();
-    });
-
-    continuarBtn.addEventListener('click', async ()=>{
-      photos.push(currentPhotoData);
-      currentPhotoIndex++;
-      showScreen(null);
-      await runCaptureSequence();
-    });
-
     function sendPhotosToServer(){
       if(session && photos.length>0){
         socket.emit('photos_submit', { session, viewerId: socket.id, photos }, (ack)=>{
-          log('photos_submit ack: '+JSON.stringify(ack||'no ack'));
+          log('📤 photos_submit ack: '+JSON.stringify(ack||'no ack'));
         });
       }
     }
 
     // ---- BOOMERANG flow ----
     async function recordShortClip(msDuration=2000){
-      if(!videoEl || (videoEl.readyState < 2)) { await new Promise(res=>setTimeout(res,200)); }
+      if(!videoEl || (videoEl.readyState < 2)) { 
+        await new Promise(res=>setTimeout(res,200)); 
+      }
+      
       const vw = videoEl.videoWidth || 720;
       const vh = videoEl.videoHeight || 1280;
       const outW = Math.min(720, vw);
       const outH = Math.round(outW * (vh / vw));
-      const off = document.createElement('canvas'); off.width = outW; off.height = outH;
+      
+      const off = document.createElement('canvas'); 
+      off.width = outW; 
+      off.height = outH;
       const offCtx = off.getContext('2d');
       const captureStream = off.captureStream(30);
       const chunks = [];
+      
       let recorder;
-      try { recorder = new MediaRecorder(captureStream, { mimeType:'video/webm;codecs=vp8' }); }
-      catch(e){ recorder = new MediaRecorder(captureStream); }
-      recorder.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+      try { 
+        recorder = new MediaRecorder(captureStream, { mimeType:'video/webm;codecs=vp8' }); 
+      } catch(e){ 
+        recorder = new MediaRecorder(captureStream); 
+      }
+      
+      recorder.ondataavailable = e => { 
+        if(e.data && e.data.size) chunks.push(e.data); 
+      };
+      
       recorder.start();
       const start = performance.now();
+      
       await new Promise((resolve) => {
         function frame(){
           offCtx.save();
           offCtx.clearRect(0,0,outW,outH);
-          offCtx.translate(outW,0); offCtx.scale(-1,1);
-          try { offCtx.drawImage(videoEl, 0,0,vw,vh, 0,0,outW,outH); } catch(e){}
+          offCtx.translate(outW,0); 
+          offCtx.scale(-1,1);
+          
+          try { 
+            offCtx.drawImage(videoEl, 0,0,vw,vh, 0,0,outW,outH); 
+          } catch(e){}
+          
           offCtx.restore();
-          if(performance.now() - start < msDuration) requestAnimationFrame(frame);
-          else setTimeout(()=>{ recorder.stop(); resolve(); }, 60);
+          
+          if(performance.now() - start < msDuration) {
+            requestAnimationFrame(frame);
+          } else {
+            setTimeout(()=>{ 
+              recorder.stop(); 
+              resolve(); 
+            }, 60);
+          }
         }
         frame();
       });
+      
       await new Promise(r=>{ recorder.onstop = r; });
+      
       if(chunks.length===0) return null;
       return new Blob(chunks, { type:'video/webm' });
     }
 
     async function generateBoomerang(shortBlob, loopMs=15000, targetW=1080){
       try{
-        const v = document.createElement('video'); v.muted=true; v.playsInline=true; v.src = URL.createObjectURL(shortBlob);
-        await new Promise((res, rej)=>{ v.onloadedmetadata = res; v.onerror = rej; });
+        const v = document.createElement('video'); 
+        v.muted=true; 
+        v.playsInline=true; 
+        v.src = URL.createObjectURL(shortBlob);
+        
+        await new Promise((res, rej)=>{ 
+          v.onloadedmetadata = res; 
+          v.onerror = rej; 
+        });
+        
         const aspect = v.videoHeight / v.videoWidth || 16/9;
         const targetH = Math.round(targetW * aspect);
-        const canvas = document.createElement('canvas'); canvas.width = targetW; canvas.height = targetH;
+        const canvas = document.createElement('canvas'); 
+        canvas.width = targetW; 
+        canvas.height = targetH;
         const ctx = canvas.getContext('2d');
-        const template = new Image(); template.crossOrigin='anonymous'; template.src='bomerang.png';
-        await new Promise(res=>{ template.onload = res; template.onerror = res; });
+        
+        const template = new Image(); 
+        template.crossOrigin='anonymous'; 
+        template.src='bomerang.png';
+        await new Promise(res=>{ 
+          template.onload = res; 
+          template.onerror = res; 
+        });
+        
         const recStream = canvas.captureStream(30);
         const chunks = [];
         let rec;
-        try { rec = new MediaRecorder(recStream, { mimeType:'video/webm;codecs=vp8' }); } catch(e){ rec = new MediaRecorder(recStream); }
-        rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+        
+        try { 
+          rec = new MediaRecorder(recStream, { mimeType:'video/webm;codecs=vp8' }); 
+        } catch(e){ 
+          rec = new MediaRecorder(recStream); 
+        }
+        
+        rec.ondataavailable = e => { 
+          if(e.data && e.data.size) chunks.push(e.data); 
+        };
+        
         rec.start();
         const start = performance.now();
+        
         function drawFrame(){
-          if(template && template.complete && template.naturalWidth) ctx.drawImage(template, 0,0, template.width, template.height, 0,0, canvas.width, canvas.height);
-          else { ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height); }
-          try { ctx.drawImage(v, 0,0, v.videoWidth, v.videoHeight, 0,0, canvas.width, canvas.height); } catch(e){}
+          if(template && template.complete && template.naturalWidth) {
+            ctx.drawImage(template, 0,0, template.width, template.height, 0,0, canvas.width, canvas.height);
+          } else { 
+            ctx.fillStyle='#000'; 
+            ctx.fillRect(0,0,canvas.width,canvas.height); 
+          }
+          
+          try { 
+            ctx.drawImage(v, 0,0, v.videoWidth, v.videoHeight, 0,0, canvas.width, canvas.height); 
+          } catch(e){}
         }
+        
         async function playForward(){
           return new Promise(res=>{
-            v.currentTime = 0; v.play().catch(()=>{});
-            const onTick = () => { drawFrame(); if(v.ended || v.currentTime >= v.duration - 0.001){ v.pause(); v.removeEventListener('timeupdate', onTick); res(); } };
+            v.currentTime = 0; 
+            v.play().catch(()=>{});
+            
+            const onTick = () => { 
+              drawFrame(); 
+              if(v.ended || v.currentTime >= v.duration - 0.001){ 
+                v.pause(); 
+                v.removeEventListener('timeupdate', onTick); 
+                res(); 
+              } 
+            };
+            
             v.addEventListener('timeupdate', onTick);
             drawFrame();
           });
         }
+        
         async function playReverse(){
           return new Promise(res=>{
-            v.pause(); v.currentTime = v.duration;
-            function step(){ const stepMs = 1000/30; v.currentTime = Math.max(0, v.currentTime - (stepMs/1000)); drawFrame(); if(v.currentTime > 0.02) requestAnimationFrame(step); else res(); }
+            v.pause(); 
+            v.currentTime = v.duration;
+            
+            function step(){ 
+              const stepMs = 1000/30; 
+              v.currentTime = Math.max(0, v.currentTime - (stepMs/1000)); 
+              drawFrame(); 
+              if(v.currentTime > 0.02) {
+                requestAnimationFrame(step); 
+              } else {
+                res(); 
+              }
+            }
             step();
           });
         }
+        
         while(performance.now() - start < loopMs){
           await playForward();
           if(performance.now() - start >= loopMs) break;
           await playReverse();
         }
+        
         await sleep(120);
         await new Promise(r=>{ rec.onstop = r; rec.stop(); });
         return new Blob(chunks, { type:'video/webm' });
+        
       }catch(e){
-        log('generateBoomerang error: ' + e);
+        log('❌ generateBoomerang error: ' + e);
         return null;
       }
     }
@@ -469,8 +669,31 @@
           r.onerror = reject;
           r.readAsDataURL(blob);
         } else {
-          const v = document.createElement('video'); v.muted=true; v.playsInline=true; v.src = URL.createObjectURL(blob);
-          v.onloadeddata = async ()=>{ try{ v.currentTime = 0.05; }catch(e){} await sleep(60); const c = document.createElement('canvas'); c.width = v.videoWidth || 640; c.height = v.videoHeight || 480; const ctx = c.getContext('2d'); try{ ctx.drawImage(v,0,0,c.width,c.height); resolve(c.toDataURL('image/jpeg',0.85)); }catch(e){ reject(e); } };
+          const v = document.createElement('video'); 
+          v.muted=true; 
+          v.playsInline=true; 
+          v.src = URL.createObjectURL(blob);
+          
+          v.onloadeddata = async ()=>{ 
+            try{ 
+              v.currentTime = 0.05; 
+            }catch(e){} 
+            
+            await sleep(60); 
+            
+            const c = document.createElement('canvas'); 
+            c.width = v.videoWidth || 640; 
+            c.height = v.videoHeight || 480; 
+            const ctx = c.getContext('2d'); 
+            
+            try{ 
+              ctx.drawImage(v,0,0,c.width,c.height); 
+              resolve(c.toDataURL('image/jpeg',0.85)); 
+            }catch(e){ 
+              reject(e); 
+            } 
+          };
+          
           v.onerror = (e)=> reject(e);
         }
       });
@@ -479,56 +702,107 @@
     async function startBoomerangFlow(){
       try {
         if(!stream) await startCamera();
-      } catch(e){ return; }
-      for(let t=3;t>0;t--){ countdownEl.textContent = String(t); await sleep(700); }
+      } catch(e){ 
+        log('❌ Falha ao iniciar câmera para boomerang');
+        return; 
+      }
+      
+      // Countdown antes de gravar
+      for(let t=3; t>0; t--){ 
+        countdownEl.textContent = String(t); 
+        await sleep(700); 
+      }
       countdownEl.textContent='';
-      progressEl.textContent = 'Gravando...'; progressEl.classList.remove('hidden');
+      
+      progressEl.textContent = 'Gravando...'; 
+      progressEl.classList.remove('hidden');
+      
       const shortBlob = await recordShortClip(BOOM_SHORT_MS);
       progressEl.classList.add('hidden');
-      if(!shortBlob){ log('shortBlob nulo'); showScreen(welcomeScreen); return; }
+      
+      if(!shortBlob){ 
+        log('❌ shortBlob nulo'); 
+        showScreen(welcomeScreen); 
+        return; 
+      }
+      
       const shortUrl = URL.createObjectURL(shortBlob);
       boomPreviewVideo.src = shortUrl;
       boomPreviewVideo.play().catch(()=>{});
       showScreen(boomPreviewScreen);
+      
       const refazer = async () => {
         boomPreviewVideo.pause();
         boomPreviewVideo.src = '';
         showScreen(null);
-        try { await startCamera(); } catch(e){}
+        try { 
+          await startCamera(); 
+        } catch(e){}
       };
+      
       const continuar = async () => {
         boomPreviewVideo.pause();
         boomPreviewVideo.src = '';
         showScreen(null);
+        
         try {
           const thumb = await blobToDataURL(shortBlob, true).catch(()=>null);
-          if(thumb){ socket.emit('photo_ready', { session, index: 0, viewerId: socket.id, photo: thumb }); }
-        } catch(e){ log('thumb emit error: '+e); }
-        progressEl.textContent = 'Processando boomerang...'; progressEl.classList.remove('hidden');
+          if(thumb){ 
+            socket.emit('photo_ready', { session, index: 0, viewerId: socket.id, photo: thumb }); 
+          }
+        } catch(e){ 
+          log('❌ thumb emit error: '+e); 
+        }
+        
+        progressEl.textContent = 'Processando boomerang...'; 
+        progressEl.classList.remove('hidden');
+        
         const finalBlob = await generateBoomerang(shortBlob, BOOM_FINAL_MS, BOOM_TARGET_W);
         progressEl.classList.add('hidden');
+        
         if(!finalBlob){
-          log('finalBlob nulo');
+          log('❌ finalBlob nulo');
           showScreen(welcomeScreen);
           return;
         }
+        
         try {
           const ab = await finalBlob.arrayBuffer();
-          await emitWithAckFallback('boomerang_ready', { session, viewerId: socket.id, filename: `boomerang_${Date.now()}.webm`, data: ab }, finalBlob);
+          await emitWithAckFallback('boomerang_ready', { 
+            session, 
+            viewerId: socket.id, 
+            filename: `boomerang_${Date.now()}.webm`, 
+            data: ab 
+          }, finalBlob);
+          
           const thumb2 = await blobToDataURL(finalBlob, true).catch(()=>null);
-          if(thumb2) socket.emit('photos_submit', { session, viewerId: socket.id, photos: [thumb2] });
-          log('boomerang flow finished');
+          if(thumb2) {
+            socket.emit('photos_submit', { session, viewerId: socket.id, photos: [thumb2] });
+          }
+          
+          log('✅ Boomerang flow finished');
           stopCamera();
           showScreen(thankScreen);
-          try{ fim.currentTime=0; fim.play().catch(()=>{}); } catch(e){}
+          
+          try{ 
+            fim.currentTime=0; 
+            fim.play().catch(()=>{}); 
+          } catch(e){}
+          
         } catch(e){
-          log('erro ao enviar boomerang: ' + e);
+          log('❌ erro ao enviar boomerang: ' + e);
           showScreen(welcomeScreen);
         }
       };
-      const onceRef = () => { boomRefazerBtn.removeEventListener('click', onRef); boomContinuarBtn.removeEventListener('click', onCont); };
+      
+      const onceRef = () => { 
+        boomRefazerBtn.removeEventListener('click', onRef); 
+        boomContinuarBtn.removeEventListener('click', onCont); 
+      };
+      
       const onRef = () => { onceRef(); refazer(); };
       const onCont = () => { onceRef(); continuar(); };
+      
       boomRefazerBtn.addEventListener('click', onRef);
       boomContinuarBtn.addEventListener('click', onCont);
     }
@@ -536,33 +810,56 @@
     function emitWithAckFallback(event, data, fallbackBlob, timeoutMs=7000){
       return new Promise((resolve, reject) => {
         let done = false;
+        
         try {
           socket.timeout(timeoutMs).emit(event, data, (err, resp) => {
             done = true;
-            if(err){ log(event + ' ack error: ' + JSON.stringify(err)); fallback(); }
-            else { log(event + ' ack resp: ' + JSON.stringify(resp||'ok')); resolve(resp); return; }
+            if(err){ 
+              log(`❌ ${event} ack error: ` + JSON.stringify(err)); 
+              fallback(); 
+            } else { 
+              log(`✅ ${event} ack resp: ` + JSON.stringify(resp||'ok')); 
+              resolve(resp); 
+              return; 
+            }
           });
         } catch (e) {
-          log('emit try-catch: ' + e);
-          try { socket.emit(event, data); } catch(e){}
-          setTimeout(()=>{ if(!done) fallback(); }, timeoutMs);
+          log('❌ emit try-catch: ' + e);
+          try { 
+            socket.emit(event, data); 
+          } catch(e){}
+          
+          setTimeout(()=>{ 
+            if(!done) fallback(); 
+          }, timeoutMs);
         }
+        
         async function fallback(){
           if(done) return;
-          if(!fallbackBlob) { reject(new Error('No fallback blob')); return; }
+          if(!fallbackBlob) { 
+            reject(new Error('No fallback blob')); 
+            return; 
+          }
+          
           try {
             const form = new FormData();
             form.append('session', session);
             form.append('viewerId', socket.id || '');
             form.append('file', fallbackBlob, `boomerang_${Date.now()}.webm`);
-            const res = await fetch(SERVER_URL + '/upload_boomerang', { method:'POST', body: form });
+            
+            const res = await fetch(SERVER_URL + '/upload_boomerang', { 
+              method:'POST', 
+              body: form 
+            });
+            
             const json = await res.json().catch(()=>null);
-            log('fallback upload response: ' + JSON.stringify(json||res.status));
+            log('📤 fallback upload response: ' + JSON.stringify(json||res.status));
             done = true;
             resolve(json);
+            
           } catch(e){
             done = true;
-            log('fallback upload failed: ' + e);
+            log('❌ fallback upload failed: ' + e);
             reject(e);
           }
         }
@@ -570,49 +867,155 @@
     }
 
     // Socket handlers
-    socket.on('connect', ()=>{ if(session) socket.emit('cell_connected', { session }); log('socket connected'); });
-    socket.on('disconnect', ()=>{ log('socket disconnected'); });
-    socket.on('reset_session', ()=>{ stopCamera(); photos=[]; currentPhotoIndex=0; currentPhotoData=null; showScreen(welcomeScreen); });
-
-    // Event listeners para detectar mudanças de fullscreen
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
-
-    // UI wiring
-    showScreen(enterFs);
-
-    // Verificar se já está em fullscreen ao carregar
-    setTimeout(checkFullscreenOnLoad, 1000);
-
-    // Botão amarelo agora vai direto para a tela de escolha
-    enterFsBtn.addEventListener('click', async (e)=>{
-      e.preventDefault();
-      try { await goToWelcomeScreen(); } catch(err){ log('goToWelcomeScreen throw: '+err); }
+    socket.on('connect', ()=>{ 
+      if(session) socket.emit('cell_connected', { session }); 
+      log('🔌 Socket connected'); 
+    });
+    
+    socket.on('disconnect', ()=>{ 
+      log('🔌 Socket disconnected'); 
+    });
+    
+    socket.on('reset_session', ()=>{ 
+      stopCamera(); 
+      photos=[]; 
+      currentPhotoIndex=0; 
+      currentPhotoData=null; 
+      showScreen(welcomeScreen); 
+      log('🔄 Sessão resetada');
     });
 
-    startBtn.addEventListener('click', async ()=>{
-      startBtn.disabled = true; startBtn.textContent = '🎵 Preparando...';
-      await inicio.play().catch(()=>{});
-      startBtn.disabled = false; startBtn.textContent = '🎬 Sessão de Fotos (3x)';
-      showScreen(null);
-      try { await startCamera(); } catch(e){ return; }
-      currentPhotoIndex = 0; photos = [];
-      await runCaptureSequence();
+    // Event Listeners seguros
+    function setupEventListeners() {
+      // Botão principal
+      enterFsBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        log('🎯 Botão principal clicado!');
+        goToWelcomeScreen();
+      });
+      
+      // Também responder a Enter/Space
+      enterFsBtn.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          log('🎯 Botão ativado por teclado');
+          goToWelcomeScreen();
+        }
+      });
+      
+      // Touch events para mobile
+      enterFsBtn.addEventListener('touchstart', function(e) {
+        e.preventDefault();
+        log('📱 Touch no botão detectado');
+      }, { passive: false });
+      
+      enterFsBtn.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        log('📱 Touch finalizado - ativando botão');
+        goToWelcomeScreen();
+      }, { passive: false });
+
+      // Botão de iniciar fotos
+      startBtn.addEventListener('click', async ()=>{
+        startBtn.disabled = true; 
+        startBtn.textContent = '🎵 Preparando...';
+        
+        await inicio.play().catch(()=>{});
+        
+        startBtn.disabled = false; 
+        startBtn.textContent = '🎬 Sessão de Fotos (3x)';
+        showScreen(null);
+        
+        try { 
+          await startCamera(); 
+        } catch(e){ 
+          log('❌ Falha ao iniciar câmera para fotos');
+          return; 
+        }
+        
+        currentPhotoIndex = 0; 
+        photos = [];
+        await runCaptureSequence();
+      });
+
+      // Botão de refazer foto
+      refazerBtn.addEventListener('click', async ()=>{
+        showScreen(null);
+        await runCaptureSequence();
+      });
+
+      // Botão de continuar foto
+      continuarBtn.addEventListener('click', async ()=>{
+        photos.push(currentPhotoData);
+        currentPhotoIndex++;
+        showScreen(null);
+        await runCaptureSequence();
+      });
+
+      // Botão de boomerang
+      startBoomBtn.addEventListener('click', async ()=>{
+        startBoomBtn.disabled = true;
+        
+        try{ 
+          await inicio.play().catch(()=>{}); 
+        }catch(e){}
+        
+        showScreen(null);
+        
+        try { 
+          await startCamera(); 
+        } catch(e){ 
+          startBoomBtn.disabled=false; 
+          log('❌ Falha ao iniciar câmera para boomerang');
+          return; 
+        }
+        
+        await startBoomerangFlow();
+        startBoomBtn.disabled = false;
+      });
+    }
+
+    // Inicialização quando DOM estiver pronto
+    document.addEventListener('DOMContentLoaded', function() {
+      log('📄 DOM Carregado');
+      initializeApp();
+      setupEventListeners();
+      
+      // Verificação adicional após um breve delay
+      setTimeout(() => {
+        log('⏰ Verificação final de inicialização');
+        checkElementOverlap();
+        
+        // Forçar foco no botão se ainda não clicável
+        if (!isInitialized) {
+          log('🔄 Reinicializando...');
+          initializeApp();
+        }
+      }, 1000);
     });
 
-    startBoomBtn.addEventListener('click', async ()=>{
-      startBoomBtn.disabled = true;
-      try{ await inicio.play().catch(()=>{}); }catch(e){}
-      showScreen(null);
-      try { await startCamera(); } catch(e){ startBoomBtn.disabled=false; return; }
-      await startBoomerangFlow();
-      startBoomBtn.disabled = false;
+    // Fallback: inicializar quando window carregar
+    window.addEventListener('load', function() {
+      log('🖼️ Window carregada');
+      if (!isInitialized) {
+        initializeApp();
+      }
     });
 
-    // expose for debug
-    window._cabine = { socket, startCamera, stopCamera, startBoomerangFlow, sendPhotosToServer };
+    // Expor para debug no console
+    window.debugApp = {
+      checkOverlap: checkElementOverlap,
+      forceInit: initializeApp,
+      goToWelcome: goToWelcomeScreen,
+      startCamera: startCamera,
+      stopCamera: stopCamera,
+      startBoomerangFlow: startBoomerangFlow,
+      sendPhotosToServer: sendPhotosToServer,
+      log: log
+    };
+
+    log('🔧 Script carregado - aguardando inicialização...');
   </script>
 </body>
 </html>
