@@ -9,7 +9,9 @@
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
     .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-    #enterFsBtn{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px}
+    #enterFsBtn{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px;transition: all 0.3s ease;box-shadow: 0 4px 15px rgba(0,0,0,0.3);}
+    #enterFsBtn:hover{background:#ffed4a;transform:translateY(-2px)}
+    #enterFsBtn:disabled{background:#ccc;cursor:not-allowed;transform:none}
     #welcome{background:rgba(255,255,255,0.15);padding:25px;text-align:center;border-radius:15px;width:95%;max-width:400px;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
     #welcome h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
     #welcome p{font-size:18px;margin-bottom:15px}
@@ -31,8 +33,8 @@
     #thank { background: rgba(255,255,255,0.15); padding: 25px; border-radius: 15px; width:95%;max-width:400px;text-align:center;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
     #thank h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
     #thank p{font-size:18px}
-    .hidden { display: none !important; }
-    .visible { display: flex !important; }
+    .hidden { display: none; }
+    .visible { display: flex; }
     #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:6px;border-radius:6px;z-index:1000;white-space:pre-line;max-width:46%}
     /* Boomerang preview screen placed above */
     #boomPreviewScreen{background:rgba(0,0,0,0.92);z-index:130;display:none;align-items:center;justify-content:center;flex-direction:column;padding:12px}
@@ -145,67 +147,126 @@
     let stream=null, photos=[], currentPhotoIndex=0, currentPhotoData=null;
     let rafId=null;
     let fullscreenAttempting = false;
+    let isFullscreen = false;
 
     // debug status
-    setInterval(()=>{ debugEl.textContent = `Sessão: ${session} | Socket: ${socket.connected?'🟢':'🔴'}\nFotos pendentes: ${photos.length}`; }, 900);
+    setInterval(()=>{ debugEl.textContent = `Sessão: ${session} | Socket: ${socket.connected?'🟢':'🔴'}\nFotos pendentes: ${photos.length}\nFullscreen: ${isFullscreen?'✅':'❌'}`; }, 900);
 
     // helpers
-    function showScreen(el){ // hide all main screens, then show el (or none)
-      [enterFs,welcomeScreen,previewScreen,boomPreviewScreen,thankScreen].forEach(s=>{ if(s){ s.classList.add('hidden'); s.style.display='none'; }});
-      canvasEl.style.display='none'; // canvas will be shown by preview loop when needed
-      countdownEl.textContent=''; progressEl.classList.add('hidden');
-      if(el){ el.classList.remove('hidden'); el.style.display='flex'; }
+    function showScreen(el){ 
+      [enterFs,welcomeScreen,previewScreen,boomPreviewScreen,thankScreen].forEach(s=>{ 
+        if(s){ 
+          s.classList.add('hidden');
+        }
+      });
+      canvasEl.style.display='none';
+      countdownEl.textContent=''; 
+      progressEl.classList.add('hidden');
+      if(el){ 
+        el.classList.remove('hidden');
+      }
     }
+    
     function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
     function log(txt){ const t=(new Date()).toLocaleTimeString(); debugEl.textContent = `[${t}] ${txt}\n` + debugEl.textContent; console.log(txt); }
 
-    // Fullscreen helper - very robust & user-feedbacked
+    // Fullscreen helper - muito robusto e com feedback ao usuário
     async function attemptFullscreen() {
       if (fullscreenAttempting) return;
       fullscreenAttempting = true;
       enterFsBtn.disabled = true;
+      enterFsBtn.textContent = 'Carregando...';
+      
       log('Tentando entrar em tela cheia...');
-      const el = document.documentElement;
+      
       try {
+        // Tenta fullscreen no documentElement (melhor compatibilidade)
+        const el = document.documentElement;
+        
         if (el.requestFullscreen) {
           await el.requestFullscreen();
         } else if (el.webkitRequestFullscreen) {
-          el.webkitRequestFullscreen();
+          await el.webkitRequestFullscreen();
         } else if (el.mozRequestFullScreen) {
-          el.mozRequestFullScreen();
+          await el.mozRequestFullScreen();
         } else if (el.msRequestFullscreen) {
-          el.msRequestFullscreen();
+          await el.msRequestFullscreen();
         } else {
-          throw new Error('API Fullscreen não suportada neste navegador');
+          throw new Error('Fullscreen não suportado');
         }
-        log('Fullscreen ativado.');
-        // small delay to ensure fullscreen state applies
-        await sleep(200);
-        showScreen(welcomeScreen);
-        if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
-      } catch (err) {
-        log('Erro ao solicitar fullscreen: ' + (err && err.message ? err.message : err));
-        // fallback: try focusing & re-try after brief timeout (some mobile browsers need focus)
+        
+        log('Fullscreen ativado com sucesso');
+        isFullscreen = true;
+        
+        // Pequeno delay para estabilizar
+        await sleep(500);
+        
+        // Inicia a câmera antes de mostrar welcome
         try {
-          enterFsBtn.focus();
-          await sleep(120);
-          if (el.requestFullscreen) {
-            await el.requestFullscreen();
-            log('Fullscreen ativado após retry.');
-            showScreen(welcomeScreen);
-            if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
-          } else {
-            throw err;
+          await startCamera();
+          showScreen(welcomeScreen);
+          if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
+        } catch (cameraError) {
+          log('Câmera falhou: ' + cameraError);
+          showScreen(welcomeScreen);
+        }
+        
+      } catch (err) {
+        log('Erro fullscreen: ' + (err.message || err));
+        
+        // Fallback: tenta entrar em tela cheia de forma diferente
+        try {
+          // Tenta no body como fallback
+          const body = document.body;
+          if (body.webkitRequestFullscreen) {
+            body.webkitRequestFullscreen();
           }
-        } catch (err2) {
-          log('Ainda não foi possível entrar em tela cheia. Mostrando instrução ao usuário.');
-          alert('Não foi possível ativar tela cheia automaticamente. Por favor, permita o modo tela cheia no navegador ou tente em outro navegador (Chrome/Edge/Safari mobile).');
-          // still show welcome so user can continue without fullscreen
+          
+          // Mostra welcome mesmo sem fullscreen
+          await startCamera();
+          showScreen(welcomeScreen);
+          
+        } catch (fallbackError) {
+          log('Fallback também falhou: ' + fallbackError);
+          alert('Para melhor experiência, use Chrome, Edge ou Safari. O modo tela cheia pode não estar disponível neste navegador.');
+          await startCamera();
           showScreen(welcomeScreen);
         }
       } finally {
         fullscreenAttempting = false;
         enterFsBtn.disabled = false;
+        enterFsBtn.textContent = '🎬 Entrar em Tela Cheia';
+      }
+    }
+
+    // Detecta mudanças de fullscreen
+    function handleFullscreenChange() {
+      const fullscreenElement = document.fullscreenElement || 
+                               document.webkitFullscreenElement ||
+                               document.mozFullScreenElement ||
+                               document.msFullscreenElement;
+      
+      isFullscreen = !!fullscreenElement;
+      
+      if (!isFullscreen && !welcomeScreen.classList.contains('hidden')) {
+        log('Saiu do modo tela cheia');
+        // Se saiu do fullscreen e está na welcome, volta para a tela inicial
+        showScreen(enterFs);
+      }
+    }
+
+    // Verificar se já está em fullscreen ao carregar
+    function checkFullscreenOnLoad() {
+      const fullscreenElement = document.fullscreenElement || 
+                               document.webkitFullscreenElement ||
+                               document.mozFullScreenElement ||
+                               document.msFullscreenElement;
+      
+      if (fullscreenElement) {
+        log('Já estava em fullscreen');
+        isFullscreen = true;
+        showScreen(welcomeScreen);
+        startCamera();
       }
     }
 
@@ -269,6 +330,7 @@
       }
       loop();
     }
+    
     function stopPreviewLoop(){ if(rafId) cancelAnimationFrame(rafId); rafId=null; canvasEl.style.display='none'; }
 
     // capture mirrored photo from video (high-res)
@@ -535,10 +597,19 @@
     socket.on('disconnect', ()=>{ log('socket disconnected'); });
     socket.on('reset_session', ()=>{ stopCamera(); photos=[]; currentPhotoIndex=0; currentPhotoData=null; showScreen(welcomeScreen); });
 
+    // Event listeners para detectar mudanças de fullscreen
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
     // UI wiring
     showScreen(enterFs);
 
-    // NOTE: robust fullscreen attempt
+    // Verificar se já está em fullscreen ao carregar
+    setTimeout(checkFullscreenOnLoad, 1000);
+
+    // Robust fullscreen attempt
     enterFsBtn.addEventListener('click', async (e)=>{
       e.preventDefault();
       try { await attemptFullscreen(); } catch(err){ log('attemptFullscreen throw: '+err); }
