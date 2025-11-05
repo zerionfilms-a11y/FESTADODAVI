@@ -33,7 +33,7 @@
     #thank p{font-size:18px}
     .hidden { display: none !important; }
     .visible { display: flex !important; }
-    #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:4px;border-radius:4px;z-index:1000;white-space:pre-line;max-width:46%}
+    #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:6px;border-radius:6px;z-index:1000;white-space:pre-line;max-width:46%}
     /* Boomerang preview screen placed above */
     #boomPreviewScreen{background:rgba(0,0,0,0.92);z-index:130;display:none;align-items:center;justify-content:center;flex-direction:column;padding:12px}
     #boomPreviewVideo{max-width:100%;max-height:80%;border-radius:8px;background:#000}
@@ -45,7 +45,7 @@
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <h1 style="font-size:24px;margin-bottom:20px">📸 Cabine Fotográfica</h1>
       <p style="font-size:16px;margin-bottom:20px">Para melhor experiência, entre em tela cheia</p>
-      <button id="enterFsBtn">🎬 Entrar em Tela Cheia</button>
+      <button id="enterFsBtn" tabindex="0">🎬 Entrar em Tela Cheia</button>
     </div>
   </div>
 
@@ -144,6 +144,7 @@
 
     let stream=null, photos=[], currentPhotoIndex=0, currentPhotoData=null;
     let rafId=null;
+    let fullscreenAttempting = false;
 
     // debug status
     setInterval(()=>{ debugEl.textContent = `Sessão: ${session} | Socket: ${socket.connected?'🟢':'🔴'}\nFotos pendentes: ${photos.length}`; }, 900);
@@ -157,6 +158,56 @@
     }
     function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
     function log(txt){ const t=(new Date()).toLocaleTimeString(); debugEl.textContent = `[${t}] ${txt}\n` + debugEl.textContent; console.log(txt); }
+
+    // Fullscreen helper - very robust & user-feedbacked
+    async function attemptFullscreen() {
+      if (fullscreenAttempting) return;
+      fullscreenAttempting = true;
+      enterFsBtn.disabled = true;
+      log('Tentando entrar em tela cheia...');
+      const el = document.documentElement;
+      try {
+        if (el.requestFullscreen) {
+          await el.requestFullscreen();
+        } else if (el.webkitRequestFullscreen) {
+          el.webkitRequestFullscreen();
+        } else if (el.mozRequestFullScreen) {
+          el.mozRequestFullScreen();
+        } else if (el.msRequestFullscreen) {
+          el.msRequestFullscreen();
+        } else {
+          throw new Error('API Fullscreen não suportada neste navegador');
+        }
+        log('Fullscreen ativado.');
+        // small delay to ensure fullscreen state applies
+        await sleep(200);
+        showScreen(welcomeScreen);
+        if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
+      } catch (err) {
+        log('Erro ao solicitar fullscreen: ' + (err && err.message ? err.message : err));
+        // fallback: try focusing & re-try after brief timeout (some mobile browsers need focus)
+        try {
+          enterFsBtn.focus();
+          await sleep(120);
+          if (el.requestFullscreen) {
+            await el.requestFullscreen();
+            log('Fullscreen ativado após retry.');
+            showScreen(welcomeScreen);
+            if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
+          } else {
+            throw err;
+          }
+        } catch (err2) {
+          log('Ainda não foi possível entrar em tela cheia. Mostrando instrução ao usuário.');
+          alert('Não foi possível ativar tela cheia automaticamente. Por favor, permita o modo tela cheia no navegador ou tente em outro navegador (Chrome/Edge/Safari mobile).');
+          // still show welcome so user can continue without fullscreen
+          showScreen(welcomeScreen);
+        }
+      } finally {
+        fullscreenAttempting = false;
+        enterFsBtn.disabled = false;
+      }
+    }
 
     // Start camera front
     async function startCamera(){
@@ -209,7 +260,6 @@
         const scale = Math.max(cw / vw, ch / vh);
         const drawW = vw * scale, drawH = vh * scale;
         const dx = (cw - drawW) / 2, dy = (ch - drawH) / 2;
-        // draw mirrored into canvas
         ctx.save();
         ctx.clearRect(0,0,cw,ch);
         ctx.translate(cw,0); ctx.scale(-1,1); // mirror
@@ -227,11 +277,9 @@
       const vh = videoEl.videoHeight || 1920;
       const cap = document.createElement('canvas'); cap.width = vw; cap.height = vh;
       const cctx = cap.getContext('2d');
-      // mirror
       cctx.save();
       cctx.translate(cap.width,0); cctx.scale(-1,1);
       try { cctx.drawImage(videoEl, 0,0,cap.width,cap.height); } catch(e){
-        // fallback: draw from canvasEl
         try { cctx.drawImage(canvasEl, 0,0,cap.width,cap.height); } catch(e){}
       }
       cctx.restore();
@@ -283,24 +331,21 @@
 
     function sendPhotosToServer(){
       if(session && photos.length>0){
-        socket.emit('photos_submit', { session, viewerId: socket.id, photos }, (ack)=>{ log('photos_submit ack: '+JSON.stringify(ack||'no ack')); });
+        socket.emit('photos_submit', { session, viewerId: socket.id, photos }, (ack)=>{
+          log('photos_submit ack: '+JSON.stringify(ack||'no ack'));
+        });
       }
     }
 
     // ---- BOOMERANG flow ----
-    // record short clip by sampling video frames into offscreen canvas and MediaRecorder
     async function recordShortClip(msDuration=2000){
-      // ensure video ready
-      if(!videoEl || (videoEl.readyState < 2)) {
-        await new Promise(res=>setTimeout(res,200));
-      }
+      if(!videoEl || (videoEl.readyState < 2)) { await new Promise(res=>setTimeout(res,200)); }
       const vw = videoEl.videoWidth || 720;
       const vh = videoEl.videoHeight || 1280;
       const outW = Math.min(720, vw);
       const outH = Math.round(outW * (vh / vw));
       const off = document.createElement('canvas'); off.width = outW; off.height = outH;
       const offCtx = off.getContext('2d');
-
       const captureStream = off.captureStream(30);
       const chunks = [];
       let recorder;
@@ -308,11 +353,9 @@
       catch(e){ recorder = new MediaRecorder(captureStream); }
       recorder.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
       recorder.start();
-
       const start = performance.now();
       await new Promise((resolve) => {
         function frame(){
-          // draw mirrored video into off canvas
           offCtx.save();
           offCtx.clearRect(0,0,outW,outH);
           offCtx.translate(outW,0); offCtx.scale(-1,1);
@@ -328,7 +371,6 @@
       return new Blob(chunks, { type:'video/webm' });
     }
 
-    // generate boomerang final by replay forward+reverse onto canvas and recording
     async function generateBoomerang(shortBlob, loopMs=15000, targetW=1080){
       try{
         const v = document.createElement('video'); v.muted=true; v.playsInline=true; v.src = URL.createObjectURL(shortBlob);
@@ -337,24 +379,20 @@
         const targetH = Math.round(targetW * aspect);
         const canvas = document.createElement('canvas'); canvas.width = targetW; canvas.height = targetH;
         const ctx = canvas.getContext('2d');
-
         const template = new Image(); template.crossOrigin='anonymous'; template.src='bomerang.png';
         await new Promise(res=>{ template.onload = res; template.onerror = res; });
-
         const recStream = canvas.captureStream(30);
         const chunks = [];
         let rec;
         try { rec = new MediaRecorder(recStream, { mimeType:'video/webm;codecs=vp8' }); } catch(e){ rec = new MediaRecorder(recStream); }
         rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
         rec.start();
-
         const start = performance.now();
         function drawFrame(){
           if(template && template.complete && template.naturalWidth) ctx.drawImage(template, 0,0, template.width, template.height, 0,0, canvas.width, canvas.height);
           else { ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height); }
           try { ctx.drawImage(v, 0,0, v.videoWidth, v.videoHeight, 0,0, canvas.width, canvas.height); } catch(e){}
         }
-
         async function playForward(){
           return new Promise(res=>{
             v.currentTime = 0; v.play().catch(()=>{});
@@ -370,13 +408,11 @@
             step();
           });
         }
-
         while(performance.now() - start < loopMs){
           await playForward();
           if(performance.now() - start >= loopMs) break;
           await playReverse();
         }
-
         await sleep(120);
         await new Promise(r=>{ rec.onstop = r; rec.stop(); });
         return new Blob(chunks, { type:'video/webm' });
@@ -386,7 +422,6 @@
       }
     }
 
-    // convert blob to dataURL; if firstFrame true, extract first frame as thumbnail
     function blobToDataURL(blob, firstFrame=false){
       return new Promise((resolve, reject)=>{
         if(!firstFrame){
@@ -402,46 +437,34 @@
       });
     }
 
-    // boomerang master flow: record short, preview short (user decide), then process/generate final and send
     async function startBoomerangFlow(){
       try {
         if(!stream) await startCamera();
       } catch(e){ return; }
-
-      // short countdown
       for(let t=3;t>0;t--){ countdownEl.textContent = String(t); await sleep(700); }
       countdownEl.textContent='';
-
       progressEl.textContent = 'Gravando...'; progressEl.classList.remove('hidden');
       const shortBlob = await recordShortClip(BOOM_SHORT_MS);
       progressEl.classList.add('hidden');
       if(!shortBlob){ log('shortBlob nulo'); showScreen(welcomeScreen); return; }
-
-      // show short clip preview so user can refazer/continuar
       const shortUrl = URL.createObjectURL(shortBlob);
       boomPreviewVideo.src = shortUrl;
       boomPreviewVideo.play().catch(()=>{});
       showScreen(boomPreviewScreen);
-
-      // attach one-time handlers
       const refazer = async () => {
         boomPreviewVideo.pause();
         boomPreviewVideo.src = '';
         showScreen(null);
         try { await startCamera(); } catch(e){}
-        // user will try again
       };
       const continuar = async () => {
         boomPreviewVideo.pause();
         boomPreviewVideo.src = '';
         showScreen(null);
-        // create thumbnail and send to operator quickly
         try {
           const thumb = await blobToDataURL(shortBlob, true).catch(()=>null);
           if(thumb){ socket.emit('photo_ready', { session, index: 0, viewerId: socket.id, photo: thumb }); }
         } catch(e){ log('thumb emit error: '+e); }
-
-        // final process (may be CPU heavy)
         progressEl.textContent = 'Processando boomerang...'; progressEl.classList.remove('hidden');
         const finalBlob = await generateBoomerang(shortBlob, BOOM_FINAL_MS, BOOM_TARGET_W);
         progressEl.classList.add('hidden');
@@ -450,16 +473,12 @@
           showScreen(welcomeScreen);
           return;
         }
-
-        // try socket emit with ack (timeout fallback to fetch upload)
         try {
           const ab = await finalBlob.arrayBuffer();
           await emitWithAckFallback('boomerang_ready', { session, viewerId: socket.id, filename: `boomerang_${Date.now()}.webm`, data: ab }, finalBlob);
-          // also send photos_submit with thumbnail so Index can generate QR quickly
           const thumb2 = await blobToDataURL(finalBlob, true).catch(()=>null);
           if(thumb2) socket.emit('photos_submit', { session, viewerId: socket.id, photos: [thumb2] });
           log('boomerang flow finished');
-          // show thanks and stop
           stopCamera();
           showScreen(thankScreen);
           try{ fim.currentTime=0; fim.play().catch(()=>{}); } catch(e){}
@@ -468,8 +487,6 @@
           showScreen(welcomeScreen);
         }
       };
-
-      // wire buttons
       const onceRef = () => { boomRefazerBtn.removeEventListener('click', onRef); boomContinuarBtn.removeEventListener('click', onCont); };
       const onRef = () => { onceRef(); refazer(); };
       const onCont = () => { onceRef(); continuar(); };
@@ -477,29 +494,22 @@
       boomContinuarBtn.addEventListener('click', onCont);
     }
 
-    // helper to emit and fallback to fetch if no ack in time
     function emitWithAckFallback(event, data, fallbackBlob, timeoutMs=7000){
       return new Promise((resolve, reject) => {
         let done = false;
         try {
           socket.timeout(timeoutMs).emit(event, data, (err, resp) => {
             done = true;
-            if(err){ log(event + ' ack error: ' + JSON.stringify(err)); /* go to fallback below */ }
+            if(err){ log(event + ' ack error: ' + JSON.stringify(err)); fallback(); }
             else { log(event + ' ack resp: ' + JSON.stringify(resp||'ok')); resolve(resp); return; }
-            // if err -> fallback below
-            fallback();
           });
-        } catch(e){
-          // older socket versions might not have timeout helper: do manual
+        } catch (e) {
           log('emit try-catch: ' + e);
-          // do manual emit
           try { socket.emit(event, data); } catch(e){}
           setTimeout(()=>{ if(!done) fallback(); }, timeoutMs);
         }
-
         async function fallback(){
           if(done) return;
-          // fallback: upload to server using fetch (POST /upload_boomerang)
           if(!fallbackBlob) { reject(new Error('No fallback blob')); return; }
           try {
             const form = new FormData();
@@ -520,9 +530,6 @@
       });
     }
 
-    // Utilities
-    function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-
     // Socket handlers
     socket.on('connect', ()=>{ if(session) socket.emit('cell_connected', { session }); log('socket connected'); });
     socket.on('disconnect', ()=>{ log('socket disconnected'); });
@@ -531,10 +538,10 @@
     // UI wiring
     showScreen(enterFs);
 
-    enterFsBtn.addEventListener('click', async ()=>{
-      try{ await document.documentElement.requestFullscreen(); }catch(e){}
-      showScreen(welcomeScreen);
-      if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
+    // NOTE: robust fullscreen attempt
+    enterFsBtn.addEventListener('click', async (e)=>{
+      e.preventDefault();
+      try { await attemptFullscreen(); } catch(err){ log('attemptFullscreen throw: '+err); }
     });
 
     startBtn.addEventListener('click', async ()=>{
