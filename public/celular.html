@@ -3,87 +3,84 @@
 <head>
   <meta charset="utf-8" />
   <title>Cabine Fotográfica — Celular</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
-    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-    .center-card{max-width:440px;width:95%;text-align:center;background:rgba(255,255,255,0.03);padding:22px;border-radius:14px;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.04)}
-    button{cursor:pointer;border:none;border-radius:12px;padding:14px 18px;font-weight:700}
-    #enterFsBtn{background:#ffd600;color:#000;font-size:18px;width:100%}
-    #startBtn{background:#0b84ff;color:#fff;font-size:18px;width:100%}
-    .mode-btn{width:92px;height:92px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin:10px}
+    html,body{height:100%;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
+    .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:18px}
+    .card{width:100%;max-width:460px;background:rgba(255,255,255,0.03);border-radius:14px;padding:18px;text-align:center;backdrop-filter:blur(8px)}
+    button{cursor:pointer;border:none;border-radius:12px;padding:12px 16px;font-weight:700}
+    #enterFsBtn{background:#ffd600;color:#000;width:100%;font-size:16px}
+    #startBtn{background:#0b84ff;color:#fff;width:100%;font-size:16px}
+    .mode-btn{width:92px;height:92px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin:8px}
     .mode-btn.boom{background:linear-gradient(135deg,#2a9df4,#0b6fb3);color:white}
     .mode-btn.three{background:linear-gradient(135deg,#ffd34d,#d18a00);color:#111}
-    .logo{max-width:160px;margin-bottom:16px}
-    /* live preview */
-    #videoEl{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;display:none;transform:scaleX(-1)} /* mirrored preview */
-    #canvasEl{position:fixed;inset:0;width:100%;height:100%;z-index:2;display:none;pointer-events:none}
-    #cropOverlay{position:absolute;z-index:3;pointer-events:none;border:2px dashed rgba(255,255,255,0.95);box-shadow:0 0 0 20000px rgba(0,0,0,0.25);display:none}
-    #countdown{position:fixed;top:22%;left:0;right:0;text-align:center;font-size:110px;font-weight:900;z-index:40;color:#fff;text-shadow:0 0 30px rgba(0,0,0,0.7);display:none}
-    #msg{position:fixed;bottom:18%;left:0;right:0;text-align:center;font-size:18px;z-index:40}
+    .logo{max-width:160px;margin:10px auto;display:block}
+    /* video / canvas */
+    #videoEl{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;display:none;transform:scaleX(-1)}
+    #canvasEl{position:fixed;inset:0;z-index:2;display:none}
+    #cropOverlay{position:fixed;z-index:3;pointer-events:none;border:2px dashed rgba(255,255,255,0.95);box-shadow:0 0 0 20000px rgba(0,0,0,0.25);display:none}
+    #countdown{position:fixed;top:18%;left:0;right:0;text-align:center;font-size:96px;font-weight:900;z-index:40;color:#fff;text-shadow:0 0 40px rgba(0,0,0,0.7);display:none}
+    #msg{position:fixed;bottom:14%;left:0;right:0;text-align:center;font-size:16px;z-index:40}
     /* preview modal */
-    #previewScreen{position:fixed;inset:0;display:none;z-index:80;align-items:center;justify-content:center;background:rgba(0,0,0,0.92)}
+    #previewScreen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:80;background:rgba(0,0,0,0.95)}
     #previewImage{max-width:92%;max-height:78%;object-fit:contain;border-radius:8px}
-    .preview-buttons{display:flex;gap:12px;margin-top:18px}
-    .preview-btn{padding:12px 18px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);color:#fff}
+    .preview-buttons{display:flex;gap:12px;margin-top:14px}
+    .preview-btn{padding:10px 14px;border-radius:8px;background:rgba(255,255,255,0.03);color:#fff;border:1px solid rgba(255,255,255,0.06)}
     /* QR overlay */
     .qr-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:200;background:rgba(0,0,0,0.5)}
-    .qr-modal{background:#fff;padding:18px;border-radius:10px;color:#111;text-align:center}
-    #debugInfo{position:fixed;left:10px;bottom:8px;font-size:11px;color:#ddd;z-index:300;max-width:46%;white-space:pre-line}
-    /* responsive */
-    @media(max-width:480px){ #countdown{font-size:72px} .mode-btn{width:76px;height:76px;font-size:22px} }
+    .qr-modal{background:#fff;padding:16px;border-radius:10px;color:#111;text-align:center}
+    #debugInfo{position:fixed;left:10px;bottom:8px;font-size:11px;color:#ddd;z-index:300;white-space:pre-line;max-width:46%}
+    @media(max-width:480px){ #countdown{font-size:72px} .mode-btn{width:72px;height:72px;font-size:22px} }
   </style>
 </head>
 <body>
-  <!-- === SCREEN 1: ONLY 'ENTRAR EM TELA CHEIA' (no other controls) === -->
-  <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#fff,#f5f5f5);">
-    <div class="center-card">
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h2 style="color:#222;margin-bottom:8px">📸 Cabine Fotográfica</h2>
-      <p style="color:#444;margin-bottom:16px">Para melhor experiência, entre em tela cheia</p>
+  <!-- Screen 1: Enter Fullscreen only -->
+  <div id="enterFs" class="screen" style="background:linear-gradient(135deg,#fff,#f5f5f5)">
+    <div class="card">
+      <img src="logo1.png" class="logo" alt="Logo" onerror="this.style.display='none'">
+      <h2 style="color:#222;margin:6px 0">📸 Cabine Fotográfica</h2>
+      <p style="color:#444;margin-bottom:12px">Entre em tela cheia para começar</p>
       <button id="enterFsBtn">🎬 Entrar em Tela Cheia</button>
     </div>
   </div>
 
-  <!-- === SCREEN 2: Welcome (logo + Iniciar Sessão) shown AFTER fullscreen === -->
-  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7)">
-    <div class="center-card">
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h2 style="color:#222;margin-bottom:6px">📸 Bem-vindo à Cabine</h2>
-      <p style="color:#444;margin-bottom:16px">Toque em Iniciar Sessão para começar</p>
+  <!-- Screen 2: Welcome -->
+  <div id="welcomeScreen" class="screen" style="display:none;background:linear-gradient(135deg,#fff,#f7f7f7)">
+    <div class="card">
+      <img src="logo1.png" class="logo" alt="Logo" onerror="this.style.display='none'">
+      <h3 style="color:#222;margin:6px 0">📸 Preparado?</h3>
+      <p style="color:#444;margin-bottom:12px">Toque em Iniciar Sessão</p>
       <button id="startBtn">▶️ Iniciar Sessão</button>
     </div>
   </div>
 
-  <!-- === SCREEN 3: MODE CHOICE (appears AFTER Iniciar Sessão) === -->
-  <div id="modeScreen" class="screen hidden" style="background:linear-gradient(135deg,#000,#111);">
-    <div class="center-card" style="background:transparent;">
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h3 style="margin-bottom:6px">Escolha o modo</h3>
+  <!-- Screen 3: Mode Selection -->
+  <div id="modeScreen" class="screen" style="display:none;background:linear-gradient(135deg,#000,#111)">
+    <div class="card" style="background:transparent">
+      <img src="logo1.png" class="logo" alt="Logo" onerror="this.style.display='none'">
+      <h4 style="margin:6px 0">Escolha o modo</h4>
       <div>
         <button id="chooseBoom" class="mode-btn boom" title="Boomerang">&infin;</button>
         <button id="chooseThree" class="mode-btn three" title="3 Fotos">☰</button>
       </div>
-      <p style="margin-top:12px;color:#ddd">Boomerang = vídeo vertical para stories. 3 Fotos = impressão.</p>
+      <p style="color:#ddd;margin-top:12px">Boomerang = vídeo vertical. 3 Fotos = impressão (envia 3 fotos ao operador).</p>
     </div>
   </div>
 
-  <!-- === VIDEO (front camera preview) and canvas overlays === -->
+  <!-- Video / Canvas + overlays -->
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="canvasEl"></canvas>
   <div id="cropOverlay"></div>
-
   <div id="countdown"></div>
   <div id="msg"></div>
 
-  <!-- Preview / Refazer | Continuar -->
+  <!-- Preview modal -->
   <div id="previewScreen">
     <div style="text-align:center">
-      <img id="previewImage" src="" alt="Preview">
+      <img id="previewImage" src="">
       <div class="preview-buttons">
         <button id="refazerBtn" class="preview-btn">🔄 Refazer</button>
         <button id="continuarBtn" class="preview-btn">✅ Continuar</button>
@@ -92,15 +89,15 @@
   </div>
 
   <!-- Thank you -->
-  <div id="thankScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7)">
-    <div class="center-card">
-      <img src="logo1.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h2 style="color:#222;margin-bottom:6px">✨ Obrigado!</h2>
-      <p style="color:#444">Aguarde o operador finalizar a sessão.</p>
+  <div id="thankScreen" class="screen" style="display:none;background:linear-gradient(135deg,#fff,#f7f7f7)">
+    <div class="card">
+      <img src="logo1.png" class="logo" alt="Logo" onerror="this.style.display='none'">
+      <h3 style="color:#222">✨ Obrigado!</h3>
+      <p style="color:#444">Aguarde até o operador finalizar a sessão.</p>
     </div>
   </div>
 
-  <!-- QR overlay when server sends visualizador URL -->
+  <!-- QR overlay -->
   <div id="qrOverlay" class="qr-overlay">
     <div class="qr-modal">
       <div style="font-weight:700;margin-bottom:8px">Escaneie o QR para ver suas fotos</div>
@@ -116,28 +113,24 @@
   <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
 <script>
-/* celular.html — fluxo completo
-   - Backend: https://festadodavi-production-0591.up.railway.app
-   - Fluxo:
-     1) enter fullscreen (only button on initial page)
-     2) welcome (logo + iniciar sessão)
-     3) mode selection (boom / 3x)
-     4a) 3x photos: use front camera live preview (mirrored), countdowns, capture 3 photos, per-photo preview (refazer/continuar), then emit 'photos_submit' with array of dataURLs
-     4b) boomerang: use front camera, countdown, record 2s short clip (cropped to BOOM_AREA mapped to camera), generate boomerang by repeating forward+reverse to ~15s (canvas+MediaRecorder), emit 'boomerang_ready' (ArrayBuffer) and 'photo_ready' with thumbnail
-   - Important: all captures use camera frontal do celular (no webcam do PC)
+/* CELULAR — versão corrigida:
+   - Usa canvas draw loop para preview (remove tela preta / congelada)
+   - Espera metadata antes de gravar boomerang
+   - Clamps crop coords e fallback caso necessário
+   - Emite photos_submit e boomerang_ready com ack para confirmar envio
 */
 
 (function(){
   const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
   const socket = io(SERVER_URL, { transports:['polling','websocket'], reconnection:true, path:'/socket.io' });
 
-  // TEMPLATE and BOOM area (relative to template 3375x6000)
+  // template coords (provided)
   const TEMPLATE_W = 3375, TEMPLATE_H = 6000;
-  const BOOM_AREA = { x:295, y:272, w:2785, h:4159 }; // coords you provided
+  const BOOM_AREA = { x:295, y:272, w:2785, h:4159 };
   const BOOM_TARGET_W = 1080;
   const BOOM_TARGET_H = Math.round(BOOM_TARGET_W * (BOOM_AREA.h / BOOM_AREA.w));
 
-  // DOM refs
+  // DOM
   const enterFs = document.getElementById('enterFs');
   const enterFsBtn = document.getElementById('enterFsBtn');
   const welcomeScreen = document.getElementById('welcomeScreen');
@@ -163,52 +156,38 @@
 
   const thankScreen = document.getElementById('thankScreen');
 
-  // State
-  let session = (new URLSearchParams(location.search)).get('session') || 'cabine-fixa';
+  // state
+  const session = (new URLSearchParams(location.search)).get('session') || 'cabine-fixa';
   let mode = null; // 'three' | 'boom'
-  let stream = null; // MediaStream from front camera
-  let photos = []; // collected dataURLs for 3-photo flow
-  let currentCaptured = null;
-  let isCapturing = false;
+  let stream = null;
+  let rafId = null;
+  let videoLoopRunning = false;
+  let photos = [];
 
-  // Debug updater
+  // debug updater
   setInterval(()=> {
     debugEl.textContent = `Sessão: ${session}\nModo: ${mode || '-'}\nFotos capturadas: ${photos.length}\nSocket: ${socket.connected ? '🟢 conectado' : '🔴 desconectado'}`;
-  }, 800);
+  }, 900);
 
-  // Helper: show/hide screens
-  function showScreen(el){
-    [enterFs, welcomeScreen, modeScreen, previewScreen, thankScreen].forEach(s => {
-      if(!s) return;
-      s.classList.add('hidden');
-      s.style.display = 'none';
-    });
-    // hide video/canvas unless needed
-    videoEl.style.display = 'none';
-    canvasEl.style.display = 'none';
-    cropOverlay.style.display = 'none';
-    countdownEl.style.display = 'none';
-    msgEl.textContent = '';
-
-    if(el){
-      el.classList.remove('hidden');
-      el.style.display = 'flex';
+  // show/hide screens
+  function showOnly(el){
+    [enterFs, welcomeScreen, modeScreen, previewScreen, thankScreen].forEach(s => { if(!s) return; s.style.display = (s===el) ? 'flex' : 'none'; });
+    // hide canvas/video overlays unless explicitly used
+    if (el !== null && el !== undefined) {
+      // when a main screen is shown, we typically hide the camera preview unless mode screen is next to start capture.
     }
   }
 
-  showScreen(enterFs); // initial screen
+  showOnly(enterFs);
 
-  // -------------------------
-  // SOCKET handlers
-  // -------------------------
-  socket.on('connect', () => {
-    log('Conectado ao servidor socket: ' + socket.id);
-    socket.emit('join_session', { session, role: 'viewer' });
-    // ask server for a cached operator frame (optional) — but we don't use PC webcam for captures
-    socket.emit('request_stream', { session, viewerId: socket.id });
+  // socket handlers
+  socket.on('connect', ()=> {
+    log('socket conectado: ' + socket.id);
+    socket.emit('join_session', { session, role:'viewer' });
+    socket.emit('request_stream', { session, viewerId: socket.id }); // ask operator for stream frame (optional)
   });
 
-  socket.on('disconnect', (r) => log('Socket desconectado: ' + r));
+  socket.on('disconnect',(r)=> log('socket desconectado: '+r));
 
   socket.on('show_qr', ({ visualizadorUrl }) => {
     if (!visualizadorUrl) return;
@@ -217,529 +196,497 @@
         if (err) log('Erro gerar QR: '+err);
         qrOverlay.style.display = 'flex';
       });
-    } catch(e){
-      qrOverlay.style.display = 'flex';
-    }
+    } catch(e){ qrOverlay.style.display = 'flex'; }
   });
 
   socket.on('reset_session', ({ session: s }) => {
     if (s && s !== session) return;
-    // back to start state
     photos = [];
-    currentCaptured = null;
-    stopStreamSilently();
-    showScreen(welcomeScreen);
+    stopPreviewLoop();
+    stopAndReleaseCamera();
+    showOnly(welcomeScreen);
     qrOverlay.style.display = 'none';
   });
 
-  // -------------------------
-  // Fullscreen / UI flow
-  // -------------------------
-  enterFsBtn.addEventListener('click', async () => {
-    try { await document.documentElement.requestFullscreen(); } catch(e){ /* ignore */ }
-    showScreen(welcomeScreen);
+  // UI wiring
+  enterFsBtn.addEventListener('click', async ()=> {
+    try { await document.documentElement.requestFullscreen().catch(()=>{}); } catch(e){}
+    showOnly(welcomeScreen);
     socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
   });
 
-  startBtn.addEventListener('click', async () => {
-    // After clicking 'Iniciar Sessão', show the mode selection (buttons)
-    showScreen(modeScreen);
-    await playAudioSafe('inicio');
+  startBtn.addEventListener('click', ()=> {
+    showOnly(modeScreen);
   });
 
-  chooseThree.addEventListener('click', async () => {
+  chooseThree.addEventListener('click', async ()=> {
     mode = 'three';
-    // start front camera preview live
-    await ensureFrontCameraStream();
-    // show live preview and overlay appropriate crop for print areas (we'll draw crop to indicate area)
-    videoEl.style.display = 'block';
-    canvasEl.style.display = 'none';
-    cropOverlay.style.display = 'none'; // no single crop for printing (we guide by preview framing)
-    showScreen(null); // hide central cards, keep video visible
-    // start capture sequence for 3 photos
+    photos = [];
+    await startCameraAndPreview();
+    hideAllCardsKeepPreview();
     await startThreePhotosSequence();
   });
 
-  chooseBoom.addEventListener('click', async () => {
+  chooseBoom.addEventListener('click', async ()=> {
     mode = 'boom';
-    await ensureFrontCameraStream();
-    // show live preview and overlay the BOOM area (mapped on screen)
-    videoEl.style.display = 'block';
-    drawBoomOverlay(); // position cropOverlay to show exact boomerang area
-    cropOverlay.style.display = 'block';
-    showScreen(null);
+    await startCameraAndPreview();
+    drawBoomOverlay(); cropOverlay.style.display = 'block';
+    hideAllCardsKeepPreview();
     await startBoomerangSequence();
   });
 
-  // -------------------------
-  // Camera helpers (front camera)
-  // -------------------------
+  function hideAllCardsKeepPreview(){
+    // hide UI cards but keep preview canvas visible
+    enterFs.style.display = 'none';
+    welcomeScreen.style.display = 'none';
+    modeScreen.style.display = 'none';
+    // show canvas
+    canvasEl.style.display = 'block';
+    videoEl.style.display = 'none';
+    countdownEl.style.display = 'none';
+  }
+
+  // start camera and preview loop (draw video into canvas to avoid black frames)
+  async function startCameraAndPreview(){
+    await ensureFrontCameraStream();
+    // prepare canvas to match viewport and DPR
+    resizeCanvasToWindow();
+    if (!videoLoopRunning) startPreviewLoop();
+    canvasEl.style.display = 'block';
+    videoEl.style.display = 'none';
+  }
+
+  function resizeCanvasToWindow(){
+    const dpr = window.devicePixelRatio || 1;
+    canvasEl.width = Math.floor(window.innerWidth * dpr);
+    canvasEl.height = Math.floor(window.innerHeight * dpr);
+    canvasEl.style.width = window.innerWidth + 'px';
+    canvasEl.style.height = window.innerHeight + 'px';
+    const ctx = canvasEl.getContext('2d');
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener('resize', ()=> { resizeCanvasToWindow(); if (mode === 'boom') drawBoomOverlay(); });
+
+  function startPreviewLoop(){
+    if (videoLoopRunning) return;
+    videoLoopRunning = true;
+    const ctx = canvasEl.getContext('2d');
+    function loop(){
+      if (!stream || videoEl.readyState < 2) {
+        // draw black background until frame available
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvasEl.width,canvasEl.height);
+      } else {
+        // draw video to canvas cover (mirrored)
+        const vw = videoEl.videoWidth, vh = videoEl.videoHeight;
+        if (vw && vh) {
+          const cw = canvasEl.clientWidth, ch = canvasEl.clientHeight;
+          // compute cover scale
+          const scale = Math.max(cw / vw, ch / vh);
+          const drawW = vw * scale, drawH = vh * scale;
+          const dx = (cw - drawW) / 2, dy = (ch - drawH) / 2;
+          // scale transform (we already set DPR transform)
+          // Clear then draw mirrored
+          ctx.save();
+          ctx.clearRect(0,0,cw,ch);
+          ctx.translate(cw, 0); ctx.scale(-1,1); // mirror horizontally
+          // We need to draw with mirrored coordinates; to do that use negative destination x.
+          // Draw image normal but with translate+scale done.
+          // Because of translate(cw,0) and scale(-1,1), destination x 0 corresponds to right edge,
+          // so drawImage's destX should be dx (but mirrored), easiest: drawImage with destX = cw - (dx + drawW)
+          const destX = cw - (dx + drawW);
+          ctx.drawImage(videoEl, 0, 0, vw, vh, destX, dy, drawW, drawH);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvasEl.clientWidth,canvasEl.clientHeight);
+        }
+      }
+      rafId = requestAnimationFrame(loop);
+    }
+    loop();
+  }
+
+  function stopPreviewLoop(){
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+    videoLoopRunning = false;
+    canvasEl.style.display = 'none';
+    cropOverlay.style.display = 'none';
+  }
+
+  // ensure camera stream and wait loadedmetadata/play
   async function ensureFrontCameraStream(){
     if (stream) return stream;
     try {
-      const constraints = {
-        video: {
-          facingMode: { ideal: "user" },
-          width: { ideal: 1080 }, // high resolution but not insane; avoids 600x400 limitation
-          height: { ideal: 1920 }
-        },
-        audio: false
-      };
+      const constraints = { video: { facingMode: { ideal: "user" }, width: { ideal: 1080 }, height:{ ideal:1920 } }, audio:false };
       stream = await navigator.mediaDevices.getUserMedia(constraints);
       videoEl.srcObject = stream;
-      videoEl.style.transform = 'scaleX(-1)'; // mirrored preview so user sees themselves like a mirror
-      await videoEl.play().catch(()=>{});
+      videoEl.muted = true;
+      await new Promise((res, rej) => {
+        // wait for metadata / first frame
+        const onMeta = () => { videoEl.removeEventListener('loadedmetadata', onMeta); res(); };
+        videoEl.addEventListener('loadedmetadata', onMeta);
+        // also set a timeout fallback
+        setTimeout(()=>res(), 1200);
+      });
+      try { await videoEl.play().catch(()=>{}); } catch(e){}
       return stream;
     } catch(e){
-      log('Erro ao acessar câmera frontal: ' + (e.message || e));
+      log('Erro ao acessar câmera frontal: ' + (e.message||e));
       alert('Não foi possível acessar a câmera frontal. Verifique permissões.');
       throw e;
     }
   }
 
-  function stopStreamSilently(){
+  // stop camera
+  function stopAndReleaseCamera(){
     if (!stream) return;
-    stream.getTracks().forEach(t => t.stop());
+    stream.getTracks().forEach(t=>t.stop());
     stream = null;
     videoEl.srcObject = null;
-    videoEl.style.display = 'none';
+    canvasEl.style.display = 'none';
+    cropOverlay.style.display = 'none';
   }
 
-  // -------------------------
-  // Overlay mapping: BOOM area shown on screen
-  // -------------------------
+  // draw boom overlay (map BOOM_AREA to visible canvas)
   function drawBoomOverlay(){
-    // Map BOOM_AREA (template coords) -> screen coords where the video is drawn
-    // We assume video is cover-fitted into the viewport (object-fit:cover)
-    const vw = videoEl.clientWidth || window.innerWidth;
-    const vh = videoEl.clientHeight || window.innerHeight;
-    // video videoEl.videoWidth/videoHeight give actual stream resolution
-    const vidW = videoEl.videoWidth || 1080;
-    const vidH = videoEl.videoHeight || 1920;
-    // Compute scale for cover
-    const scale = Math.max(vw / vidW, vh / vidH);
-    const drawW = vidW * scale, drawH = vidH * scale;
-    const dx = (vw - drawW) / 2, dy = (vh - drawH) / 2;
-
-    // Map template->video coordinate scale factor: assume template was intended to map to camera area similarly
-    // We'll approximate by mapping TEMPLATE_W/TEMPLATE_H -> vidW/vidH
-    const sx = drawW / TEMPLATE_W;
-    const sy = drawH / TEMPLATE_H;
-    // compute crop rect on screen
-    const cx = dx + BOOM_AREA.x * sx;
-    const cy = dy + BOOM_AREA.y * sy;
-    const cw = BOOM_AREA.w * sx;
-    const ch = BOOM_AREA.h * sy;
-
-    // position cropOverlay absolutely relative to viewport
-    cropOverlay.style.left = `${cx}px`;
-    cropOverlay.style.top = `${cy}px`;
-    cropOverlay.style.width = `${cw}px`;
-    cropOverlay.style.height = `${ch}px`;
+    // map BOOM_AREA from template -> screen coordinates (using same cover logic as preview loop)
+    const vw = videoEl.videoWidth || 1080;
+    const vh = videoEl.videoHeight || 1920;
+    const cw = canvasEl.clientWidth;
+    const ch = canvasEl.clientHeight;
+    const scale = Math.max(cw / vw, ch / vh);
+    const drawW = vw * scale, drawH = vh * scale;
+    const dx = (cw - drawW) / 2, dy = (ch - drawH) / 2;
+    // template->draw scale: drawW / TEMPLATE_W
+    const s = drawW / TEMPLATE_W;
+    const cx = dx + BOOM_AREA.x * s;
+    const cy = dy + BOOM_AREA.y * s;
+    const cwRect = BOOM_AREA.w * s;
+    const chRect = BOOM_AREA.h * s;
+    cropOverlay.style.left = cx + 'px';
+    cropOverlay.style.top = cy + 'px';
+    cropOverlay.style.width = cwRect + 'px';
+    cropOverlay.style.height = chRect + 'px';
   }
 
-  // keep overlay updated on resize / orientation
-  window.addEventListener('resize', ()=> { if (mode === 'boom' && stream) drawBoomOverlay(); });
-
-  // -------------------------
-  // THREE PHOTOS SEQUENCE
-  // -------------------------
+  // ---------------------------
+  // THREE PHOTOS FLOW
+  // ---------------------------
   async function startThreePhotosSequence(){
     photos = [];
-    isCapturing = true;
-    // we will take 3 photos, with countdown per photo
     for (let i=0;i<3;i++){
       try {
-        // show live preview during countdown (video element visible)
-        await runCountdownForPhoto(i+1, 5); // 5-second countdown like before
-        // capture image from front camera, mirrored (so user sees same)
-        const dataUrl = capturePhotoFromVideoMirrored();
-        // show preview and wait for refazer/continuar
+        await runCountdown(5);
+        // capture current frame from canvas (which is mirrored to match preview)
+        const dataUrl = captureFromCanvasHighRes();
         const decision = await showPreviewAndWait(dataUrl);
-        if (decision === 'refazer') {
-          // repeat same index
-          i = i - 1;
-          continue;
-        } else {
-          // continue to next
-          photos.push(dataUrl);
-        }
+        if (decision === 'refazer') { i = i - 1; continue; }
+        photos.push(dataUrl);
+        log('Foto capturada (index ' + i + ') size ~' + Math.round((dataUrl.length*3)/4/1024) + 'KB');
       } catch(e){
-        log('Erro durante captura 3x: ' + (e.message || e));
-        i = i - 1;
-        await sleep(800);
-        continue;
+        log('Erro na captura 3x: ' + (e.message||e)); i = i - 1; await sleep(600);
       }
     }
-    // after 3 photos, send photos array to server together
-    try {
-      socket.emit('photos_submit', { session, viewerId: socket.id, photos });
-      log('photos_submit enviado com ' + photos.length + ' fotos.');
-    } catch(e){
-      log('Erro enviando photos_submit: ' + e);
-    }
-    // show thank you screen
-    isCapturing = false;
-    showScreen(thankScreen);
-    try { playAudioSafe('fim'); } catch(e){}
+
+    // Emit photos_submit with acknowledgement callback
+    const payload = { session, viewerId: socket.id, photos };
+    socket.emit('photos_submit', payload, (ack) => {
+      // server ack handling
+      log('photos_submit ACK: ' + JSON.stringify(ack || 'null'));
+      if (ack && ack.ok) {
+        msg('Fotos enviadas com sucesso');
+      } else {
+        msg('Erro ao enviar fotos ao servidor (verifique).');
+      }
+    });
+    // show thank
+    stopPreviewLoop();
+    stopAndReleaseCamera();
+    showOnly(thankScreen);
+    try { playAudio('fim'); } catch(e){}
   }
 
-  function capturePhotoFromVideoMirrored(){
-    // capture highest resolution available from video element
-    const v = videoEl;
-    const w = v.videoWidth || 1080;
-    const h = v.videoHeight || 1920;
-    const c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    const ctx = c.getContext('2d');
-
-    // Draw mirrored to keep same orientation as user saw
+  function captureFromCanvasHighRes(){
+    // create a capture canvas at video resolution (use videoWidth/videoHeight) to preserve quality
+    const vw = videoEl.videoWidth || 1080;
+    const vh = videoEl.videoHeight || 1920;
+    const cap = document.createElement('canvas');
+    cap.width = vw; cap.height = vh;
+    const ctx = cap.getContext('2d');
+    // We used mirrored preview drawing: so to capture the same orientation, draw mirrored.
     ctx.save();
-    ctx.translate(w, 0);
-    ctx.scale(-1, 1);
-    try {
-      ctx.drawImage(v, 0, 0, w, h);
-    } catch(e){ log('drawImage error: ' + e); }
+    ctx.translate(vw,0); ctx.scale(-1,1);
+    try { ctx.drawImage(videoEl, 0,0,vw,vh); } catch(e){
+      // fallback: draw from canvasEl scaled
+      const tmpCtx = canvasEl.getContext('2d');
+      ctx.drawImage(canvasEl, 0,0, cap.width, cap.height);
+    }
     ctx.restore();
-    return c.toDataURL('image/jpeg', 0.95);
+    return cap.toDataURL('image/jpeg', 0.95);
   }
 
+  // Preview modal show + wait for refazer/continuar
   function showPreviewAndWait(dataUrl){
-    return new Promise((resolve) => {
+    return new Promise(resolve=>{
       previewImage.src = dataUrl;
       previewScreen.style.display = 'flex';
-      // attach temporary handlers
-      function onRef(){
-        cleanup();
-        resolve('refazer');
-      }
-      function onCont(){
-        cleanup();
-        resolve('continuar');
-      }
-      function cleanup(){
-        previewScreen.style.display = 'none';
-        refazerBtn.removeEventListener('click', onRef);
-        continuarBtn.removeEventListener('click', onCont);
-      }
+      function onRef(){ cleanup(); resolve('refazer'); }
+      function onCont(){ cleanup(); resolve('continuar'); }
+      function cleanup(){ previewScreen.style.display = 'none'; refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); }
       refazerBtn.addEventListener('click', onRef);
       continuarBtn.addEventListener('click', onCont);
     });
   }
 
-  async function runCountdownForPhoto(index, seconds = 5){
-    // show countdown overlay and allow live video behind it
-    countdownEl.style.display = 'block';
-    for (let t = seconds; t > 0; t--){
-      if (t <= 2){
-        countdownEl.textContent = 'SORRIA!';
-        countdownEl.style.color = '#ffd600';
-        if (t === 2) { try { document.getElementById('beep').currentTime = 0; document.getElementById('beep').play().catch(()=>{}); } catch(e){} }
-      } else {
-        countdownEl.textContent = String(t);
-        countdownEl.style.color = '#fff';
-      }
-      await sleep(1000);
-    }
-    countdownEl.style.display = 'none';
-  }
-
-  // -------------------------
-  // BOOMERANG SEQUENCE (client-side)
-  // -------------------------
+  // ---------------------------
+  // BOOMERANG FLOW
+  // ---------------------------
   async function startBoomerangSequence(){
-    isCapturing = true;
-    // show small countdown then record short clip
-    await runShortCountdown(3); // 3s to position
-    // record a short 2 second cropped clip from front camera mapped to BOOM_AREA
-    const shortBlob = await recordCroppedShortClip(2000);
-    if (!shortBlob) {
-      log('Não foi possível gravar clipe curto do boomerang');
-      isCapturing = false;
-      showScreen(welcomeScreen);
-      return;
-    }
-    // create thumbnail
-    let thumb = null;
-    try { thumb = await blobToDataURL(shortBlob, true); } catch(e){ log('Erro gerar thumb: '+e); }
+    await runCountdown(3);
+    // record short cropped clip (2s) from canvas (we'll draw crop from canvas into offscreen)
+    const shortBlob = await recordCroppedShortClipFromCanvas(2000);
+    if (!shortBlob) { log('falha gravar short clip'); msg('Erro ao gravar boomerang.'); return; }
+    const thumb = await blobToDataURL(shortBlob, true).catch(()=>null);
 
-    // generate final boomerang by repeating forward+reverse onto canvas and recording ~15s
+    // process boomerang to ~15s by repeating forward+reverse
+    msg('Processando boomerang...');
     const finalBlob = await generateBoomerangFromShortClip(shortBlob, { loopMs:15000, targetW:BOOM_TARGET_W, targetH:BOOM_TARGET_H });
-    if (!finalBlob) {
-      log('Falha ao gerar boomerang final.');
-      isCapturing = false;
-      showScreen(welcomeScreen);
-      return;
-    }
+    if (!finalBlob) { log('falha gerar boomerang final'); msg('Erro processando boomerang'); return; }
 
-    // send boomerang to server (ArrayBuffer) and send thumbnail as photo_ready
+    // send via socket (ArrayBuffer) with ack if server supports
     try {
       const ab = await finalBlob.arrayBuffer();
-      socket.emit('boomerang_ready', { session, viewerId: socket.id, filename: `boomerang_${Date.now()}.webm`, data: ab });
-      log('boomerang_ready emitido (ArrayBuffer).');
-      if (thumb) {
-        socket.emit('photo_ready', { session, index: 0, viewerId: socket.id, photo: thumb });
-        log('photo_ready (thumbnail) emitido.');
-      }
-      // also keep server's photos flow consistent: emit photos_submit with single thumb
-      socket.emit('photos_submit', { session, viewerId: socket.id, photos: [thumb] });
+      socket.emit('boomerang_ready', { session, viewerId: socket.id, filename:`boomerang_${Date.now()}.webm`, data: ab }, (ack) => {
+        log('boomerang_ready ACK: ' + JSON.stringify(ack||'null'));
+      });
+      if (thumb) socket.emit('photo_ready', { session, index:0, viewerId: socket.id, photo: thumb });
+      // also keep photos_submit consistency
+      socket.emit('photos_submit', { session, viewerId: socket.id, photos: [thumb] }, (ack) => {
+        log('photos_submit (boom) ACK: ' + JSON.stringify(ack||'null'));
+      });
+      msg('Boomerang enviado!');
     } catch(e){
-      log('Erro ao enviar boomerang: ' + (e.message||e));
-      // fallback: open blob in new tab for manual download
+      log('Erro enviando boomerang: ' + e);
       const url = URL.createObjectURL(finalBlob);
-      window.open(url, '_blank');
+      window.open(url,'_blank');
+      msg('Erro ao enviar boomerang. Abra nova aba para download.');
     }
 
-    isCapturing = false;
-    showScreen(thankScreen);
-    try { playAudioSafe('fim'); } catch(e){}
+    stopPreviewLoop();
+    stopAndReleaseCamera();
+    showOnly(thankScreen);
+    try { playAudio('fim'); } catch(e){}
   }
 
-  async function runShortCountdown(seconds = 3){
-    countdownEl.style.display = 'block';
-    for (let t = seconds; t > 0; t--){
-      countdownEl.textContent = String(t);
-      await sleep(700);
-    }
-    countdownEl.style.display = 'none';
-  }
-
-  // record a short crop (BOOM_AREA) for msDuration milliseconds
-  async function recordCroppedShortClip(msDuration = 2000){
-    try {
-      if (!stream) await ensureFrontCameraStream();
-    } catch(e){
+  // record cropped short clip by drawing the crop area from the live canvas (not directly from video)
+  async function recordCroppedShortClipFromCanvas(msDuration = 2000){
+    const cw = canvasEl.clientWidth, ch = canvasEl.clientHeight;
+    if (!cw || !ch) {
+      log('canvas dims invalid');
       return null;
     }
-    // ensure video has metadata to know videoWidth/videoHeight
-    if (!videoEl.videoWidth || !videoEl.videoHeight) {
-      // try to play to populate
-      try { await videoEl.play().catch(()=>{}); } catch(e){}
+
+    // Calculate crop in canvas coordinate (we used drawBoomOverlay mapping)
+    // We'll compute scale factors used in preview loop (we used video -> canvas cover scaling)
+    const vw = videoEl.videoWidth || 1080, vh = videoEl.videoHeight || 1920;
+    const scale = Math.max(cw / vw, ch / vh);
+    const drawW = vw * scale, drawH = vh * scale;
+    const dx = (cw - drawW) / 2, dy = (ch - drawH) / 2;
+    const s = drawW / TEMPLATE_W;
+
+    // Compute crop on canvas
+    let cropX = Math.round(dx + BOOM_AREA.x * s);
+    let cropY = Math.round(dy + BOOM_AREA.y * s);
+    let cropW = Math.round(BOOM_AREA.w * s);
+    let cropH = Math.round(BOOM_AREA.h * s);
+
+    // Clamp to canvas bounds (fallback if values out of range)
+    cropX = Math.max(0, Math.min(cropX, cw-1));
+    cropY = Math.max(0, Math.min(cropY, ch-1));
+    if (cropW <= 0 || cropH <= 0 || cropX+cropW > cw || cropY+cropH > ch) {
+      // fallback to a centered vertical crop
+      const fallbackW = Math.floor(cw * 0.6);
+      const fallbackH = Math.floor(fallbackW * (BOOM_AREA.h / BOOM_AREA.w));
+      cropW = fallbackW; cropH = fallbackH;
+      cropX = Math.round((cw - cropW)/2);
+      cropY = Math.round((ch - cropH)/2);
+      log('Crop fallback used for boomerang.');
     }
-    const actualVw = videoEl.videoWidth || 1080;
-    const actualVh = videoEl.videoHeight || 1920;
 
-    // Map TEMPLATE -> camera (center-cover mapping)
-    const scale = Math.max(actualVw / TEMPLATE_W, actualVh / TEMPLATE_H);
-    const drawW = TEMPLATE_W * scale, drawH = TEMPLATE_H * scale;
-    const dx = (actualVw - drawW) / 2;
-    const dy = (actualVh - drawH) / 2;
-    const cropX = Math.round(dx + BOOM_AREA.x * scale);
-    const cropY = Math.round(dy + BOOM_AREA.y * scale);
-    const cropW = Math.round(BOOM_AREA.w * scale);
-    const cropH = Math.round(BOOM_AREA.h * scale);
-    log(`Crop on camera pixels: x=${cropX},y=${cropY},w=${cropW},h=${cropH}`);
-
-    // We will scale the crop to BOOM_TARGET_W x BOOM_TARGET_H for performance
+    // Prepare offscreen canvas that will be recorded (target size)
     const outW = BOOM_TARGET_W, outH = BOOM_TARGET_H;
-    const off = document.createElement('canvas');
-    off.width = outW; off.height = outH;
+    const off = document.createElement('canvas'); off.width = outW; off.height = outH;
     const offCtx = off.getContext('2d');
 
-    // capture frames into off canvas, then record that canvas.stream()
-    const captureStream = off.captureStream(30);
+    const streamRec = off.captureStream(30);
     const recorded = [];
-    let options = { mimeType: 'video/webm;codecs=vp8' };
-    const recorder = new MediaRecorder(captureStream, options);
+    let mime = 'video/webm;codecs=vp8';
+    let recorder;
+    try { recorder = new MediaRecorder(streamRec, { mimeType: mime }); }
+    catch(e){ recorder = new MediaRecorder(streamRec); }
     recorder.ondataavailable = e => { if (e.data && e.data.size) recorded.push(e.data); };
     recorder.start();
 
     const start = performance.now();
     await new Promise(resolve => {
-      function drawFrame(){
+      function frame(){
+        // draw cropped region from main canvas into off canvas scaled to outW/outH
         try {
-          // draw mirrored crop? We want final boomerang to be mirrored like photos (user expectation).
-          offCtx.save();
-          offCtx.fillStyle = '#000'; offCtx.fillRect(0,0,outW,outH);
-          // drawImage(source, sx, sy, sw, sh, dx, dy, dw, dh)
-          // videoEl is mirrored in UI (scaleX(-1)). For capture, we draw as mirrored so final matches preview.
-          // To mirror: translate + scale
-          offCtx.translate(outW, 0);
-          offCtx.scale(-1, 1);
-          // We need to draw the crop region from video but mirrored: easiest is to draw normally then apply mirroring by transforming destination
-          // However drawImage with mirroring applied above expects source coordinates; we'll draw using drawImage with source region:
-          offCtx.drawImage(videoEl, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
-          offCtx.restore();
+          const mainCtx = canvasEl.getContext('2d');
+          // main canvas currently contains mirrored video frame
+          offCtx.clearRect(0,0,outW,outH);
+          offCtx.drawImage(canvasEl, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
         } catch(e){}
         if (performance.now() - start < msDuration) {
-          requestAnimationFrame(drawFrame);
+          requestAnimationFrame(frame);
         } else {
           setTimeout(()=>{ recorder.stop(); resolve(); }, 60);
         }
       }
-      drawFrame();
+      frame();
     });
-
     await new Promise(res => recorder.onstop = res);
     const blob = new Blob(recorded, { type: 'video/webm' });
     return blob;
   }
 
-  // generate boomerang final clip: plays short clip forward+reverse repeatedly onto a canvas which includes template underlay
+  // generate boomerang final (forward+reverse looping) from a short clip
   async function generateBoomerangFromShortClip(shortBlob, opts = { loopMs:15000, targetW:1080, targetH:1857 }){
     const loopMs = opts.loopMs || 15000;
     const targetW = opts.targetW || BOOM_TARGET_W;
     const targetH = opts.targetH || BOOM_TARGET_H;
 
-    const v = document.createElement('video');
-    v.src = URL.createObjectURL(shortBlob);
-    v.muted = true;
-    v.playsInline = true;
+    const v = document.createElement('video'); v.src = URL.createObjectURL(shortBlob); v.muted = true; v.playsInline = true;
     await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = rej; });
 
-    // canvas for final boomerang composition
-    const canvas = document.createElement('canvas');
-    canvas.width = targetW; canvas.height = targetH;
+    const canvas = document.createElement('canvas'); canvas.width = targetW; canvas.height = targetH;
     const ctx = canvas.getContext('2d');
 
-    // load template image if available
-    const template = new Image();
-    template.crossOrigin = 'anonymous';
-    template.src = 'bomerang.png';
-    await new Promise((res) => { template.onload = res; template.onerror = res; });
+    const template = new Image(); template.crossOrigin='anonymous'; template.src = 'bomerang.png';
+    await new Promise(res => { template.onload = res; template.onerror = res; });
 
-    // compute area on canvas for video from template scaling (we scale whole template to canvas)
     const scaleFactor = targetW / TEMPLATE_W;
-    const area = {
-      x: Math.round(BOOM_AREA.x * scaleFactor),
-      y: Math.round(BOOM_AREA.y * scaleFactor),
-      w: Math.round(BOOM_AREA.w * scaleFactor),
-      h: Math.round(BOOM_AREA.h * scaleFactor)
-    };
+    const area = { x: Math.round(BOOM_AREA.x * scaleFactor), y: Math.round(BOOM_AREA.y * scaleFactor), w: Math.round(BOOM_AREA.w * scaleFactor), h: Math.round(BOOM_AREA.h * scaleFactor) };
 
     const stream = canvas.captureStream(30);
     const chunks = [];
-    const rec = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
-    rec.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    let rec;
+    try { rec = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' }); }
+    catch(e){ rec = new MediaRecorder(stream); }
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
     rec.start();
 
-    const startTime = performance.now();
+    const t0 = performance.now();
 
-    // helper to draw current v frame and template
-    function drawFrame() {
+    function drawFrame(){
       ctx.clearRect(0,0,canvas.width,canvas.height);
       if (template && template.complete && template.naturalWidth) {
-        ctx.drawImage(template, 0, 0, TEMPLATE_W, TEMPLATE_H, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(template, 0,0, TEMPLATE_W, TEMPLATE_H, 0,0, canvas.width, canvas.height);
       } else {
         ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
       }
-      try {
-        ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, area.x, area.y, area.w, area.h);
-      } catch(e){}
+      try { ctx.drawImage(v, 0,0, v.videoWidth, v.videoHeight, area.x, area.y, area.w, area.h); } catch(e){}
     }
 
-    // play forward
-    async function playForward() {
+    async function playForward(){
       return new Promise(res => {
-        v.currentTime = 0;
-        v.play().catch(()=>{});
-        const tick = () => {
+        v.currentTime = 0; v.play().catch(()=>{});
+        const onTime = () => {
           drawFrame();
           if (v.ended || v.currentTime >= v.duration - 0.001) {
-            v.pause();
-            res();
-          } else {
-            requestAnimationFrame(tick);
+            v.pause(); v.removeEventListener('timeupdate', onTime); res();
           }
         };
-        tick();
+        v.addEventListener('timeupdate', onTime);
+        drawFrame();
       });
     }
-    // play reverse (manual stepping)
-    async function playReverse() {
+    async function playReverse(){
       return new Promise(res => {
-        v.pause();
-        v.currentTime = v.duration;
+        v.pause(); v.currentTime = v.duration;
         function step(){
           const stepSec = 1/30;
           v.currentTime = Math.max(0, v.currentTime - stepSec);
           drawFrame();
-          if (v.currentTime > 0.02) {
-            requestAnimationFrame(step);
-          } else {
-            res();
-          }
+          if (v.currentTime > 0.02) requestAnimationFrame(step); else res();
         }
         step();
       });
     }
 
-    while (performance.now() - startTime < loopMs) {
+    while (performance.now() - t0 < loopMs) {
       await playForward();
-      if (performance.now() - startTime >= loopMs) break;
+      if (performance.now() - t0 >= loopMs) break;
       await playReverse();
     }
 
-    // stop recorder
     await sleep(120);
     await new Promise(res => { rec.onstop = res; rec.stop(); });
 
-    const finalBlob = new Blob(chunks, { type: 'video/webm' });
-    return finalBlob;
+    return new Blob(chunks, { type: 'video/webm' });
   }
 
-  // -------------------------
-  // Utilities: blob->dataURL (with first frame thumbnail)
-  // -------------------------
+  // blob->dataURL (first frame optional)
   function blobToDataURL(blob, firstFrame=false){
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve,reject)=>{
       if (!firstFrame) {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
+        const r = new FileReader();
+        r.onload = ()=> resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(blob);
       } else {
-        const v = document.createElement('video');
-        v.muted = true; v.playsInline = true;
-        v.src = URL.createObjectURL(blob);
+        const v = document.createElement('video'); v.muted=true; v.playsInline=true; v.src = URL.createObjectURL(blob);
         v.onloadeddata = async () => {
-          try {
-            v.currentTime = 0.05;
-          } catch(e){}
+          try { v.currentTime = 0.05; } catch(e){}
           await sleep(80);
-          const c = document.createElement('canvas');
-          c.width = v.videoWidth || 640;
-          c.height = v.videoHeight || 480;
+          const c = document.createElement('canvas'); c.width = v.videoWidth || 640; c.height = v.videoHeight || 480;
           const ctx = c.getContext('2d');
-          try {
-            ctx.drawImage(v, 0, 0, c.width, c.height);
-            resolve(c.toDataURL('image/jpeg', 0.85));
-          } catch(e){ reject(e); }
+          try { ctx.drawImage(v, 0,0,c.width,c.height); resolve(c.toDataURL('image/jpeg',0.85)); } catch(e){ reject(e); }
         };
-        v.onerror = (e) => reject(e);
+        v.onerror = (e)=> reject(e);
       }
     });
   }
 
-  // -------------------------
-  // small helpers
-  // -------------------------
-  function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+  // small utilities
+  function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+  function log(msg){ const t=new Date().toLocaleTimeString(); debugEl.textContent = `[${t}] ${msg}\n` + debugEl.textContent; console.log(msg); }
+  function msg(text){ msgEl.textContent = text; setTimeout(()=>{ if (msgEl.textContent===text) msgEl.textContent = ''; }, 3500); }
+  function playAudio(id){ try{ const a=document.getElementById(id); if(a){ a.currentTime=0; a.play().catch(()=>{}); } }catch(e){ } }
 
-  function log(msg){
-    const t = new Date().toLocaleTimeString();
-    debugEl.textContent = `[${t}] ${msg}\n` + debugEl.textContent;
-    console.log(msg);
+  async function runCountdown(seconds=5){
+    countdownEl.style.display = 'block';
+    for(let t=seconds; t>0; t--){
+      if (t <= 2) { countdownEl.textContent = 'SORRIA!'; countdownEl.style.color = '#ffd600'; if (t===2) { try{ document.getElementById('beep').play().catch(()=>{}); }catch(e){} } }
+      else { countdownEl.textContent = String(t); countdownEl.style.color = '#fff'; }
+      await sleep(1000);
+    }
+    countdownEl.style.display = 'none';
   }
 
-  async function playAudioSafe(id){
-    try { const a = document.getElementById(id); if (a) { a.currentTime = 0; await a.play().catch(()=>{}); } } catch(e){}
-  }
+  // handle incoming operator stream_frame if operator provides a sample (optional)
+  socket.on('stream_frame', ({ session: s, frame }) => {
+    // if we receive a frame from operator, draw it in preview so user can see operator background (not needed for captures)
+    // frame expected to be dataURL — but we don't depend on it for captures
+    if (!frame) return;
+    // For debug only: draw frame into canvas once
+    try {
+      const img = new Image();
+      img.onload = ()=> {
+        const ctx = canvasEl.getContext('2d');
+        ctx.clearRect(0,0,canvasEl.clientWidth,canvasEl.clientHeight);
+        ctx.drawImage(img, 0,0, canvasEl.clientWidth, canvasEl.clientHeight);
+      };
+      img.src = frame;
+    } catch(e){}
+  });
 
-  // -------------------------
-  // Utilities: convert blob to arrayBuffer safely for socket emit
-  // -------------------------
-  async function blobToArrayBuffer(blob){
-    return await blob.arrayBuffer();
-  }
+  // Expose for debug
+  window._cabine = { socket, startPreviewLoop, stopPreviewLoop, ensureFrontCameraStream, stopAndReleaseCamera };
 
-  // expose _cabine for quick debug
-  window._cabine = { socket, ensureFrontCameraStream, stopStreamSilently, startThreePhotosSequence, startBoomerangSequence };
+  log('Cliente celular pronto.');
 
-  // finalize
-  log('Cliente pronto (celular).');
-
-})(); // IIFE end
+})();
 </script>
 </body>
 </html>
