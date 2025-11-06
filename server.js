@@ -1,558 +1,416 @@
 /**
- * server.js - CORRIGIDO
+ * server.js — CABINE FOTOGRÁFICA (COMPLETO)
  *
- * Node/Express + Socket.IO server for Festadodavi
+ * Funcionalidades:
+ * - Servidor Express + Socket.IO
+ * - Recebe fotos (dataURLs) do celular e faz upload para IMGBB
+ * - Recebe boomerang (ArrayBuffer/binary) via socket e faz upload para IMGBB
+ * - Gera/armazena sessão com fotos/boomerang e emite eventos para operator/index
+ * - Rotas: / (static public), /health, /sessions (admin), /visualizador/:session (preview simples)
  *
- * Features:
- *  - session/room model: operators join session rooms, viewers connect with viewerId
- *  - handles photos_submit and boomerang_ready from viewers and uploads to IMGBB
- *  - emits visualizador payloads and QR notifications to viewers and operators
+ * Dependências:
+ *  - express, socket.io, multer, axios, fs-extra, uuid, qrcode
  *
- * Usage:
- *   - set env IMGBB_KEY (required to upload to imgbb)
- *   - set env PORT (optional)
- *   - set env FRONTEND_ORIGIN (optional, for CORS)
- *
- * Install deps:
- *   npm i express socket.io node-fetch uuid form-data fluent-ffmpeg
- *   // fluent-ffmpeg requires ffmpeg installed on the host (apt, brew, etc).
- *
- * Notes:
- *  - This implementation uses in-memory stores. For production use persistent DB/Redis.
+ * Atenção:
+ *  - Altere IMGBB_KEY para sua chave IMGBB
+ *  - Ajuste BASE_URL se necessário (padrão: https://festadodavi.onrender.com)
  */
 
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const fetch = require('node-fetch'); // npm i node-fetch@2
+const multer = require('multer');
+const axios = require('axios');
+const fs = require('fs-extra');
+const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const FormData = require('form-data');
-
-let ffmpegAvailable = false;
-let ffmpeg = null;
-try {
-  // try to require fluent-ffmpeg; optional
-  ffmpeg = require('fluent-ffmpeg');
-  // if no ffmpeg binary installed, fluent-ffmpeg will fail at runtime when used.
-  ffmpegAvailable = true;
-} catch (e) {
-  ffmpegAvailable = false;
-}
-
-/* --------------------------
-   Configuration & stores
-   -------------------------- */
-const IMGBB_KEY = process.env.IMGBB_KEY || 'fc52605669365cdf28ea379d10f2a341'; // set this in your environment
-const PORT = process.env.PORT || 3000;
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
-
-if (!IMGBB_KEY) {
-  console.warn('⚠️ IMGBB_KEY not set. Uploads to imgbb will fail until you set IMGBB_KEY env var.');
-}
+const QRCode = require('qrcode');
 
 const app = express();
 const server = http.createServer(app);
+
+// Socket.IO com configurações razoáveis
 const io = new Server(server, {
   cors: {
-    origin: FRONTEND_ORIGIN,
-    methods: ["GET", "POST"]
+    origin: '*',
+    methods: ['GET', 'POST'],
   },
-  path: '/socket.io'
+  transports: ['websocket', 'polling'],
+  // path: '/socket.io' // use default
 });
 
-// In-memory sessions:
-// sessions[sessionId] = { operators: Set(socketId), viewers: { viewerId: payload }, lastStreamFrame: 'data:'... }
+// Configs
+const BASE_URL = process.env.BASE_URL || 'festadodavi-production-0591.up.railway.app'; // preferência salva
+const IMGBB_KEY = process.env.IMGBB_KEY || 'fc52605669365cdf28ea379d10f2a341'; // <<< coloque sua chave real
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// cria pastas necessárias
+fs.ensureDirSync(UPLOADS_DIR);
+fs.ensureDirSync(PUBLIC_DIR);
+
+app.use(express.json({ limit: '80mb' }));
+app.use(express.urlencoded({ extended: true, limit: '80mb' }));
+app.use(express.static(PUBLIC_DIR)); // serve index.html, celular.html, visualizador.html se colocados em /public
+
+// simples middleware de log
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
+// --------- Util: upload para IMGBB (aceita dataURL ou base64 sem prefix) ----------
+async function uploadBase64ToImgbb(base64OrDataUrl, name = 'cabine_asset') {
+  // aceita dataURL (data:*/*;base64,AAAA...) ou base64 puro
+  if (!IMGBB_KEY || IMGBB_KEY.includes('PUT_YOUR')) {
+    console.warn('IMGBB_KEY não configurada. uploadBase64ToImgbb retornará null.');
+    return null;
+  }
+
+  try {
+    let rawBase64 = base64OrDataUrl;
+    if (rawBase64.startsWith('data:')) {
+      rawBase64 = rawBase64.split(',')[1];
+    }
+
+    const params = new URLSearchParams();
+    params.append('key', IMGBB_KEY);
+    params.append('image', rawBase64);
+    params.append('name', name);
+
+    const res = await axios.post('https://api.imgbb.com/1/upload', params.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      maxBodyLength: Infinity,
+      timeout: 30000,
+    });
+
+    if (res.data && res.data.success && res.data.data) {
+      // prefer display_url when available
+      return res.data.data.display_url || res.data.data.url || null;
+    }
+    console.warn('IMGBB resposta inesperada:', res.data);
+    return null;
+  } catch (err) {
+    console.error('Erro upload IMGBB:', err.response ? err.response.data : err.message || err);
+    return null;
+  }
+}
+
+// --------- Estrutura de sessão em memória (pode ser persistida em DB) ----------
+/**
+ * sessions = {
+ *   sessionId: {
+ *     createdAt,
+ *     operatorSocketId,
+ *     viewers: [ socketId ],
+ *     photos: [url1, url2, ...],
+ *     boomerang: { url, uploadedAt } | null,
+ *     lastRawPhotos: [dataURL,...] // opcional
+ *   }
+ * }
+ */
 const sessions = {};
 
-/* --------------------------
-   Helpers
-   -------------------------- */
-
+// helpers de sessão
 function ensureSession(sessionId) {
+  if (!sessionId) sessionId = 'cabine-fixa';
   if (!sessions[sessionId]) {
-    sessions[sessionId] = { operators: new Set(), viewers: {}, lastStreamFrame: null };
+    sessions[sessionId] = {
+      createdAt: new Date().toISOString(),
+      operatorSocketId: null,
+      viewers: [],
+      photos: [],
+      boomerang: null,
+      lastRawPhotos: [],
+    };
   }
   return sessions[sessionId];
 }
 
-async function uploadToImgbbFromDataUrl(dataUrl, name = 'upload') {
-  if (!IMGBB_KEY) throw new Error('IMGBB_KEY not configured');
-  // remove data:image/...;base64,
-  const m = dataUrl.match(/^data:image\/\w+;base64,(.*)$/);
-  if (!m) throw new Error('Invalid data URL for image');
-  const base64 = m[1];
-
-  const form = new FormData();
-  form.append('key', IMGBB_KEY);
-  form.append('image', base64);
-  form.append('name', name);
-
-  const res = await fetch('https://api.imgbb.com/1/upload', {
-    method: 'POST',
-    body: form
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error('IMGBB upload failed: ' + res.status + ' ' + text);
-  }
-  const json = await res.json();
-  if (!json || !json.success || !json.data || !json.data.url) {
-    throw new Error('IMGBB bad response: ' + JSON.stringify(json));
-  }
-  return json.data.url;
-}
-
-async function uploadBufferToImgbb(buffer, name = 'video') {
-  // imgbb primarily supports images; for videos you might need another host.
-  // We'll upload a thumbnail (first frame) if needed. For now throw.
-  throw new Error('uploadBufferToImgbb not implemented for videos. Consider using a file host or S3.');
-}
-
-// Save base64 dataurl to temp file (image/video)
-function saveDataUrlToTempFile(dataUrl, extHint='') {
-  const matches = dataUrl.match(/^data:([^;]+);base64,(.*)$/);
-  if (!matches) throw new Error('Invalid data URL');
-  const mime = matches[1];
-  const base64 = matches[2];
-  let ext = 'bin';
-  if (mime.includes('/')) ext = mime.split('/')[1];
-  if (extHint) ext = extHint;
-  const buffer = Buffer.from(base64, 'base64');
-  const tmpPath = path.join(os.tmpdir(), `festadodavi_${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`);
-  fs.writeFileSync(tmpPath, buffer);
-  return { path: tmpPath, mime, buffer };
-}
-
-/* optional FFmpeg boomerang processing:
-   create a looped video by concatenating forward + reversed segments and trimming to target length.
-   requires ffmpeg available on the host.
-*/
-async function processBoomerangWithFFmpeg(inputPath, outputPath, options = {}) {
-  if (!ffmpegAvailable) throw new Error('ffmpeg not available');
-  const { loopRepeats = 6, reverse = true } = options; // generate ~15s depends on input length
-  return new Promise((resolve, reject) => {
-    try {
-      // We'll create a reversed copy, then concat multiple times: forward + reverse + forward...
-      // Steps:
-      //  - create reversed.mp4 (ffmpeg -i input -vf reverse -af areverse reversed.mp4)
-      //  - create concat list file
-      //  - run ffmpeg concat -> outputPath
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fdv-'));
-      const reversed = path.join(tmpDir, 'rev.mp4');
-      const listFile = path.join(tmpDir, 'list.txt');
-
-      // reverse
-      ffmpeg(inputPath)
-        .outputOptions('-vf', 'reverse')
-        .outputOptions('-af', 'areverse')
-        .save(reversed)
-        .on('end', () => {
-          // build concat list
-          const parts = [];
-          for (let i = 0; i < loopRepeats; i++) {
-            parts.push(inputPath);
-            parts.push(reversed);
-          }
-          // write list file
-          const content = parts.map(p => `file '${p.replace(/'/g, "'\"'\"'")}'`).join('\n');
-          fs.writeFileSync(listFile, content, 'utf8');
-
-          // concat
-          ffmpeg()
-            .input(listFile)
-            .inputOptions('-f', 'concat', '-safe', '0')
-            .outputOptions('-c', 'copy')
-            .save(outputPath)
-            .on('end', () => {
-              // cleanup
-              try { fs.unlinkSync(reversed); } catch(e){}
-              try { fs.unlinkSync(listFile); } catch(e){}
-              try { fs.rmdirSync(tmpDir); } catch(e){}
-              resolve(outputPath);
-            })
-            .on('error', (err) => reject(err));
-        })
-        .on('error', (err) => reject(err));
-    } catch (e) {
-      reject(e);
-    }
-  });
-}
-
-/* --------------------------
-   Express routes
-   -------------------------- */
+// ---------- Rotas HTTP ----------
 app.get('/health', (req, res) => {
-  res.json({ ok: true, ffmpeg: ffmpegAvailable, now: new Date().toISOString() });
+  res.json({ ok: true, uptime: process.uptime(), sessions: Object.keys(sessions).length });
 });
 
-app.get('/', (req, res) => {
-  res.send('Festadodavi socket server running');
+// rota admin para listar sessões
+app.get('/sessions', (req, res) => {
+  const list = Object.keys(sessions).map((id) => ({
+    session: id,
+    createdAt: sessions[id].createdAt,
+    photosCount: sessions[id].photos.length,
+    hasBoomerang: !!sessions[id].boomerang,
+  }));
+  res.json(list);
 });
 
-// Serve static files from public directory
-app.use(express.static('public'));
+// rota para visualizar a payload do visualizador (simples)
+app.get('/visualizador/:session', (req, res) => {
+  const sessionId = req.params.session;
+  const s = sessions[sessionId];
+  if (!s) {
+    return res.status(404).send('<h2>Visualizador - sessão não encontrada</h2>');
+  }
 
-/* --------------------------
-   Socket.IO event handlers
-   -------------------------- */
+  // Gera uma página simples com fotos e/o boomerang
+  let html = `<!doctype html><html><head><meta charset="utf-8"><title>Visualizador - ${sessionId}</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:#000;color:#fff;font-family:Arial;padding:12px">`;
+  html += `<h2>Visualizador — Sessão: ${sessionId}</h2>`;
+  if (s.photos && s.photos.length) {
+    html += `<h3>Fotos (${s.photos.length})</h3><div style="display:flex;gap:8px;flex-wrap:wrap">`;
+    s.photos.forEach((u) => {
+      html += `<div style="max-width:220px"><img src="${u}" style="width:100%;height:auto;display:block;border-radius:8px"/></div>`;
+    });
+    html += `</div>`;
+  }
+  if (s.boomerang && s.boomerang.url) {
+    html += `<h3>Boomerang</h3>`;
+    html += `<video controls playsinline loop style="width:100%;max-width:420px;border-radius:8px"><source src="${s.boomerang.url}"></video>`;
+  }
+  html += `<p style="opacity:0.6;margin-top:14px">Gerado em: ${s.createdAt}</p>`;
+  html += `</body></html>`;
+  res.send(html);
+});
+
+// POST route (multipart) for optional manual upload (operator UI / debug)
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+});
+const uploadMiddleware = multer({ storage });
+
+app.post('/upload-debug', uploadMiddleware.single('file'), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'no file' });
+    const filePath = path.join(UPLOADS_DIR, file.filename);
+    const buffer = await fs.readFile(filePath);
+    const base64 = buffer.toString('base64');
+    const url = await uploadBase64ToImgbb(base64);
+    return res.json({ ok: true, url });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ ok: false, err: String(err) });
+  }
+});
+
+// ------------- Socket.IO -------------
 io.on('connection', (socket) => {
-  console.log('[socket] connected', socket.id);
+  console.log('Socket connected:', socket.id);
 
   socket.on('join_session', ({ session, role }) => {
-    if (!session) return;
-    ensureSession(session);
-    socket.join(`session:${session}`);
-    socket.data.session = session;
-    socket.data.role = role || 'operator';
+    const sid = session || 'cabine-fixa';
+    socket.join(sid);
+    const s = ensureSession(sid);
+
     if (role === 'operator') {
-      sessions[session].operators.add(socket.id);
-      console.log(`[socket] operator ${socket.id} joined session ${session}`);
+      s.operatorSocketId = socket.id;
+      console.log(`[${sid}] operator joined: ${socket.id}`);
     } else {
-      console.log(`[socket] socket ${socket.id} joined session ${session} as ${role}`);
+      // viewer/cell
+      if (!s.viewers.includes(socket.id)) s.viewers.push(socket.id);
+      console.log(`[${sid}] viewer joined: ${socket.id}`);
     }
-    // optionally emit last stream frame cached
-    const lastFrame = sessions[session].lastStreamFrame;
-    if (lastFrame) {
-      socket.emit('stream_frame', { session, frame: lastFrame });
-    }
+
+    // emit state to this socket
+    socket.emit('session_state', {
+      session: sid,
+      photosCount: s.photos.length,
+      hasBoomerang: !!s.boomerang,
+      preview: { photos: s.photos, boomerang: s.boomerang && s.boomerang.url ? s.boomerang.url : null },
+      baseUrl: BASE_URL,
+    });
   });
 
-  socket.on('join_viewer', ({ viewerId }) => {
-    if (!viewerId) return;
-    socket.join(`viewer:${viewerId}`);
-    socket.data.viewerId = viewerId;
-    console.log(`[socket] viewer ${socket.id} joined viewer:${viewerId}`);
-    // if viewer data exists, push photos_ready
-    // find viewer in all sessions
-    for (const sessionId of Object.keys(sessions)) {
-      const view = sessions[sessionId].viewers[viewerId];
-      if (view) {
-        // send viewer_photos_ready
-        socket.emit('viewer_photos_ready', {
-          photos: view.photos || [],
-          storiesMontage: view.storiesMontage || null,
-          print: view.print || null,
-          boomerang: view.boomerang || null,
-          createdAt: view.createdAt
-        });
-        break;
-      }
-    }
-  });
-
-  // CORREÇÃO: Adicionar handler para cell_connected
-  socket.on('cell_connected', ({ session }) => {
-    console.log(`[cell_connected] Celular conectado na sessão: ${session}`);
-    ensureSession(session);
-    // Opcional: notificar operadores que um celular se conectou
-    io.to(`session:${session}`).emit('cell_connected', { viewerId: socket.id });
-  });
-
-  // CORREÇÃO: Adicionar handler para cell_entered_fullscreen
-  socket.on('cell_entered_fullscreen', ({ session, viewerId }) => {
-    console.log(`[cell_entered_fullscreen] Celular ${viewerId} entrou em fullscreen na sessão: ${session}`);
-    ensureSession(session);
-    // Notificar operadores que um celular entrou em fullscreen
-    io.to(`session:${session}`).emit('cell_entered_fullscreen', { viewerId });
-  });
-
-  // Relay stream_frame from operator → cache last frame & broadcast to viewers in session
-  socket.on('stream_frame', ({ session, frame }) => {
-    if (!session || !frame) return;
-    ensureSession(session);
-    sessions[session].lastStreamFrame = frame;
-    // broadcast to viewers in this session (if any)
-    // we'll emit a lightweight event 'stream_frame' to room `session:${session}` so viewers can pick it up
-    io.to(`session:${session}`).emit('stream_frame', { session, frame });
-  });
-
-  // request_stream (viewer asks for cached frame) — forward to operators to request streaming
-  socket.on('request_stream', ({ session, viewerId }) => {
-    if (!session) return;
-    // notify operators to start streaming (they may already be streaming)
-    io.to(`session:${session}`).emit('request_stream', { session, viewerId });
-    // also notify the viewer to wait (stream_pending)
-    if (socket.data && socket.data.viewerId) {
-      socket.emit('stream_pending', { session });
-    }
-  });
-
-  // operator requests take_photo => forward to operator client(s) maybe to trigger capture
-  socket.on('take_photo', ({ session, index, viewerId }) => {
-    // typically viewer triggers this but operators can ask too
-    io.to(`session:${session}`).emit('take_photo', { session, index, viewerId });
-  });
-
-  // operator sends photo_ready (dataURL) to server -> forward to specific viewer
-  socket.on('photo_ready', ({ session, index, viewerId, photo }) => {
+  // cellphone: envia fotos em dataURLs (array)
+  // { session, viewerId(optional), photos: [dataURL,...] }
+  socket.on('photos_from_cell', async (payload) => {
     try {
-      if (viewerId) {
-        io.to(`viewer:${viewerId}`).emit('photo_ready', { index, photo });
-      } else {
-        // broadcast to session viewers
-        io.to(`session:${session}`).emit('photo_ready', { index, photo });
-      }
-    } catch (e) {
-      console.warn('photo_ready forward error', e);
-    }
-  });
+      const session = payload.session || 'cabine-fixa';
+      const photos = Array.isArray(payload.photos) ? payload.photos : [];
+      console.log(`[${session}] photos_from_cell received. Count: ${photos.length}`);
 
-  // Viewer sends photos_submit (array of dataURLs) — server will upload to IMGBB and create viewer entry and emit show_qr
-  socket.on('photos_submit', async ({ session, viewerId, photos }) => {
-    try {
-      if (!session) session = 'cabine-fixa';
-      ensureSession(session);
+      const s = ensureSession(session);
+      s.lastRawPhotos = photos.slice(0, 10);
 
-      console.log(`[photos_submit] viewerId=${viewerId} photos=${(photos && photos.length) || 0}`);
-
-      // upload each photo (images) to IMGBB (sequential to avoid rate issues)
+      // upload each to IMGBB (se possível)
       const uploaded = [];
       for (let i = 0; i < photos.length; i++) {
-        try {
-          const url = await uploadToImgbbFromDataUrl(photos[i], `cabine_photo_${Date.now()}_${i+1}`);
-          uploaded.push(url);
-          console.log(`[IMGBB] uploaded photo ${i+1}: ${url}`);
-        } catch (err) {
-          console.warn('IMGBB upload photo error', err);
-        }
+        const p = photos[i];
+        // small delay to avoid flooding IMGBB
+        // eslint-disable-next-line no-await-in-loop
+        const url = await uploadBase64ToImgbb(p, `cabine_${session}_${Date.now()}_${i}`);
+        if (url) uploaded.push(url);
       }
 
-      // store viewer data (if viewerId provided) OR generate one
-      const vid = viewerId || uuidv4();
-      const viewerEntry = {
-        photos: uploaded,
-        storiesMontage: null,
-        print: null,
-        boomerang: null,
-        createdAt: (new Date()).toISOString()
-      };
-      sessions[session].viewers[vid] = viewerEntry;
+      if (uploaded.length) {
+        s.photos = uploaded;
+      }
 
-      // notify operator(s) and viewer socket(s)
-      io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
-      io.to(`viewer:${vid}`).emit('viewer_photos_ready', {
-        photos: uploaded,
-        storiesMontage: null,
-        print: null,
-        boomerang: null,
-        createdAt: viewerEntry.createdAt
+      // build visualizador URL (server-side route) - index/operador can generate QR from this link
+      const visualizadorUrl = `${BASE_URL}/visualizador/${encodeURIComponent(session)}`;
+
+      // notify operator(s) and viewers in the session
+      io.to(session).emit('photos_ready', {
+        session,
+        uploaded,
+        visualizadorUrl,
       });
 
-      // Optionally generate visualizador payload and emit 'show_qr' with visualizadorUrl
-      try {
-        const viewerPayload = { 
-          photos: uploaded, 
-          storiesMontage: null, 
-          print: null, 
-          boomerang: null,
-          createdAt: viewerEntry.createdAt 
-        };
-        const payloadStr = JSON.stringify(viewerPayload);
-        const b64 = Buffer.from(payloadStr, 'utf8').toString('base64');
-        const visualizadorUrl = `${(process.env.VISUALIZADOR_ORIGIN || ('http://'+(process.env.HOSTNAME || 'localhost:'+PORT)))}/visualizador.html?data=${encodeURIComponent(b64)}`;
-        // emit show_qr to viewer and operators
-        io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
-        io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
-      } catch(err) {
-        console.warn('Error creating visualizador url', err);
-      }
-
+      console.log(`[${session}] photos processed and emitted (uploaded: ${uploaded.length})`);
     } catch (err) {
-      console.error('photos_submit handler error', err);
+      console.error('Error photos_from_cell:', err);
+      socket.emit('error_msg', { message: 'Erro ao processar fotos' });
     }
   });
 
-  // CORREÇÃO: Novo handler para boomerang_ready simplificado
-  socket.on('boomerang_ready', async ({ session, viewerId, dataUrl, previewFrame }) => {
+  // cellphone: envia boomerang as binary (ArrayBuffer or Buffer) via socket
+  // Data: { session, filename, arrayBuffer/Buffer (binary) } — we accept both shapes
+  socket.on('boomerang_ready', async (payload) => {
     try {
-      console.log(`[boomerang_ready] viewer=${viewerId} session=${session}`);
-      if (!dataUrl) return;
+      const session = payload.session || 'cabine-fixa';
+      console.log(`[${session}] boomerang_ready received (socket: ${socket.id})`);
 
-      // Fazer upload do preview frame para IMGBB
-      let boomerangPreviewUrl = null;
-      if (previewFrame) {
-        try {
-          boomerangPreviewUrl = await uploadToImgbbFromDataUrl(previewFrame, `boomerang_preview_${Date.now()}`);
-          console.log(`[IMGBB] uploaded boomerang preview: ${boomerangPreviewUrl}`);
-        } catch (err) {
-          console.warn('IMGBB upload boomerang preview error', err);
+      // payload.data may be ArrayBuffer or Buffer or we may receive in payload as base64 string
+      let buffer = null;
+
+      if (payload.data) {
+        // If payload.data is ArrayBuffer-like:
+        if (Buffer.isBuffer(payload.data)) {
+          buffer = payload.data;
+        } else if (payload.data instanceof ArrayBuffer) {
+          buffer = Buffer.from(payload.data);
+        } else if (payload.data.data && Array.isArray(payload.data.data)) {
+          // sometimes socket.io transfers typed arrays like { data: [...] }
+          buffer = Buffer.from(payload.data.data);
+        } else if (typeof payload.data === 'string' && payload.data.startsWith('data:')) {
+          // dataURL string
+          const base64 = payload.data.split(',')[1];
+          buffer = Buffer.from(base64, 'base64');
+        } else if (typeof payload.data === 'string') {
+          // assume base64 raw
+          try {
+            buffer = Buffer.from(payload.data, 'base64');
+          } catch (e) {
+            buffer = null;
+          }
         }
       }
 
-      // Store viewer entry
-      ensureSession(session);
-      const vid = viewerId || uuidv4();
-      sessions[session].viewers[vid] = {
-        photos: sessions[session].viewers[vid] ? sessions[session].viewers[vid].photos : [],
-        storiesMontage: boomerangPreviewUrl,
-        print: null,
-        boomerang: dataUrl, // manter dataUrl completo para o visualizador
-        createdAt: (new Date()).toISOString()
-      };
+      // fallback: payload.base64
+      if (!buffer && payload.base64) {
+        buffer = Buffer.from(payload.base64, 'base64');
+      }
 
-      // Build visualizador URL payload
-      const viewerPayload = {
-        photos: sessions[session].viewers[vid].photos || [],
-        storiesMontage: boomerangPreviewUrl,
-        print: null,
-        boomerang: dataUrl,
-        createdAt: sessions[session].viewers[vid].createdAt
-      };
-      
-      const payloadStr = JSON.stringify(viewerPayload);
-      const b64 = Buffer.from(payloadStr, 'utf8').toString('base64');
-      const visualizadorUrl = `${process.env.VISUALIZADOR_ORIGIN || ('http://'+(process.env.HOSTNAME || 'localhost:'+PORT))}/visualizador.html?data=${encodeURIComponent(b64)}`;
+      if (!buffer) {
+        console.warn('boomerang_ready: não veio buffer válido. Tentando tratar payload.raw...');
+        if (payload.raw && typeof payload.raw === 'string' && payload.raw.indexOf('base64') > -1) {
+          const base64 = payload.raw.split(',')[1];
+          buffer = Buffer.from(base64, 'base64');
+        }
+      }
 
-      // Notify operator and viewer
-      io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
-      io.to(`viewer:${vid}`).emit('viewer_photos_ready', viewerPayload);
-      
-      // Emit show_qr to both operator and viewer
-      io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
-      io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
+      if (!buffer) {
+        socket.emit('error_msg', { message: 'Boomerang sem dados binários válidos' });
+        return;
+      }
 
-      console.log(`[boomerang_ready] processed viewer=${vid} visualizadorUrl=${visualizadorUrl}`);
+      // grava temporariamente e faz upload
+      const fileName = payload.filename || `boomerang_${Date.now()}.webm`;
+      const tempPath = path.join(UPLOADS_DIR, `${uuidv4()}_${fileName}`);
+      await fs.writeFile(tempPath, buffer);
 
-    } catch (err) {
-      console.error('boomerang_ready handler error', err);
-    }
-  });
+      // converte para base64 para IMGBB (IMGBB tende a aceitar imagens; vídeos podem não aceitar. Tentaremos)
+      const b64 = buffer.toString('base64');
 
-  // CORREÇÃO: Handler para boomerang com dados binários
-  socket.on('boomerang_binary', async ({ session, viewerId, filename, data }) => {
-    try {
-      console.log(`[boomerang_binary] viewer=${viewerId} session=${session}, data size: ${data ? data.byteLength : 0}`);
-      
-      if (!data || !session) return;
-
-      // Converter ArrayBuffer para Buffer
-      const buffer = Buffer.from(data);
-      
-      // Criar data URL para o vídeo
-      const dataUrl = `data:video/webm;base64,${buffer.toString('base64')}`;
-
-      // Criar thumbnail (primeiro frame) para preview
-      let previewFrame = null;
+      // IMGBB NÃO é ideal para vídeos — se não aceitar, você precisa de Cloudinary ou S3. Tentamos mesmo assim.
+      let uploadedUrl = null;
       try {
-        // Aqui você poderia extrair o primeiro frame do vídeo usando ffmpeg
-        // Por enquanto, vamos usar um placeholder
-        previewFrame = null; // Implementar extração de thumbnail se necessário
+        uploadedUrl = await uploadBase64ToImgbb(`data:video/webm;base64,${b64}`, `boomerang_${session}_${Date.now()}`);
       } catch (e) {
-        console.warn('Erro ao criar thumbnail do boomerang:', e);
+        console.warn('Erro no upload de vídeo para IMGBB (tentativa):', e);
       }
 
-      // Processar como o boomerang_ready normal
-      ensureSession(session);
-      const vid = viewerId || uuidv4();
-      sessions[session].viewers[vid] = {
-        photos: sessions[session].viewers[vid] ? sessions[session].viewers[vid].photos : [],
-        storiesMontage: previewFrame,
-        print: null,
-        boomerang: dataUrl,
-        createdAt: (new Date()).toISOString()
-      };
+      // se o upload falhar, pode haver fallback: servir o arquivo temporário via /uploads (não ideal em produção)
+      if (!uploadedUrl) {
+        const publicPath = `/uploads/${path.basename(tempPath)}`;
+        // expõe a rota pública temporária
+        app.use('/uploads', express.static(UPLOADS_DIR));
+        uploadedUrl = `${BASE_URL}${publicPath}`;
+        console.warn('Fallback: boomerang servido localmente em:', uploadedUrl);
+      }
 
-      const viewerPayload = {
-        photos: sessions[session].viewers[vid].photos || [],
-        storiesMontage: previewFrame,
-        print: null,
-        boomerang: dataUrl,
-        createdAt: sessions[session].viewers[vid].createdAt
-      };
-      
-      const payloadStr = JSON.stringify(viewerPayload);
-      const b64 = Buffer.from(payloadStr, 'utf8').toString('base64');
-      const visualizadorUrl = `${process.env.VISUALIZADOR_ORIGIN || ('http://'+(process.env.HOSTNAME || 'localhost:'+PORT))}/visualizador.html?data=${encodeURIComponent(b64)}`;
+      // atualiza sessão
+      const s = ensureSession(session);
+      s.boomerang = { url: uploadedUrl, uploadedAt: new Date().toISOString() };
 
-      io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
-      io.to(`viewer:${vid}`).emit('viewer_photos_ready', viewerPayload);
-      io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
-      io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
+      // gera visualizador link
+      const visualizadorUrl = `${BASE_URL}/visualizador/${encodeURIComponent(session)}`;
 
-      console.log(`[boomerang_binary] processed viewer=${vid}`);
+      // emite para a sessão — operator e viewer deverão receber e mostrar QR/imagem/video
+      io.to(session).emit('boomerang_ready', {
+        session,
+        videoUrl: uploadedUrl,
+        visualizadorUrl,
+      });
 
+      console.log(`[${session}] Boomerang processado e enviado: ${uploadedUrl}`);
+
+      // opcional: remove arquivo temporário após 30s (mantemos por segurança)
+      setTimeout(() => {
+        fs.remove(tempPath).catch(() => {});
+      }, 30 * 1000);
     } catch (err) {
-      console.error('boomerang_binary handler error', err);
+      console.error('Erro boomerang_ready:', err);
+      socket.emit('error_msg', { message: 'Erro ao processar boomerang' });
     }
   });
 
-  // create_viewer_session (operator created viewer entry directly)
-  socket.on('create_viewer_session', ({ session, photos, storiesMontage, print, boomerang }) => {
-    try {
-      ensureSession(session);
-      const vid = uuidv4();
-      sessions[session].viewers[vid] = {
-        photos: photos || [],
-        storiesMontage: storiesMontage || null,
-        print: print || null,
-        boomerang: boomerang || null,
-        createdAt: (new Date()).toISOString()
-      };
-      // notify operator (who called)
-      socket.emit('viewer_session_created', { viewerId: vid });
-      // notify any connected viewer sockets (none likely) and operator room with viewer_photos_ready
-      io.to(`viewer:${vid}`).emit('viewer_photos_ready', {
-        photos: sessions[session].viewers[vid].photos,
-        storiesMontage: sessions[session].viewers[vid].storiesMontage,
-        print: sessions[session].viewers[vid].print,
-        boomerang: sessions[session].viewers[vid].boomerang,
-        createdAt: sessions[session].viewers[vid].createdAt
-      });
-      io.to(`session:${session}`).emit('viewer_photos_ready', {
-        photos: sessions[session].viewers[vid].photos,
-        storiesMontage: sessions[session].viewers[vid].storiesMontage,
-        print: sessions[session].viewers[vid].print,
-        boomerang: sessions[session].viewers[vid].boomerang,
-        createdAt: sessions[session].viewers[vid].createdAt
-      });
-    } catch (e) {
-      console.error('create_viewer_session err', e);
-    }
-  });
-
-  socket.on('show_qr_to_session', ({ session, visualizadorUrl }) => {
-    if (!session || !visualizadorUrl) return;
-    // send show_qr event to all viewers connected in that session (they will display the QR)
-    io.to(`session:${session}`).emit('show_qr', { visualizadorUrl });
-    // also send to operators
-    io.to(`session:${session}`).emit('show_qr_on_viewer', { visualizadorUrl });
-  });
-
-  socket.on('show_qr_on_viewer', ({ viewerId, visualizadorUrl }) => {
-    if (!viewerId || !visualizadorUrl) return;
-    io.to(`viewer:${viewerId}`).emit('show_qr', { visualizadorUrl });
-  });
-
+  // operator -> finalize / reset session
   socket.on('reset_session', ({ session }) => {
-    if (!session) return;
-    // clear session data (in-memory)
-    if (sessions[session]) {
-      sessions[session].viewers = {};
-      sessions[session].lastStreamFrame = null;
-    }
-    io.to(`session:${session}`).emit('reset_session', { session });
+    const sid = session || 'cabine-fixa';
+    delete sessions[sid];
+    io.to(sid).emit('reset_session', { session: sid });
+    console.log(`Sessão ${sid} resetada por socket ${socket.id}`);
+  });
+
+  // health / debug
+  socket.on('ping_server', (cb) => {
+    if (cb && typeof cb === 'function') cb({ ok: true, time: Date.now() });
   });
 
   socket.on('disconnect', () => {
-    // cleanup operator membership sets
-    const sess = socket.data && socket.data.session;
-    if (sess && sessions[sess]) {
-      sessions[sess].operators.delete(socket.id);
-    }
-    console.log('[socket] disconnected', socket.id);
+    // remove from viewers lists
+    try {
+      Object.keys(sessions).forEach((sid) => {
+        const s = sessions[sid];
+        if (!s) return;
+        if (s.operatorSocketId === socket.id) s.operatorSocketId = null;
+        const idx = s.viewers.indexOf(socket.id);
+        if (idx >= 0) s.viewers.splice(idx, 1);
+      });
+    } catch (e) {}
+    console.log('Socket disconnected:', socket.id);
   });
-
 });
 
-/* --------------------------
-   Start server
-   -------------------------- */
+// ------------- Inicialização do servidor -------------
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Festadodavi server listening on port ${PORT}`);
-  console.log(`FFmpeg available: ${ffmpegAvailable}`);
-  console.log(`IMGBB Key: ${IMGBB_KEY ? '✅ Configured' : '❌ Not configured'}`);
+  console.log(`Servidor rodando na porta ${PORT} — BASE_URL=${BASE_URL}`);
+  console.log(`Uploads temporários em ${UPLOADS_DIR}`);
 });
+
+/**
+ * Observações e recomendações:
+ *  - IMGBB não é ideal para vídeos; se você precisa de boomerangs confiáveis, use Cloudinary / S3.
+ *  - Este servidor tenta fazer upload de vídeo para IMGBB; caso falhe, serve o arquivo temporário via /uploads.
+ *  - Sessions são mantidas em memória — reinício do servidor perde dados. Para persistência use um DB.
+ *  - integração com index.html / celular.html:
+ *     -> Celular emite 'photos_from_cell' com { session, photos: [dataURL, ...] }.
+ *     -> Celular emite 'boomerang_ready' com { session, filename, data: ArrayBuffer/Buffer }.
+ *     -> Index / operador escuta 'photos_ready' e 'boomerang_ready' para gerar QR / montar visualizador.
+ *
+ * Teste rápido:
+ *  - Start: NODE_ENV=production IMGBB_KEY=... node server.js
+ *  - Acesse: http://localhost:3000/ (ou seu PUBLIC_DIR com index.html)
+ */
