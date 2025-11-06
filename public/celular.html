@@ -5,84 +5,88 @@
   <title>Cabine Fotográfica — Celular</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
     .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-    #enterFsBtn{padding:20px 30px;border-radius:15px;border:none;background:linear-gradient(145deg,#ffd600,#ffaa00);color:#000;font-weight:800;cursor:pointer;font-size:22px;margin:20px;width:90%;max-width:320px}
-    #welcome{background:rgba(255,255,255,0.15);padding:25px;text-align:center;border-radius:15px;width:95%;max-width:400px;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
-    #welcome h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
-    #welcome p{font-size:18px;margin-bottom:15px}
-    #startBtn,#startBoomBtn{padding:18px 25px;border-radius:12px;border:none;font-weight:700;cursor:pointer;font-size:18px;margin-top:8px;width:100%;transition:all 0.3s ease}
-    #startBtn{background:linear-gradient(145deg,#ffffff,#e6e6e6);color:#0b84ff}
-    #startBoomBtn{background:linear-gradient(135deg,#2a9df4,#0b6fb3);color:#fff}
-    .logo{max-width:180px;margin-bottom:20px;border-radius:10px}
-
-    /* video & canvas */
-    /* keep video visible (opacity 1) so capture isn't black on some mobiles; canvas used for mirror and overlay */
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(-1);z-index:0}
-    #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:10}
-
-    #progress{position:fixed;top:20px;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:150;color:#fff;text-shadow:0 0 10px #000;background:rgba(0,0,0,0.5);padding:10px;backdrop-filter:blur(5px)}
-    #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000,0 0 30px #000;z-index:100;color:#fff}
-    #msg{position:fixed;top:50%;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:100;color:#fff;text-shadow:0 0 10px #000}
-    #previewScreen{background:rgba(0,0,0,0.9);z-index:120;padding:0}
+    /* botão Entrar em Tela Cheia - FÁCIL de ver e clicar */
+    #enterFsBtn{
+      padding:18px 25px;border-radius:12px;border:none;
+      background:#ffd600;color:#000;font-weight:800;
+      cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:360px;
+      -webkit-tap-highlight-color: rgba(0,0,0,0); /* mobile highlight off */
+      box-shadow:0 6px 20px rgba(0,0,0,0.35);
+    }
+    #enterFsBtn:active{ transform: translateY(1px); }
+    #welcome{background:rgba(255,255,255,0.12);padding:24px;text-align:center;border-radius:15px;width:95%;max-width:420px;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.06)}
+    .logo{max-width:160px;margin-bottom:10px;border-radius:8px}
+    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;transform:scaleX(-1);z-index:0}
+    #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:1}
+    #progress{position:fixed;top:16px;left:50%;transform:translateX(-50%);text-align:center;font-size:20px;font-weight:700;z-index:250;color:#fff;background:rgba(0,0,0,0.45);padding:8px 12px;border-radius:8px;display:none}
+    #countdown{position:fixed;top:28%;left:0;right:0;text-align:center;font-size:110px;font-weight:800;text-shadow:0 0 20px #000;z-index:260;color:#fff;pointer-events:none;display:none}
+    .hidden { display: none !important; }
+    .visible { display: flex !important; }
+    #previewScreen{background:rgba(0,0,0,0.9);z-index:300;padding:0;display:none}
     #previewContainer{position:relative;width:100%;height:100%;display:flex;flex-direction:column}
-    #previewImage,#boomPreviewVideo{width:100%;height:100%;object-fit:contain;display:block}
-    .preview-buttons{position:absolute;bottom:30px;left:0;right:0;display:flex;gap:15px;justify-content:center;padding:0 20px;z-index:150}
-    .preview-btn{padding:12px 18px;border-radius:8px;border:none;font-weight:700;cursor:pointer;font-size:16px;flex:1;max-width:140px;background:rgba(0,0,0,0.7);color:white;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.3)}
-    #refazerBtn{background:rgba(220,53,69,0.8)}
-    #continuarBtn{background:rgba(40,167,69,0.8)}
-    #thank{background:rgba(255,255,255,0.15);padding:25px;border-radius:15px;width:95%;max-width:400px;text-align:center;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
-    #thank h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
-    .hidden{display:none}
-    .visible{display:flex}
-    #debugInfo{position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:6px;border-radius:6px;z-index:1000;white-space:pre-line;max-width:46%}
-    #boomPreviewScreen{background:rgba(0,0,0,0.92);z-index:130;display:none;align-items:center;justify-content:center;flex-direction:column;padding:12px}
-    #boomPreviewVideo{max-width:100%;max-height:80%;border-radius:8px;background:#000}
-    #recordingScreen{background:rgba(0,0,0,0.7);z-index:110}
-    #recordingMsg{position:fixed;top:20%;left:0;right:0;text-align:center;font-size:32px;font-weight:700;z-index:120;color:#fff;text-shadow:0 0 10px #000}
+    #previewImage{width:100%;height:100%;object-fit:contain;display:block}
+    .preview-buttons{position:absolute;bottom:28px;left:0;right:0;display:flex;gap:12px;justify-content:center;padding:0 20px;z-index:310}
+    .preview-btn{padding:12px 18px;border-radius:8px;border:none;font-weight:700;cursor:pointer;font-size:16px;flex:1;max-width:160px;background:rgba(255,255,255,0.08);color:white;backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.06)}
+    #refazerBtn{background:#d9534f}
+    #continuarBtn{background:#5cb85c}
+    #thankScreen{background:linear-gradient(135deg,#001e3c,#0b84ff);z-index:300;display:none}
+    #debugInfo{position:fixed;bottom:8px;left:8px;font-size:11px;color:#ddd;background:rgba(0,0,0,0.45);padding:6px;border-radius:6px;z-index:600;max-width:48%}
+    /* ensure enter screen area is on top and clickable */
+    #enterFs { z-index: 700; touch-action: manipulation; pointer-events: auto; }
+    /* blocker element (if created) should not intercept pointer events */
+    .maybe-blocker { pointer-events: none !important; }
+    @media (max-width:480px){ #countdown { font-size:72px } }
   </style>
 </head>
 <body>
-  <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
-    <div style="text-align:center;background:rgba(0,0,0,0.3);padding:30px;border-radius:20px;backdrop-filter:blur(15px);width:95%;max-width:400px;border:2px solid rgba(255,255,255,0.2);box-shadow:0 10px 30px rgba(0,0,0,0.3)">
+  <!-- ENTRAR EM TELA CHEIA: tela simples, APENAS o botão -->
+  <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff);">
+    <div style="text-align:center;width:100%;max-width:460px">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1 style="font-size:28px;margin-bottom:25px;text-shadow:2px 2px 8px rgba(0,0,0,0.5)">📸 Cabine Fotográfica</h1>
-      <p style="font-size:18px;margin-bottom:25px;line-height:1.4">Para melhor experiência, entre em tela cheia</p>
-      <button id="enterFsBtn" tabindex="0">🎬 ENTRAR EM TELA CHEIA</button>
-      <p style="font-size:14px;margin-top:15px;color:rgba(255,255,255,0.8)">Toque no botão acima para começar</p>
+      <h1 style="color:#fff;margin:10px 0;font-size:20px">📸 Cabine Fotográfica</h1>
+      <p style="color:rgba(255,255,255,0.85);margin-bottom:14px">Toque em "Entrar em Tela Cheia" para começar</p>
+      <button id="enterFsBtn" aria-label="Entrar em tela cheia">🎬 Entrar em Tela Cheia</button>
     </div>
   </div>
 
-  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
+  <!-- Welcome (após fullscreen) -->
+  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7);z-index:700">
     <div id="welcome">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
-      <p>Clique abaixo para iniciar</p>
-      <div style="width:100%;max-width:320px">
-        <button id="startBtn" style="width:100%">🎬 Iniciar Sessão de Fotos (3x)</button>
-      </div>
-      <div style="margin-top:12px;width:100%;max-width:320px">
-        <button id="startBoomBtn" style="width:100%;margin-top:8px;">🔁 Fazer Boomerang</button>
+      <h1 style="color:#222;margin-bottom:8px">📸 Preparado?</h1>
+      <p style="color:#444;margin-bottom:12px">Toque em Iniciar Sessão para escolher o modo</p>
+      <button id="startBtn" style="padding:16px 20px;border-radius:10px;border:none;background:#0b84ff;color:#fff;font-weight:700;cursor:pointer;font-size:18px">🎬 Iniciar Sessão</button>
+    </div>
+  </div>
+
+  <!-- Buttons mode screen (after start) -->
+  <div id="modeScreen" class="screen hidden" style="background:linear-gradient(135deg,#000,#222);z-index:700">
+    <div style="text-align:center">
+      <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+      <p style="color:#fff;margin-bottom:12px">Escolha o modo</p>
+      <div style="display:flex;gap:18px;justify-content:center">
+        <button id="btnBoom" style="width:96px;height:96px;border-radius:50%;border:none;background:linear-gradient(135deg,#06f,#08a);font-size:28px;color:#fff;cursor:pointer">∞</button>
+        <button id="btnThree" style="width:96px;height:96px;border-radius:50%;border:none;background:linear-gradient(135deg,#ffb400,#d18a00);font-size:28px;color:#fff;cursor:pointer">☰</button>
       </div>
     </div>
   </div>
 
-  <div id="recordingScreen" class="screen hidden">
-    <div id="recordingMsg">🎥 Movimente-se...</div>
-  </div>
-
+  <!-- video + canvas used for live preview / capture -->
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="canvasEl"></canvas>
 
-  <div id="progress" class="hidden"></div>
-  <div id="countdown"></div>
-  <div id="msg"></div>
+  <div id="progress" role="status">Preparando...</div>
+  <div id="countdown" aria-hidden="true"></div>
 
-  <div id="previewScreen" class="screen hidden">
+  <!-- preview after a photo / or boomerang preview -->
+  <div id="previewScreen" class="screen" style="display:none;z-index:800">
     <div id="previewContainer">
-      <img id="previewImage" src="" alt="Preview da foto">
+      <img id="previewImage" src="" alt="Preview da captura">
       <div class="preview-buttons">
         <button id="refazerBtn" class="preview-btn">🔄 Refazer</button>
         <button id="continuarBtn" class="preview-btn">✅ Continuar</button>
@@ -90,304 +94,540 @@
     </div>
   </div>
 
-  <div id="boomPreviewScreen" class="screen hidden">
-    <video id="boomPreviewVideo" controls playsinline loop></video>
-    <div class="preview-buttons" style="position:relative;margin-top:12px;max-width:720px">
-      <button id="boomRefazerBtn" class="preview-btn">🔄 Refazer</button>
-      <button id="boomContinuarBtn" class="preview-btn">✅ Continuar</button>
-    </div>
-  </div>
-
-  <div id="thankScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
+  <div id="thankScreen" class="screen" style="display:none;z-index:800">
     <div id="thank">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1>✨ Obrigado por utilizar a cabine!</h1>
-      <p>Espere o operador encerrar a sessão.</p>
-      <div id="qrCodeContainer" style="margin-top:20px; display:none;">
-        <p style="font-size:16px; margin-bottom:10px;">Seu boomerang está pronto!</p>
-        <canvas id="qrCanvas" style="background:white; padding:10px; border-radius:8px;"></canvas>
-      </div>
+      <h1 style="color:#fff">✨ Obrigado por utilizar a cabine!</h1>
+      <p style="color:#fff">Aguarde o operador finalizar a sessão.</p>
     </div>
   </div>
 
-  <div id="debugInfo"></div>
+  <div id="debugInfo">debug</div>
 
   <audio id="clack" src="clack.mp3" preload="auto"></audio>
   <audio id="inicio" src="inicio.mp3" preload="auto"></audio>
   <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
-  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+<script>
+/*
+  celular.html - corrigido botão "Entrar em Tela Cheia"
+  Ajuste a variável SERVER_URL para o seu backend se precisar.
+*/
+const SERVER_URL = "https://festadodavi-production-0591.up.railway.app"; // troque se precisar
+const socket = io(SERVER_URL, { transports:['websocket','polling'], reconnection:true, path:'/socket.io' });
 
-  <script>
-    // IMPORTANT: backend set to user's preferred URL
-    const SERVER_URL = "festadodavi-production-0591.up.railway.app";
-    const socket = io(SERVER_URL, { transports:["websocket","polling"], reconnection:true, reconnectionAttempts:5, reconnectionDelay:1000, timeout:20000, forceNew:true });
+const enterFs = document.getElementById('enterFs');
+const enterFsBtn = document.getElementById('enterFsBtn');
+const welcomeScreen = document.getElementById('welcomeScreen');
+const startBtn = document.getElementById('startBtn');
+const modeScreen = document.getElementById('modeScreen');
+const btnBoom = document.getElementById('btnBoom');
+const btnThree = document.getElementById('btnThree');
 
-    const params = new URLSearchParams(location.search);
-    const session = params.get('session') || 'cabine-fixa';
+const videoEl = document.getElementById('videoEl');
+const canvasEl = document.getElementById('canvasEl');
+const progressEl = document.getElementById('progress');
+const countdownEl = document.getElementById('countdown');
+const previewScreen = document.getElementById('previewScreen');
+const previewImage = document.getElementById('previewImage');
+const refazerBtn = document.getElementById('refazerBtn');
+const continuarBtn = document.getElementById('continuarBtn');
+const thankScreen = document.getElementById('thankScreen');
+const debugEl = document.getElementById('debugInfo');
 
-    // DOM
-    const debugEl = document.getElementById('debugInfo');
-    const enterFs = document.getElementById('enterFs');
-    const enterFsBtn = document.getElementById('enterFsBtn');
-    const welcomeScreen = document.getElementById('welcomeScreen');
-    const startBtn = document.getElementById('startBtn');
-    const startBoomBtn = document.getElementById('startBoomBtn');
-    const videoEl = document.getElementById('videoEl');
-    const canvasEl = document.getElementById('canvasEl');
-    const progressEl = document.getElementById('progress');
-    const countdownEl = document.getElementById('countdown');
-    const msgEl = document.getElementById('msg');
-    const previewScreen = document.getElementById('previewScreen');
-    const previewImage = document.getElementById('previewImage');
-    const refazerBtn = document.getElementById('refazerBtn');
-    const continuarBtn = document.getElementById('continuarBtn');
-    const boomPreviewScreen = document.getElementById('boomPreviewScreen');
-    const boomPreviewVideo = document.getElementById('boomPreviewVideo');
-    const boomRefazerBtn = document.getElementById('boomRefazerBtn');
-    const boomContinuarBtn = document.getElementById('boomContinuarBtn');
-    const thankScreen = document.getElementById('thankScreen');
-    const qrCodeContainer = document.getElementById('qrCodeContainer');
-    const qrCanvas = document.getElementById('qrCanvas');
-    const recordingScreen = document.getElementById('recordingScreen');
-    const recordingMsg = document.getElementById('recordingMsg');
-    const clack = document.getElementById('clack');
-    const inicio = document.getElementById('inicio');
-    const fim = document.getElementById('fim');
+let stream = null;
+let mode = 'three'; // 'three' or 'boom'
+let photos = [];
+let currentCapture = null; // dataURL or blob
 
-    // boomerang settings
-    const BOOM_SHORT_MS = 2000;
-    const BOOM_FINAL_MS = 15000;
-    const BOOM_TARGET_W = 1080;
+function debug(msg){
+  console.log(msg);
+  debugEl.textContent = (new Date().toLocaleTimeString()) + ' — ' + msg + '\n' + debugEl.textContent;
+}
 
-    let stream=null, photos=[], currentPhotoIndex=0, currentPhotoData=null;
-    let rafId=null;
-    let fullscreenAttempting = false;
-    let isFullscreen = false;
+/* ============ FULLSCREEN HELPERS ============ */
+function isFullscreen() {
+  return !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+}
+function requestFullscreen(element){
+  if(element.requestFullscreen) return element.requestFullscreen();
+  if(element.webkitRequestFullscreen) return element.webkitRequestFullscreen();
+  if(element.mozRequestFullScreen) return element.mozRequestFullScreen();
+  if(element.msRequestFullscreen) return element.msRequestFullscreen();
+  return Promise.reject(new Error('Fullscreen API não suportada'));
+}
+document.addEventListener('fullscreenchange', () => {
+  debug('fullscreenchange -> ' + isFullscreen());
+  if(isFullscreen()){
+    // show welcome after fullscreen
+    showScreen(welcomeScreen);
+  }
+});
 
-    setInterval(()=>{ debugEl.textContent = `Sessão: ${session} | Socket: ${socket.connected?'🟢':'🔴'}\nFotos pendentes: ${photos.length}\nFullscreen: ${isFullscreen?'✅':'❌'}`; }, 900);
+/* ============ UI SHOW/HIDE ============ */
+function hideAllMain(){
+  enterFs.style.display = 'none';
+  welcomeScreen.style.display = 'none';
+  modeScreen.style.display = 'none';
+  previewScreen.style.display = 'none';
+  videoEl.style.display = 'none';
+  canvasEl.style.display = 'none';
+  thankScreen.style.display = 'none';
+  progressEl.style.display = 'none';
+  countdownEl.style.display = 'none';
+}
+function showScreen(el){
+  hideAllMain();
+  if(!el) return;
+  el.style.display = 'flex';
+}
 
-    function showScreen(el){ 
-      [enterFs,welcomeScreen,previewScreen,boomPreviewScreen,thankScreen,recordingScreen].forEach(s=>{ if(s) s.classList.add('hidden'); });
-      canvasEl.style.display='none';
-      countdownEl.textContent='';
-      msgEl.textContent='';
-      progressEl.classList.add('hidden');
-      recordingMsg.textContent='🎥 Movimente-se...';
-      if(el) el.classList.remove('hidden');
-    }
+/* Ensure enter button is really clickable on mobile:
+   - add touchend + click listeners
+   - stop propagation and prevent default to avoid ghost clicks
+*/
+function safeAddTapListener(el, handler){
+  el.addEventListener('click', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); handler(ev); });
+  el.addEventListener('touchend', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); handler(ev); }, {passive:false});
+  el.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter' || ev.key===' ') { ev.preventDefault(); handler(ev); } });
+}
 
-    function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-    function log(txt){ const t=(new Date()).toLocaleTimeString(); debugEl.textContent = `[${t}] ${txt}\n` + debugEl.textContent; console.log(txt); }
+/* ============ Camera helpers ============ */
+async function startFrontCamera(){
+  if(stream) return stream;
+  try {
+    // prefer facingMode user. Using simple constraint which works on most modern mobile browsers.
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+    videoEl.srcObject = stream;
+    videoEl.style.display = 'block';
+    videoEl.style.transform = 'scaleX(-1)'; // mirror for user
+    await videoEl.play().catch(()=>{});
+    debug('camera started: ' + (videoEl.videoWidth||'unknown') + 'x' + (videoEl.videoHeight||'unknown'));
+    return stream;
+  } catch(e){
+    debug('erro ao acessar camera: ' + e.message);
+    alert('Não foi possível acessar a câmera. Verifique as permissões do navegador.');
+    throw e;
+  }
+}
+function stopCamera(){
+  if(stream){
+    stream.getTracks().forEach(t=>t.stop());
+    stream = null;
+  }
+  videoEl.pause();
+  videoEl.srcObject = null;
+  videoEl.style.display = 'none';
+}
 
-    async function attemptFullscreen() {
-      if (fullscreenAttempting) return;
-      fullscreenAttempting = true;
-      enterFsBtn.disabled = true;
-      enterFsBtn.textContent = 'CARREGANDO...';
-
-      log('Tentando entrar em tela cheia...');
-      try {
-        const element = document.documentElement;
-        if (element.requestFullscreen) await element.requestFullscreen();
-        else if (element.webkitRequestFullscreen) await element.webkitRequestFullscreen();
-        else if (element.mozRequestFullScreen) await element.mozRequestFullScreen();
-        else if (element.msRequestFullscreen) await element.msRequestFullscreen();
-
-        log('Fullscreen ativado com sucesso');
-        isFullscreen = true;
-        await sleep(300);
-        try { await startCamera(); showScreen(welcomeScreen); if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id }); } catch(cameraError){ log('Câmera falhou: ' + cameraError); showScreen(welcomeScreen); }
-      } catch (err) {
-        log('Erro fullscreen: ' + (err.message || err));
-        try { await startCamera(); showScreen(welcomeScreen); } catch(cameraError){ log('Câmera falhou no fallback: ' + cameraError); showScreen(welcomeScreen); }
-      } finally {
-        fullscreenAttempting = false;
-        enterFsBtn.disabled = false;
-        enterFsBtn.textContent = '🎬 ENTRAR EM TELA CHEIA';
-      }
-    }
-
-    function handleFullscreenChange() {
-      const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-      isFullscreen = !!fullscreenElement;
-      if (!isFullscreen && !welcomeScreen.classList.contains('hidden')) { log('Saiu do modo tela cheia'); showScreen(enterFs); }
-    }
-
-    function checkFullscreenOnLoad() {
-      const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-      if (fullscreenElement) { log('Já estava em fullscreen'); isFullscreen = true; showScreen(welcomeScreen); startCamera(); }
-    }
-
-    async function startCamera(){
-      try{
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1080 }, height: { ideal: 1920 } }, audio: false });
-        videoEl.srcObject = stream; videoEl.style.display = 'block';
-        await new Promise((resolve, reject) => { videoEl.onloadedmetadata = () => resolve(); videoEl.onerror = reject; setTimeout(resolve, 1000); });
-        startPreviewLoop();
-        return true;
-      }catch(e){ log('Erro camera: ' + e); alert('Permissão da câmera negada ou indisponível. Verifique as permissões.'); throw e; }
-    }
-
-    function stopCamera(){ try{ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } } catch(e){} try{ videoEl.pause(); videoEl.srcObject = null; } catch(e){} stopPreviewLoop(); }
-
-    function startPreviewLoop(){
-      if(rafId) return;
-      const dpr = window.devicePixelRatio || 1;
-      function resize(){ const w = window.innerWidth, h = window.innerHeight; canvasEl.width = Math.floor(w * dpr); canvasEl.height = Math.floor(h * dpr); canvasEl.style.width = w + 'px'; canvasEl.style.height = h + 'px'; const ctx = canvasEl.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); }
-      resize(); window.addEventListener('resize', resize);
-      canvasEl.style.display = 'block';
-      function loop(){
-        const ctx = canvasEl.getContext('2d');
-        const vw = videoEl.videoWidth || 720, vh = videoEl.videoHeight || 1280;
-        const cw = canvasEl.clientWidth, ch = canvasEl.clientHeight;
-        const scale = Math.max(cw / vw, ch / vh);
-        const drawW = vw * scale, drawH = vh * scale;
-        const dx = (cw - drawW) / 2, dy = (ch - drawH) / 2;
-        ctx.save(); ctx.clearRect(0,0,cw,ch); ctx.translate(cw,0); ctx.scale(-1,1);
-        try{ ctx.drawImage(videoEl, 0,0,vw,vh, cw - (dx + drawW), dy, drawW, drawH); } catch(e){}
+/* draw current video frame continuously onto canvas (to avoid frozen frames) */
+let drawFrameRaf = null;
+function startDrawingPreviewToCanvas(){
+  canvasEl.style.display = 'block';
+  canvasEl.width = window.innerWidth;
+  canvasEl.height = window.innerHeight;
+  const ctx = canvasEl.getContext('2d');
+  function loop(){
+    try {
+      if(videoEl.videoWidth && videoEl.videoHeight){
+        // cover strategy
+        const iw = videoEl.videoWidth, ih = videoEl.videoHeight;
+        const cw = canvasEl.width, ch = canvasEl.height;
+        const scale = Math.max(cw/iw, ch/ih);
+        const w = iw*scale, h = ih*scale;
+        ctx.clearRect(0,0,cw,ch);
+        // mirror draw
+        ctx.save();
+        ctx.translate(cw,0); ctx.scale(-1,1);
+        ctx.drawImage(videoEl, (cw - w)/2 * -1, (ch - h)/2, w, h); // draw mirrored
         ctx.restore();
-        rafId = requestAnimationFrame(loop);
       }
-      loop();
+    } catch(e){}
+    drawFrameRaf = requestAnimationFrame(loop);
+  }
+  if(!drawFrameRaf) loop();
+}
+function stopDrawingPreviewToCanvas(){
+  if(drawFrameRaf){ cancelAnimationFrame(drawFrameRaf); drawFrameRaf = null; }
+  canvasEl.style.display = 'none';
+}
+
+/* ============ Capture logic ============ */
+function showCountdownFor(seconds){
+  countdownEl.style.display = 'block';
+  return new Promise(async (resolve)=>{
+    for(let t=seconds; t>0; t--){
+      if(t<=2){
+        countdownEl.textContent = 'SORRIA!';
+        try { document.getElementById('clack').currentTime = 0; document.getElementById('clack').play().catch(()=>{}); } catch(e){}
+      } else {
+        countdownEl.textContent = String(t);
+      }
+      await new Promise(r=>setTimeout(r,1000));
     }
+    countdownEl.textContent = '';
+    countdownEl.style.display = 'none';
+    resolve();
+  });
+}
+async function capturePhotoDataUrl(){
+  // ensure canvas sizes match video source high-res for better quality
+  const w = videoEl.videoWidth || window.innerWidth;
+  const h = videoEl.videoHeight || window.innerHeight;
+  canvasEl.width = w;
+  canvasEl.height = h;
+  const ctx = canvasEl.getContext('2d');
+  // mirror so final image appears as user expects
+  ctx.save(); ctx.translate(w,0); ctx.scale(-1,1);
+  ctx.drawImage(videoEl, 0, 0, w, h);
+  ctx.restore();
+  const dataUrl = canvasEl.toDataURL('image/jpeg', 0.95);
+  return dataUrl;
+}
 
-    function stopPreviewLoop(){ if(rafId) cancelAnimationFrame(rafId); rafId=null; canvasEl.style.display='none'; }
-
-    function capturePhotoFromVideo(){
-      const vw = videoEl.videoWidth || 1080; const vh = videoEl.videoHeight || 1920;
-      const cap = document.createElement('canvas'); cap.width = vw; cap.height = vh; const cctx = cap.getContext('2d'); cctx.save(); cctx.translate(cap.width,0); cctx.scale(-1,1);
-      try{ cctx.drawImage(videoEl, 0,0,cap.width,cap.height); } catch(e){ try{ cctx.drawImage(canvasEl,0,0,cap.width,cap.height); } catch(e){} }
-      cctx.restore(); return cap.toDataURL('image/jpeg', 0.95);
-    }
-
-    async function captureSinglePhoto(){
-      progressEl.textContent = `${currentPhotoIndex+1}/3`; progressEl.classList.remove('hidden');
-      for(let t=5;t>0;t--){ if(t<=2){ countdownEl.textContent='SORRIA!'; countdownEl.style.color='#ffd600'; if(t===2){ try{ clack.currentTime=0; clack.play().catch(()=>{}); }catch(e){} } } else { countdownEl.textContent=String(t); countdownEl.style.color='#fff'; } await sleep(1000); }
-      countdownEl.textContent='';
-      const data = capturePhotoFromVideo();
-      return data;
-    }
-
-    function showPhotoPreview(photoData){ previewImage.src = photoData; showScreen(previewScreen); }
-
-    async function runCaptureSequence(){
-      if(currentPhotoIndex >= 3){ stopCamera(); progressEl.classList.add('hidden'); showScreen(thankScreen); sendPhotosToServer(); return; }
-      currentPhotoData = await captureSinglePhoto(); showPhotoPreview(currentPhotoData);
-    }
-
-    refazerBtn.addEventListener('click', async ()=>{ showScreen(null); await startCamera(); await runCaptureSequence(); });
-    continuarBtn.addEventListener('click', async ()=>{ photos.push(currentPhotoData); currentPhotoIndex++; showScreen(null); await runCaptureSequence(); });
-
-    function sendPhotosToServer(){ if(session && photos.length>0){ socket.emit('photos_submit', { session, viewerId: socket.id, photos }, (ack)=>{ log('photos_submit ack: '+JSON.stringify(ack||'no ack')); }); } }
-
-    // ---- BOOMERANG ----
-    async function recordShortClip(msDuration=2000){
-      if(!videoEl || (videoEl.readyState < 2)) await new Promise(res=>setTimeout(res,200));
-      const vw = videoEl.videoWidth || 720; const vh = videoEl.videoHeight || 1280;
-      const outW = Math.min(720, vw); const outH = Math.round(outW * (vh / vw));
-      const off = document.createElement('canvas'); off.width = outW; off.height = outH; const offCtx = off.getContext('2d');
-      const captureStream = off.captureStream(30); const chunks = []; let recorder;
-      try{ recorder = new MediaRecorder(captureStream, { mimeType:'video/webm;codecs=vp8' }); } catch(e){ recorder = new MediaRecorder(captureStream); }
-      recorder.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
-      recorder.start(); const start = performance.now();
-      await new Promise((resolve)=>{
-        function frame(){ offCtx.save(); offCtx.clearRect(0,0,outW,outH); offCtx.translate(outW,0); offCtx.scale(-1,1); try{ offCtx.drawImage(videoEl, 0,0,vw,vh, 0,0,outW,outH); } catch(e){} offCtx.restore(); if(performance.now()-start < msDuration) requestAnimationFrame(frame); else { setTimeout(()=>{ recorder.stop(); resolve(); },60); } }
-        frame();
+/* 3-photo flow */
+async function startThreePhotoFlow(){
+  try {
+    await startFrontCamera();
+    startDrawingPreviewToCanvas();
+    showScreen(null); // hide welcome & show live canvas
+    progressEl.style.display = 'block';
+    progressEl.textContent = '1/3';
+    photos = [];
+    for(let i=0;i<3;i++){
+      progressEl.textContent = `${i+1}/3`;
+      await showCountdownFor(5);
+      const dataUrl = await capturePhotoDataUrl();
+      currentCapture = dataUrl;
+      // show preview
+      previewImage.src = dataUrl;
+      previewScreen.style.display = 'flex';
+      stopDrawingPreviewToCanvas(); // freeze preview image (the preview shows captured image)
+      // wait user decision
+      const decision = await new Promise((res)=> {
+        function onRef(){ cleanup(); res('refazer'); }
+        function onCont(){ cleanup(); res('continuar'); }
+        function cleanup(){ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); }
+        refazerBtn.addEventListener('click', onRef);
+        continuarBtn.addEventListener('click', onCont);
       });
-      await new Promise(r=>{ recorder.onstop = r; }); if(chunks.length===0) return null; return new Blob(chunks, { type:'video/webm' });
+      previewScreen.style.display = 'none';
+      if(decision==='refazer'){ i = i - 1; /* repeat */ startDrawingPreviewToCanvas(); continue; }
+      photos.push(currentCapture);
+      // resume preview for next capture
+      startDrawingPreviewToCanvas();
     }
+    // finished 3 photos
+    progressEl.style.display = 'none';
+    stopDrawingPreviewToCanvas();
+    stopCamera();
+    showScreen(thankScreen);
+    // send photos to server
+    emitPhotosSubmit();
+  } catch(e){
+    debug('erro three flow: ' + e.message);
+    progressEl.style.display = 'none';
+    stopDrawingPreviewToCanvas();
+    stopCamera();
+    alert('Erro durante a captura de fotos: ' + (e.message||''));
+    showScreen(welcomeScreen);
+  }
+}
 
-    async function generateBoomerang(shortBlob, loopMs=15000, targetW=1080){
-      try{
-        const v = document.createElement('video'); v.muted=true; v.playsInline=true; v.src = URL.createObjectURL(shortBlob);
-        await new Promise((res, rej)=>{ v.onloadedmetadata = res; v.onerror = rej; });
-        const aspect = v.videoHeight / v.videoWidth || 16/9; const targetH = Math.round(targetW * aspect);
-        const canvas = document.createElement('canvas'); canvas.width = targetW; canvas.height = targetH; const ctx = canvas.getContext('2d');
-        const template = new Image(); template.crossOrigin='anonymous'; template.src='bomerang.png'; await new Promise(res=>{ template.onload = res; template.onerror = res; });
-        const recStream = canvas.captureStream(30); const chunks=[]; let rec;
-        try{ rec = new MediaRecorder(recStream, { mimeType:'video/webm;codecs=vp8' }); } catch(e){ rec = new MediaRecorder(recStream); }
-        rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
-        rec.start(); const start = performance.now();
-        function drawFrame(){ if(template && template.complete && template.naturalWidth) ctx.drawImage(template,0,0,template.width,template.height,0,0,canvas.width,canvas.height); else { ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height); } try{ ctx.drawImage(v,0,0,v.videoWidth,v.videoHeight,0,0,canvas.width,canvas.height); } catch(e){} }
-        async function playForward(){ return new Promise(res=>{ v.currentTime=0; v.play().catch(()=>{}); const onTick = ()=>{ drawFrame(); if(v.ended || v.currentTime >= v.duration-0.001){ v.pause(); v.removeEventListener('timeupdate', onTick); res(); } }; v.addEventListener('timeupdate', onTick); drawFrame(); }); }
-        async function playReverse(){ return new Promise(res=>{ v.pause(); v.currentTime = v.duration; function step(){ const stepMs = 1000/30; v.currentTime = Math.max(0, v.currentTime - (stepMs/1000)); drawFrame(); if(v.currentTime > 0.02) requestAnimationFrame(step); else res(); } step(); }); }
-        while(performance.now()-start < loopMs){ await playForward(); if(performance.now()-start >= loopMs) break; await playReverse(); }
-        await sleep(120); await new Promise(r=>{ rec.onstop = r; rec.stop(); }); return new Blob(chunks, { type:'video/webm' });
-      }catch(e){ log('generateBoomerang error: ' + e); return null; }
-    }
-
-    function blobToDataURL(blob, firstFrame=false){ return new Promise((resolve, reject)=>{ if(!firstFrame){ const r = new FileReader(); r.onload = ()=> resolve(r.result); r.onerror = reject; r.readAsDataURL(blob); } else { const v = document.createElement('video'); v.muted=true; v.playsInline=true; v.src = URL.createObjectURL(blob); v.onloadeddata = async ()=>{ try{ v.currentTime = 0.05; }catch(e){} await sleep(60); const c = document.createElement('canvas'); c.width = v.videoWidth || 640; c.height = v.videoHeight || 480; const ctx = c.getContext('2d'); try{ ctx.drawImage(v,0,0,c.width,c.height); resolve(c.toDataURL('image/jpeg',0.85)); }catch(e){ reject(e); } }; v.onerror = (e)=> reject(e); } }); }
-
-    async function startBoomerangFlow(){
-      try{ if(!stream) await startCamera(); } catch(e){ startBoomBtn.disabled = false; return; }
-      showScreen(recordingScreen); canvasEl.style.display = 'block';
-      for(let t=3;t>0;t--){ recordingMsg.textContent = `Preparando... ${t}`; await sleep(700); }
-      recordingMsg.textContent = '🎥 Movimente-se...'; progressEl.textContent = 'Gravando...'; progressEl.classList.remove('hidden');
-      const shortBlob = await recordShortClip(BOOM_SHORT_MS); progressEl.classList.add('hidden');
-      if(!shortBlob){ log('shortBlob nulo'); showScreen(welcomeScreen); startBoomBtn.disabled = false; return; }
-      progressEl.textContent = 'Processando boomerang...'; progressEl.classList.remove('hidden');
-      const finalBlob = await generateBoomerang(shortBlob, BOOM_FINAL_MS, BOOM_TARGET_W); progressEl.classList.add('hidden');
-      if(!finalBlob){ log('finalBlob nulo'); showScreen(welcomeScreen); startBoomBtn.disabled = false; return; }
-
-      const finalUrl = URL.createObjectURL(finalBlob);
-      boomPreviewVideo.src = finalUrl; boomPreviewVideo.loop = true; boomPreviewVideo.play().catch(()=>{});
-      showScreen(boomPreviewScreen);
-
-      const refazer = async ()=>{ boomPreviewVideo.pause(); boomPreviewVideo.src = ''; showScreen(null); try{ await startCamera(); } catch(e){} startBoomBtn.disabled = false; };
-      const continuar = async ()=>{
-        boomPreviewVideo.pause(); boomPreviewVideo.src = '';
-        showScreen(null);
-        try{ const thumb = await blobToDataURL(finalBlob, true).catch(()=>null); if(thumb) socket.emit('photo_ready', { session, index:0, viewerId: socket.id, photo: thumb }); } catch(e){ log('thumb emit error: '+e); }
-        try{ const ab = await finalBlob.arrayBuffer(); await emitWithAckFallback('boomerang_ready', { session, viewerId: socket.id, filename:`boomerang_${Date.now()}.webm`, data: ab }, finalBlob); const thumb2 = await blobToDataURL(finalBlob, true).catch(()=>null); if(thumb2) socket.emit('photos_submit', { session, viewerId: socket.id, photos:[thumb2] }); log('boomerang flow finished'); stopCamera(); showScreen(thankScreen); try{ fim.currentTime=0; fim.play().catch(()=>{}); } catch(e){} } catch(e){ log('erro ao enviar boomerang: ' + e); showScreen(welcomeScreen); }
-        startBoomBtn.disabled = false;
-      };
-
-      const onceRef = ()=>{ boomRefazerBtn.removeEventListener('click', onRef); boomContinuarBtn.removeEventListener('click', onCont); };
-      const onRef = ()=>{ onceRef(); refazer(); };
-      const onCont = ()=>{ onceRef(); continuar(); };
-      boomRefazerBtn.addEventListener('click', onRef);
-      boomContinuarBtn.addEventListener('click', onCont);
-    }
-
-    function emitWithAckFallback(event, data, fallbackBlob, timeoutMs=7000){
-      return new Promise((resolve, reject)=>{
-        let done=false;
-        try{
-          socket.timeout(timeoutMs).emit(event, data, (err, resp)=>{ done=true; if(err){ log(event+' ack error: '+JSON.stringify(err)); fallback(); } else { log(event+' ack resp: '+JSON.stringify(resp||'ok')); resolve(resp); return; } });
-        } catch(e){ log('emit try-catch: '+e); try{ socket.emit(event,data); } catch(e){} setTimeout(()=>{ if(!done) fallback(); }, timeoutMs); }
-        async function fallback(){ if(done) return; if(!fallbackBlob){ reject(new Error('No fallback blob')); return; } try{ const form = new FormData(); form.append('session', session); form.append('viewerId', socket.id || ''); form.append('file', fallbackBlob, `boomerang_${Date.now()}.webm`); const res = await fetch(SERVER_URL + '/upload_boomerang', { method:'POST', body: form }); const json = await res.json().catch(()=>null); log('fallback upload response: '+JSON.stringify(json||res.status)); done=true; resolve(json); } catch(e){ done=true; log('fallback upload failed: '+e); reject(e); } }
-      });
-    }
-
-    // show QR on viewer when index notifies viewer
-    socket.on('show_qr_on_viewer', ({ visualizadorUrl })=>{
-      log('QR code recebido: '+visualizadorUrl);
-      qrCodeContainer.style.display='block';
-      QRCode.toCanvas(qrCanvas, visualizadorUrl, { width:200, margin:1, color:{ dark:'#000000', light:'#FFFFFF' } }, function(err){ if(err){ log('Erro ao gerar QR code: '+err); qrCodeContainer.innerHTML = '<p>Link: <a href="'+visualizadorUrl+'" target="_blank">'+visualizadorUrl+'</a></p>'; } else { log('QR code gerado com sucesso'); } });
+/* Boomerang flow: record short 2s clip, then generate forward+reverse loop preview on client,
+   allow Refazer / Continuar, on continue upload/send to server as boomerang_ready (attempt).
+*/
+async function startBoomerangFlow(){
+  try {
+    await startFrontCamera();
+    startDrawingPreviewToCanvas();
+    showScreen(null);
+    progressEl.style.display = 'block'; progressEl.textContent = 'Preparando boomerang...';
+    await showCountdownFor(3);
+    progressEl.textContent = 'Gravando 2s...';
+    // record 2s from canvas (cropped area if needed) -> we will record full frame for simplicity
+    const shortBlob = await recordShortClipFromVideo(2000);
+    if(!shortBlob) throw new Error('Falha ao gravar clipe curto');
+    progressEl.textContent = 'Processando boomerang...';
+    // create boomerang final (client-side rendering forward+reverse into a canvas and record)
+    const finalBlob = await generateBoomerangFromShortBlob(shortBlob, 15000);
+    // produce thumbnail (first frame)
+    const thumbnail = await blobFirstFrameDataUrl(finalBlob).catch(()=>null);
+    // preview boomerang for user (create objectURL and show it in preview screen as <video>)
+    const url = URL.createObjectURL(finalBlob);
+    previewImage.src = url; // use img tag — many mobiles can show video poster via img; we can open a small video instead if needed
+    // show preview with continue/refazer
+    previewScreen.style.display = 'flex';
+    stopDrawingPreviewToCanvas();
+    const decision = await new Promise((res)=> {
+      function onRef(){ cleanup(); res('refazer'); }
+      function onCont(){ cleanup(); res('continuar'); }
+      function cleanup(){ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); }
+      refazerBtn.addEventListener('click', onRef);
+      continuarBtn.addEventListener('click', onCont);
     });
+    previewScreen.style.display = 'none';
+    if(decision === 'refazer'){
+      // allow redo
+      URL.revokeObjectURL(url);
+      startDrawingPreviewToCanvas();
+      stopCamera();
+      await startBoomerangFlow();
+      return;
+    }
+    // continue -> send to server
+    progressEl.textContent = 'Enviando boomerang...';
+    await sendBoomerangBlobToServer(finalBlob, thumbnail);
+    progressEl.style.display = 'none';
+    stopCamera();
+    showScreen(thankScreen);
+  } catch(e){
+    debug('erro boomerang flow: ' + e.message);
+    progressEl.style.display = 'none';
+    stopDrawingPreviewToCanvas();
+    stopCamera();
+    alert('Erro durante boomerang: ' + (e.message||''));
+    showScreen(welcomeScreen);
+  }
+}
 
-    // socket handlers
-    socket.on('connect', ()=>{ if(session) socket.emit('cell_connected', { session }); log('socket connected'); });
-    socket.on('disconnect', ()=>{ log('socket disconnected'); });
-    socket.on('reset_session', ()=>{ stopCamera(); photos=[]; currentPhotoIndex=0; currentPhotoData=null; showScreen(welcomeScreen); });
+/* Record short clip by drawing to offscreen canvas and MediaRecorder */
+function recordShortClipFromVideo(durationMs = 2000){
+  return new Promise(async (resolve, reject) => {
+    // offscreen canvas same size as video for quality
+    const vw = videoEl.videoWidth || 1280;
+    const vh = videoEl.videoHeight || 720;
+    const off = document.createElement('canvas');
+    off.width = vw; off.height = vh;
+    const ctx = off.getContext('2d');
+    // capture stream
+    const streamCap = off.captureStream(25);
+    let chunks = [];
+    let recorder;
+    try {
+      recorder = new MediaRecorder(streamCap, { mimeType: 'video/webm;codecs=vp8' });
+    } catch(e) {
+      try { recorder = new MediaRecorder(streamCap); } catch(err){ reject(err); return; }
+    }
+    recorder.ondataavailable = (ev)=>{ if(ev.data && ev.data.size) chunks.push(ev.data); };
+    recorder.start(100);
+    const start = performance.now();
+    function frame(){
+      try {
+        // draw mirrored frame to off
+        ctx.save(); ctx.translate(off.width,0); ctx.scale(-1,1); ctx.drawImage(videoEl, 0,0,off.width,off.height); ctx.restore();
+      } catch(e){}
+      if(performance.now() - start < durationMs){
+        requestAnimationFrame(frame);
+      } else {
+        setTimeout(()=>{ recorder.stop(); }, 80);
+      }
+    }
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      resolve(blob);
+    };
+    frame();
+  });
+}
 
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+/* Create boomerang by playing short clip forward+reverse on a canvas and recording final loop */
+async function generateBoomerangFromShortBlob(shortBlob, totalMs = 15000){
+  // load short clip into video element
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true;
+  v.src = URL.createObjectURL(shortBlob);
+  await new Promise((res, rej) => { v.onloadedmetadata = () => res(); v.onerror = () => rej(new Error('Erro ao carregar short clip')); });
+  // target canvas
+  const targetW = 720; // reduce size to keep performance acceptable
+  const targetH = Math.round(targetW * (v.videoHeight / v.videoWidth || 16/9));
+  const canvas = document.createElement('canvas'); canvas.width = targetW; canvas.height = targetH;
+  const ctx = canvas.getContext('2d');
+  // optional: draw template background here (e.g., template image 'bomerang.png') underneath frames
+  const captureStream = canvas.captureStream(25);
+  let chunks = [];
+  let recorder;
+  try {
+    recorder = new MediaRecorder(captureStream, { mimeType: 'video/webm;codecs=vp8' });
+  } catch(e) {
+    recorder = new MediaRecorder(captureStream);
+  }
+  recorder.ondataavailable = (ev)=>{ if(ev.data && ev.data.size) chunks.push(ev.data); };
+  recorder.start();
+  const start = performance.now();
+  // helper to draw a frame from v to canvas (cover)
+  function drawFrameFromVideo(video){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    try {
+      ctx.drawImage(video, 0,0,video.videoWidth,video.videoHeight, 0,0,canvas.width,canvas.height);
+    } catch(e){}
+  }
+  // play forward and reverse repeatedly until totalMs elapsed
+  // For reverse, we'll step time backwards manually
+  const playForwardOnce = () => new Promise((res) => {
+    v.currentTime = 0;
+    v.play().catch(()=>{});
+    function tick(){
+      drawFrameFromVideo(v);
+      if(v.ended || v.currentTime >= v.duration - 0.001){ v.pause(); v.removeEventListener('timeupdate', tick); res(); }
+    }
+    v.addEventListener('timeupdate', tick);
+    drawFrameFromVideo(v);
+  });
+  const playReverseOnce = () => new Promise((res) => {
+    v.pause();
+    v.currentTime = v.duration;
+    function step(){
+      v.currentTime = Math.max(0, v.currentTime - (1/25));
+      drawFrameFromVideo(v);
+      if(v.currentTime > 0.02) requestAnimationFrame(step);
+      else res();
+    }
+    step();
+  });
+  while(performance.now() - start < totalMs){
+    await playForwardOnce();
+    if(performance.now() - start >= totalMs) break;
+    await playReverseOnce();
+  }
+  await new Promise(r => setTimeout(r,120));
+  recorder.stop();
+  await new Promise(r => { recorder.onstop = r; });
+  const finalBlob = new Blob(chunks, { type: 'video/webm' });
+  URL.revokeObjectURL(v.src);
+  return finalBlob;
+}
 
-    showScreen(enterFs);
-    setTimeout(checkFullscreenOnLoad, 1000);
+/* produce first frame dataURL for thumbnail */
+function blobFirstFrameDataUrl(blob){
+  return new Promise((res,rej) => {
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true;
+    v.src = URL.createObjectURL(blob);
+    v.onloadeddata = async () => {
+      try {
+        v.currentTime = Math.min(0.05, v.duration/10);
+        await new Promise(r => setTimeout(r,100));
+        const c = document.createElement('canvas');
+        c.width = v.videoWidth || 320; c.height = v.videoHeight || 480;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(v, 0,0,c.width,c.height);
+        const d = c.toDataURL('image/jpeg', 0.8);
+        URL.revokeObjectURL(v.src);
+        res(d);
+      } catch(e){ rej(e); }
+    };
+    v.onerror = (e) => rej(e);
+  });
+}
 
-    enterFsBtn.addEventListener('click', async (e)=>{ e.preventDefault(); try{ await attemptFullscreen(); } catch(err){ log('attemptFullscreen throw: '+err); } });
+/* Send photos to server: emits photos_submit (adjust to your server expected event) */
+function emitPhotosSubmit(){
+  if(!socket || !socket.connected){
+    debug('socket não conectado — tentando conectar antes de enviar photos_submit');
+    socket.connect();
+    // try later
+    setTimeout(()=>emitPhotosSubmit(), 1500);
+    return;
+  }
+  debug('emit photos_submit (qty=' + photos.length + ')');
+  socket.emit('photos_submit', { session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa', viewerId: socket.id, photos });
+}
 
-    startBtn.addEventListener('click', async ()=>{ startBtn.disabled=true; startBtn.textContent='🎵 Preparando...'; try{ await inicio.play().catch(()=>{}); }catch(e){} startBtn.disabled=false; startBtn.textContent='🎬 Iniciar Sessão de Fotos'; showScreen(null); try{ await startCamera(); } catch(e){ return; } currentPhotoIndex=0; photos=[]; await runCaptureSequence(); });
+/* Send boomerang blob to server — prefer socket binary, fallback to POST */
+async function sendBoomerangBlobToServer(blob, thumbDataUrl){
+  if(socket && socket.connected){
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      socket.emit('boomerang_ready', { session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa', viewerId: socket.id, filename: `boomerang_${Date.now()}.webm`, data: arrayBuffer });
+      debug('boomerang_ready emitido via socket');
+      if(thumbDataUrl) socket.emit('photo_ready', { session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa', viewerId: socket.id, index: 0, photo: thumbDataUrl });
+      return;
+    } catch(e){
+      debug('erro emit socket (will fallback): ' + e.message);
+    }
+  }
+  // fallback POST (server must implement /upload_boomerang)
+  try {
+    const fd = new FormData();
+    fd.append('file', blob, `boomerang_${Date.now()}.webm`);
+    fd.append('session', (new URLSearchParams(location.search)).get('session') || 'cabine-fixa');
+    const res = await fetch((new URL('/upload_boomerang', SERVER_URL)).toString(), { method: 'POST', body: fd });
+    const json = await res.json();
+    debug('fallback upload response: ' + JSON.stringify(json).slice(0,200));
+    if(json && json.url){
+      socket.emit('boomerang_ready', { session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa', viewerId: socket.id, videoUrl: json.url });
+    }
+  } catch(e){
+    debug('fallback upload falhou: ' + e.message);
+  }
+}
 
-    startBoomBtn.addEventListener('click', async ()=>{ startBoomBtn.disabled=true; try{ await inicio.play().catch(()=>{}); }catch(e){} showScreen(null); try{ await startCamera(); } catch(e){ startBoomBtn.disabled=false; return; } await startBoomerangFlow(); });
+/* ============ socket handlers ============ */
+socket.on('connect', ()=> debug('socket conectado: ' + socket.id));
+socket.on('disconnect', ()=> debug('socket desconectado'));
+socket.on('show_qr_on_viewer', ({ visualizadorUrl }) => {
+  debug('show_qr_on_viewer recebido');
+  try {
+    QRCode.toCanvas(document.createElement('canvas'), visualizadorUrl, { width: 200 }, (err, canvas) => {
+      if(err) return debug('erro QR: ' + err);
+      // show small modal-like QR (simple approach: use alert with link — but here we inject into debug area)
+      debug('QR: ' + visualizadorUrl);
+      // Show user a quick overlay with QR canvas
+      const win = window.open('', '_blank');
+      win.document.write('<html><head><title>QR</title></head><body style="display:flex;align-items:center;justify-content:center;height:100vh;background:#111;color:#fff;"><div style="text-align:center"><p>Abra o link abaixo:</p><a href="'+visualizadorUrl+'" target="_blank">'+visualizadorUrl+'</a><p>Ou escaneie o QR</p><img src="'+visualizadorUrl+'" style="display:none"></div></body></html>');
+    });
+  } catch(e){ debug('erro mostrar qr: ' + e.message); }
+});
+socket.on('reset_session', ()=> {
+  stopDrawingPreviewToCanvas();
+  stopCamera();
+  photos = [];
+  currentCapture = null;
+  showScreen(welcomeScreen);
+});
 
-    // expose for debug
-    window._cabine = { socket, startCamera, stopCamera, startBoomerangFlow, sendPhotosToServer };
-  </script>
+/* ============ events wiring ============ */
+/* Make sure button is clickable on mobile: add both click and touch listeners */
+safeAddTapListener(enterFsBtn, async (ev) => {
+  try {
+    await requestFullscreen(document.documentElement);
+    debug('request fullscreen triggered');
+    // small delay to allow fullscreen to settle on some browsers
+    setTimeout(()=> showScreen(welcomeScreen), 250);
+    // emit to server that mobile entered fullscreen
+    socket.emit('cell_entered_fullscreen', { session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa', viewerId: socket.id });
+  } catch(e) {
+    debug('erro requestFullscreen: ' + e.message);
+    alert('Não foi possível entrar em tela cheia neste navegador. Continue mesmo assim.');
+    showScreen(welcomeScreen);
+  }
+});
+
+safeAddTapListener(startBtn, async ()=>{
+  // move to mode selection screen (user chooses boomerang or 3 photos)
+  showScreen(modeScreen);
+});
+
+safeAddTapListener(btnThree, async ()=>{
+  mode = 'three';
+  showScreen(null);
+  await startThreePhotoFlow();
+});
+
+safeAddTapListener(btnBoom, async ()=>{
+  mode = 'boom';
+  showScreen(null);
+  await startBoomerangFlow();
+});
+
+/* expose quick debug actions (optional) */
+window._cabine = { startThreePhotoFlow, startBoomerangFlow };
+
+/* initial state */
+showScreen(enterFs);
+debug('celular.html pronto - toque em Entrar em Tela Cheia');
+</script>
 </body>
 </html>
