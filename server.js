@@ -6,7 +6,6 @@
  * Features:
  *  - session/room model: operators join session rooms, viewers connect with viewerId
  *  - handles photos_submit and boomerang_ready from viewers and uploads to IMGBB
- *  - can attempt to process boomerang with ffmpeg (fluent-ffmpeg) if available
  *  - emits visualizador payloads and QR notifications to viewers and operators
  *
  * Usage:
@@ -194,6 +193,9 @@ app.get('/', (req, res) => {
   res.send('Festadodavi socket server running');
 });
 
+// Serve static files from public directory
+app.use(express.static('public'));
+
 /* --------------------------
    Socket.IO event handlers
    -------------------------- */
@@ -234,6 +236,7 @@ io.on('connection', (socket) => {
           photos: view.photos || [],
           storiesMontage: view.storiesMontage || null,
           print: view.print || null,
+          boomerang: view.boomerang || null,
           createdAt: view.createdAt
         });
         break;
@@ -285,7 +288,7 @@ io.on('connection', (socket) => {
   // Viewer sends photos_submit (array of dataURLs) — server will upload to IMGBB and create viewer entry and emit show_qr
   socket.on('photos_submit', async ({ session, viewerId, photos }) => {
     try {
-      if (!session) session = FIXED_SESSION;
+      if (!session) session = 'cabine-fixa';
       ensureSession(session);
 
       console.log(`[photos_submit] viewerId=${viewerId} photos=${(photos && photos.length) || 0}`);
@@ -308,6 +311,7 @@ io.on('connection', (socket) => {
         photos: uploaded,
         storiesMontage: null,
         print: null,
+        boomerang: null,
         createdAt: (new Date()).toISOString()
       };
       sessions[session].viewers[vid] = viewerEntry;
@@ -318,16 +322,22 @@ io.on('connection', (socket) => {
         photos: uploaded,
         storiesMontage: null,
         print: null,
+        boomerang: null,
         createdAt: viewerEntry.createdAt
       });
 
       // Optionally generate visualizador payload and emit 'show_qr' with visualizadorUrl
-      // We'll create a JSON payload and base64 encode it for visualizador.html?data=...
       try {
-        const viewerPayload = { photos: uploaded, storiesMontage: null, print: null, createdAt: viewerEntry.createdAt };
+        const viewerPayload = { 
+          photos: uploaded, 
+          storiesMontage: null, 
+          print: null, 
+          boomerang: null,
+          createdAt: viewerEntry.createdAt 
+        };
         const payloadStr = JSON.stringify(viewerPayload);
         const b64 = Buffer.from(payloadStr, 'utf8').toString('base64');
-        const visualizadorUrl = `${/* if you host visualizador on same host */ (process.env.VISUALIZADOR_ORIGIN || ('http://'+(process.env.HOSTNAME || 'localhost:'+PORT)))}/visualizador.html?data=${encodeURIComponent(b64)}`;
+        const visualizadorUrl = `${(process.env.VISUALIZADOR_ORIGIN || ('http://'+(process.env.HOSTNAME || 'localhost:'+PORT)))}/visualizador.html?data=${encodeURIComponent(b64)}`;
         // emit show_qr to viewer and operators
         io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
         io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
@@ -340,71 +350,52 @@ io.on('connection', (socket) => {
     }
   });
 
-  // handle boomerang_ready: viewer sends clip dataURL + previewFrame. We try to process loop and upload.
-  socket.on('boomerang_ready', async ({ session, viewerId, clip, previewFrame }) => {
+  // CORREÇÃO: Novo handler para boomerang_ready simplificado
+  socket.on('boomerang_ready', async ({ session, viewerId, dataUrl, previewFrame }) => {
     try {
-      console.log(`[boomerang_ready] viewer=${viewerId} session=${session} clipSize=${(clip && clip.length) || 0}`);
-      if (!clip) return;
+      console.log(`[boomerang_ready] viewer=${viewerId} session=${session}`);
+      if (!dataUrl) return;
 
-      // save clip to temp file
-      const { path: clipPath } = saveDataUrlToTempFile(clip, 'webm'); // may be webm or mp4 depending on browser
-      let processedPath = clipPath;
-      // if ffmpeg available, try to create a looped boomerang (forward+reverse repeated)
-      if (ffmpegAvailable) {
-        try {
-          const outPath = clipPath + '.boomerang.mp4';
-          await processBoomerangWithFFmpeg(clipPath, outPath, { loopRepeats: 6 });
-          processedPath = outPath;
-        } catch (e) {
-          console.warn('ffmpeg boomerang processing failed, will fallback to raw clip', e);
-          processedPath = clipPath;
-        }
-      }
-
-      // read processed file to buffer and (optionally) upload frame or video elsewhere
-      // Here: because IMGBB is for images, not ideal for video. We'll upload the previewFrame (image)
-      // and include the clip as a downloadable link by serving it from the server temp (or upload to storage).
-      // For now we upload previewFrame (if provided) and create viewer entry linking to preview image + raw clip served by server (not persistent).
-      let storiesUrl = null;
+      // Fazer upload do preview frame para IMGBB
+      let boomerangPreviewUrl = null;
       if (previewFrame) {
         try {
-          storiesUrl = await uploadToImgbbFromDataUrl(previewFrame, `cabine_boomerang_preview_${Date.now()}`);
-        } catch (e) {
-          console.warn('Failed to upload previewFrame to imgbb', e);
+          boomerangPreviewUrl = await uploadToImgbbFromDataUrl(previewFrame, `boomerang_preview_${Date.now()}`);
+          console.log(`[IMGBB] uploaded boomerang preview: ${boomerangPreviewUrl}`);
+        } catch (err) {
+          console.warn('IMGBB upload boomerang preview error', err);
         }
       }
 
-      // store viewer entry
+      // Store viewer entry
       ensureSession(session);
       const vid = viewerId || uuidv4();
       sessions[session].viewers[vid] = {
         photos: sessions[session].viewers[vid] ? sessions[session].viewers[vid].photos : [],
-        storiesMontage: storiesUrl,
-        boomerangFile: processedPath, // path on server (temp) — you may want to move to permanent storage
+        storiesMontage: boomerangPreviewUrl,
+        print: null,
+        boomerang: dataUrl, // manter dataUrl completo para o visualizador
         createdAt: (new Date()).toISOString()
       };
 
-      // notify operator and viewer
-      io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
-      io.to(`viewer:${vid}`).emit('viewer_photos_ready', {
-        photos: sessions[session].viewers[vid].photos || [],
-        storiesMontage: storiesUrl,
-        print: null,
-        createdAt: sessions[session].viewers[vid].createdAt
-      });
-
-      // build visualizador URL payload (same pattern used in client)
+      // Build visualizador URL payload
       const viewerPayload = {
         photos: sessions[session].viewers[vid].photos || [],
-        storiesMontage: storiesUrl,
+        storiesMontage: boomerangPreviewUrl,
         print: null,
+        boomerang: dataUrl,
         createdAt: sessions[session].viewers[vid].createdAt
       };
+      
       const payloadStr = JSON.stringify(viewerPayload);
       const b64 = Buffer.from(payloadStr, 'utf8').toString('base64');
       const visualizadorUrl = `${process.env.VISUALIZADOR_ORIGIN || ('http://'+(process.env.HOSTNAME || 'localhost:'+PORT))}/visualizador.html?data=${encodeURIComponent(b64)}`;
 
-      // emit show_qr
+      // Notify operator and viewer
+      io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
+      io.to(`viewer:${vid}`).emit('viewer_photos_ready', viewerPayload);
+      
+      // Emit show_qr to both operator and viewer
       io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
       io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
 
@@ -416,7 +407,7 @@ io.on('connection', (socket) => {
   });
 
   // create_viewer_session (operator created viewer entry directly)
-  socket.on('create_viewer_session', ({ session, photos, storiesMontage, print }) => {
+  socket.on('create_viewer_session', ({ session, photos, storiesMontage, print, boomerang }) => {
     try {
       ensureSession(session);
       const vid = uuidv4();
@@ -424,6 +415,7 @@ io.on('connection', (socket) => {
         photos: photos || [],
         storiesMontage: storiesMontage || null,
         print: print || null,
+        boomerang: boomerang || null,
         createdAt: (new Date()).toISOString()
       };
       // notify operator (who called)
@@ -433,12 +425,14 @@ io.on('connection', (socket) => {
         photos: sessions[session].viewers[vid].photos,
         storiesMontage: sessions[session].viewers[vid].storiesMontage,
         print: sessions[session].viewers[vid].print,
+        boomerang: sessions[session].viewers[vid].boomerang,
         createdAt: sessions[session].viewers[vid].createdAt
       });
       io.to(`session:${session}`).emit('viewer_photos_ready', {
         photos: sessions[session].viewers[vid].photos,
         storiesMontage: sessions[session].viewers[vid].storiesMontage,
         print: sessions[session].viewers[vid].print,
+        boomerang: sessions[session].viewers[vid].boomerang,
         createdAt: sessions[session].viewers[vid].createdAt
       });
     } catch (e) {
@@ -469,6 +463,14 @@ io.on('connection', (socket) => {
     io.to(`session:${session}`).emit('reset_session', { session });
   });
 
+  // CORREÇÃO: Adicionar handler para cell_connected
+  socket.on('cell_connected', ({ session }) => {
+    console.log(`[cell_connected] Celular conectado na sessão: ${session}`);
+    ensureSession(session);
+    // Opcional: notificar operadores que um celular se conectou
+    io.to(`session:${session}`).emit('cell_connected', { viewerId: socket.id });
+  });
+
   socket.on('disconnect', () => {
     // cleanup operator membership sets
     const sess = socket.data && socket.data.session;
@@ -486,4 +488,5 @@ io.on('connection', (socket) => {
 server.listen(PORT, () => {
   console.log(`Festadodavi server listening on port ${PORT}`);
   console.log(`FFmpeg available: ${ffmpegAvailable}`);
+  console.log(`IMGBB Key: ${IMGBB_KEY ? '✅ Configured' : '❌ Not configured'}`);
 });
