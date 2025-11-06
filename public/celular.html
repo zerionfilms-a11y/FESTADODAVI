@@ -10,12 +10,11 @@
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
     .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-    /* botão Entrar em Tela Cheia - FÁCIL de ver e clicar */
     #enterFsBtn{
       padding:18px 25px;border-radius:12px;border:none;
       background:#ffd600;color:#000;font-weight:800;
       cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:360px;
-      -webkit-tap-highlight-color: rgba(0,0,0,0); /* mobile highlight off */
+      -webkit-tap-highlight-color: rgba(0,0,0,0);
       box-shadow:0 6px 20px rgba(0,0,0,0.35);
     }
     #enterFsBtn:active{ transform: translateY(1px); }
@@ -27,24 +26,23 @@
     #countdown{position:fixed;top:28%;left:0;right:0;text-align:center;font-size:110px;font-weight:800;text-shadow:0 0 20px #000;z-index:260;color:#fff;pointer-events:none;display:none}
     .hidden { display: none !important; }
     .visible { display: flex !important; }
-    #previewScreen{background:rgba(0,0,0,0.9);z-index:300;padding:0;display:none}
+    #previewScreen{background:rgba(0,0,0,0.9);z-index:900;padding:0;display:none}
     #previewContainer{position:relative;width:100%;height:100%;display:flex;flex-direction:column}
     #previewImage{width:100%;height:100%;object-fit:contain;display:block}
-    .preview-buttons{position:absolute;bottom:28px;left:0;right:0;display:flex;gap:12px;justify-content:center;padding:0 20px;z-index:310}
+    .preview-buttons{position:absolute;bottom:28px;left:0;right:0;display:flex;gap:12px;justify-content:center;padding:0 20px;z-index:910}
     .preview-btn{padding:12px 18px;border-radius:8px;border:none;font-weight:700;cursor:pointer;font-size:16px;flex:1;max-width:160px;background:rgba(255,255,255,0.08);color:white;backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.06)}
     #refazerBtn{background:#d9534f}
     #continuarBtn{background:#5cb85c}
-    #thankScreen{background:linear-gradient(135deg,#001e3c,#0b84ff);z-index:300;display:none}
-    #debugInfo{position:fixed;bottom:8px;left:8px;font-size:11px;color:#ddd;background:rgba(0,0,0,0.45);padding:6px;border-radius:6px;z-index:600;max-width:48%}
-    /* ensure enter screen area is on top and clickable */
-    #enterFs { z-index: 700; touch-action: manipulation; pointer-events: auto; }
-    .maybe-blocker { pointer-events: none !important; }
+    #thankScreen{background:linear-gradient(135deg,#001e3c,#0b84ff);z-index:900;display:none}
+    #debugInfo{position:fixed;bottom:8px;left:8px;font-size:11px;color:#ddd;background:rgba(0,0,0,0.45);padding:6px;border-radius:6px;z-index:1000;max-width:48%}
+    /* mode screen must be on top for clicks */
+    #modeScreen{z-index:950}
     @media (max-width:480px){ #countdown { font-size:72px } }
   </style>
 </head>
 <body>
   <!-- ENTRAR EM TELA CHEIA: tela simples, APENAS o botão -->
-  <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff);">
+  <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff);z-index:1000">
     <div style="text-align:center;width:100%;max-width:460px">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <h1 style="color:#fff;margin:10px 0;font-size:20px">📸 Cabine Fotográfica</h1>
@@ -53,8 +51,8 @@
     </div>
   </div>
 
-  <!-- Welcome (após fullscreen) - kept for fallback -->
-  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7);z-index:700">
+  <!-- Welcome (fallback) -->
+  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7);z-index:1000">
     <div id="welcome">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <h1 style="color:#222;margin-bottom:8px">📸 Preparado?</h1>
@@ -64,7 +62,7 @@
   </div>
 
   <!-- Buttons mode screen (after start or after fullscreen) -->
-  <div id="modeScreen" class="screen hidden" style="background:linear-gradient(135deg,#000,#222);z-index:700">
+  <div id="modeScreen" class="screen hidden" style="background:linear-gradient(135deg,#000,#222);z-index:950">
     <div style="text-align:center">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <p style="color:#fff;margin-bottom:12px">Escolha o modo</p>
@@ -83,7 +81,7 @@
   <div id="countdown" aria-hidden="true"></div>
 
   <!-- preview after a photo / or boomerang preview -->
-  <div id="previewScreen" class="screen" style="display:none;z-index:800">
+  <div id="previewScreen" class="screen" style="display:none;z-index:900">
     <div id="previewContainer">
       <img id="previewImage" src="" alt="Preview da captura">
       <div class="preview-buttons">
@@ -93,7 +91,7 @@
     </div>
   </div>
 
-  <div id="thankScreen" class="screen" style="display:none;z-index:800">
+  <div id="thankScreen" class="screen" style="display:none;z-index:900">
     <div id="thank">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <h1 style="color:#fff">✨ Obrigado por utilizar a cabine!</h1>
@@ -109,11 +107,8 @@
 
 <script>
 /*
-  celular.html - atualizado:
-   - SERVER_URL ajustado para https://festadodavi.onrender.com
-   - ao entrar em fullscreen, vai direto para a tela de escolha (modeScreen)
-   - enter button usa click + touch handlers para garantir funcionamento mobile
-   - continua desenhando o vídeo em canvas para evitar frames congelados
+  celular.html - correção: garante que após tocar "Entrar em Tela Cheia" a tela de escolha aparece imediatamente.
+  SERVER_URL apontado para sua preferência.
 */
 const SERVER_URL = "https://festadodavi.onrender.com";
 const socket = io(SERVER_URL, { transports:['websocket','polling'], reconnection:true, path:'/socket.io' });
@@ -207,7 +202,7 @@ function stopCamera(){
     stream.getTracks().forEach(t=>t.stop());
     stream = null;
   }
-  videoEl.pause();
+  try { videoEl.pause(); } catch(e){}
   videoEl.srcObject = null;
   videoEl.style.display = 'none';
 }
@@ -485,38 +480,48 @@ socket.on('reset_session', ()=> {
 });
 
 /* EVENTS wiring */
-/* When the EnterFS button is tapped: request fullscreen AND immediately open mode selection.
-   Some browsers delay fullscreen; we also listen to fullscreenchange to ensure mode shows
-   (this covers both cases). */
+/* EnterFS: request fullscreen AND immediately show the mode selection.
+   Also set a fallback timeout in case fullscreen is slow in this browser. */
 safeAddTapListener(enterFsBtn, async (ev) => {
   try {
+    // try request fullscreen
     await requestFullscreen(document.documentElement);
-    debug('request fullscreen triggered');
-    // Immediately go to mode selection so user sees choices; if browser later reports fullscreenchange it's fine.
-    showScreen(modeScreen);
-    // report to server
-    socket.emit('cell_entered_fullscreen', { session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa', viewerId: socket.id });
+    debug('request fullscreen triggered (promise resolved)');
   } catch(e) {
-    debug('erro requestFullscreen: ' + e.message);
-    // fallback: still show the mode selection if fullscreen fails
+    debug('requestFullscreen failed / rejected: ' + e.message);
+  } finally {
+    // always show mode screen immediately (this was your requested behavior)
     showScreen(modeScreen);
+    // small fallback: if fullscreen not active in 700ms, still keep modeScreen visible
+    setTimeout(()=>{
+      if(!isFullscreen()){
+        debug('fallback: fullscreen not detected, keeping modeScreen visible');
+        showScreen(modeScreen);
+      } else {
+        debug('fullscreen active after request');
+        showScreen(modeScreen);
+      }
+    }, 700);
+    // notify server
     socket.emit('cell_entered_fullscreen', { session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa', viewerId: socket.id });
   }
 });
 
-/* additionally listen to fullscreenchange - ensure modeScreen appears once fullscreen is active */
+/* ensure if fullscreenchange occurs later, we still show modeScreen */
 document.addEventListener('fullscreenchange', () => {
   debug('fullscreenchange -> ' + isFullscreen());
   if(isFullscreen()){
+    // ensure mode selection visible
     showScreen(modeScreen);
   }
 });
 
+/* startBtn fallback to show mode screen */
 safeAddTapListener(startBtn, async ()=>{
-  // In case start button is used, show mode selection as well
   showScreen(modeScreen);
 });
 
+/* mode buttons */
 safeAddTapListener(btnThree, async ()=>{
   mode = 'three';
   showScreen(null);
@@ -526,20 +531,18 @@ safeAddTapListener(btnThree, async ()=>{
 safeAddTapListener(btnBoom, async ()=>{
   mode = 'boom';
   showScreen(null);
-  // run boomerang flow
   try {
     await startFrontCamera();
-    await startBoomerangSequence(); // if you want the prior generateBoomerang logic, call startBoomerangSequence(); below we create one inline
+    await startBoomerangSequence();
   } catch(e){
-    // fallback to older method
-    await startBoomerangFlow(); // fallback function name preserved for clarity
+    debug('erro boomerang: ' + e.message);
+    alert('Erro no boomerang: ' + (e.message||''));
+    showScreen(welcomeScreen);
   }
 });
 
-/* Provide both implementations: startBoomerangSequence uses record+render already defined above.
-   If you used startBoomerangFlow previously, keep those functions. For compatibility, create alias. */
+/* boomerang sequence wrapper using the functions above */
 async function startBoomerangSequence(){
-  // uses recordShortClipFromVideo + generateBoomerangFromShortBlob flow
   try {
     await startFrontCamera();
     startDrawingPreviewToCanvas();
@@ -552,7 +555,6 @@ async function startBoomerangSequence(){
     progressEl.textContent = 'Processando boomerang...';
     const finalBlob = await generateBoomerangFromShortBlob(shortBlob, 15000);
     const thumb = await blobFirstFrameDataUrl(finalBlob).catch(()=>null);
-    // preview: use object URL in previewImage (some browsers don't render video in img; this is a quick way)
     const url = URL.createObjectURL(finalBlob);
     previewImage.src = url;
     previewScreen.style.display = 'flex';
@@ -585,9 +587,6 @@ async function startBoomerangSequence(){
     showScreen(welcomeScreen);
   }
 }
-
-/* compatibility aliases (if runBoomerangFlow used before) */
-async function startBoomerangFlow(){ return startBoomerangSequence(); }
 
 /* initial state */
 showScreen(enterFs);
