@@ -9,7 +9,7 @@
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
-    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
+    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px; z-index:120}
     .hidden { display:none !important; }
     .visible { display:flex !important; }
     button.btn {
@@ -19,20 +19,23 @@
     }
     .big { padding:18px 28px;font-size:20px;border-radius:14px }
     .logo{max-width:160px;margin-bottom:12px;border-radius:8px}
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;transform:scaleX(-1);z-index:0}
-    #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:2}
-    #countdown{position:fixed;top:18%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;z-index:40;color:#fff;text-shadow:0 0 30px #000;pointer-events:none}
-    #progress{position:fixed;top:10px;left:10px;padding:8px 10px;background:rgba(0,0,0,0.45);border-radius:8px;z-index:60;font-size:14px}
+    /* Ensure choice screen sits above video/canvas */
+    #choiceScreen { z-index:220 !important; }
+    /* video/canvas z-index lower so choice is above them */
+    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;transform:scaleX(-1);z-index:10}
+    #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:12}
+    #countdown{position:fixed;top:18%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;z-index:60;color:#fff;text-shadow:0 0 30px #000;pointer-events:none}
+    #progress{position:fixed;top:10px;left:10px;padding:8px 10px;background:rgba(0,0,0,0.45);border-radius:8px;z-index:260;font-size:14px}
     .modes { display:flex; gap:18px; margin-top:18px }
     .mode-btn { width:110px;height:110px;border-radius:999px;border:none;font-size:36px;display:flex;align-items:center;justify-content:center;cursor:pointer }
     .mode-btn.boom{background:linear-gradient(135deg,#5bd,#07a); color:white}
     .mode-btn.three{background:linear-gradient(135deg,#f4b400,#d18a00); color:white}
-    .preview-buttons{position:absolute;bottom:28px;left:0;right:0;display:flex;gap:14px;justify-content:center;padding:0 20px;z-index:80}
+    .preview-buttons{position:absolute;bottom:28px;left:0;right:0;display:flex;gap:14px;justify-content:center;padding:0 20px;z-index:180}
     .preview-btn{padding:12px 18px;border-radius:10px;border:none;font-weight:700;cursor:pointer;font-size:16px;background:rgba(0,0,0,0.6);color:#fff}
-    #qrOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:120;pointer-events:none;opacity:0;transition:opacity .18s}
+    #qrOverlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:300;pointer-events:none;opacity:0;transition:opacity .18s}
     #qrOverlay.visible{pointer-events:auto;opacity:1}
     .qr-box{background:#fff;padding:14px;border-radius:12px;color:#000;text-align:center}
-    #debugInfo{position:fixed;left:10px;bottom:10px;font-size:11px;color:#ddd;background:rgba(0,0,0,0.45);padding:6px;border-radius:6px;z-index:200;max-width:46%}
+    #debugInfo{position:fixed;left:10px;bottom:10px;font-size:11px;color:#ddd;background:rgba(0,0,0,0.45);padding:6px;border-radius:6px;z-index:320;max-width:46%}
   </style>
 </head>
 <body>
@@ -68,7 +71,7 @@
   <div id="progress" style="display:none"></div>
 
   <!-- preview screen (Refazer / Continuar) -->
-  <div id="previewScreen" class="screen hidden" style="background:rgba(0,0,0,0.9);z-index:70">
+  <div id="previewScreen" class="screen hidden" style="background:rgba(0,0,0,0.9);z-index:250">
     <div style="position:relative;width:100%;height:100%">
       <img id="previewImage" src="" style="width:100%;height:100%;object-fit:contain;display:block">
       <div class="preview-buttons">
@@ -96,17 +99,9 @@
   <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
 <script>
-/* celular.html — corrigido:
-   - Entrar em tela cheia -> mostra CHOICE (imediato)
-   - Usa câmera frontal do celular
-   - Mantém preview vivo desenhando video->canvas
-   - 3 fotos: countdown, preview refazer/continuar, envia photos_submit
-   - Boomerang: grava ~2s, gera loop forward+reverse ~15s, preview refazer/continuar, envia boomerang_ready + photo_ready (thumbnail)
-*/
-
 (function(){
   // ---------- CONFIG ----------
-  const SERVER_URL = "https://festadodavi-production-0591.up.railway.app"; // ajuste se precisar
+  const SERVER_URL = "https://festadodavi-production-0591.up.railway.app"; // ajuste se necessário
   const socket = io(SERVER_URL, { transports:['websocket','polling'], reconnection:true, path:'/socket.io' });
 
   const enterFs = document.getElementById('enterFs');
@@ -199,19 +194,16 @@
     }
   }
 
-  // BUTTON: Enter fullscreen -> immediately show choice (doesn't wait for fullscreen)
+  // BUTTON: Enter fullscreen -> immediately show choice (DO NOT start camera here)
   enterFsBtn.addEventListener('click', async () => {
     try { await document.documentElement.requestFullscreen().catch(()=>{}); } catch(e){}
-    // Immediately switch to choice screen (this fixes the "only enters fullscreen but doesn't go to choice" issue)
+    // show choice screen and keep camera off until user chooses
     showScreen(choiceScreen);
-    // try to warm camera (do not block UI)
-    ensureFrontCamera().then(() => {
-      // draw a live canvas so user sees camera when they choose mode
-      startDrawLoop();
-    }).catch(()=>{});
-    // debug log
-    debugLog('Entrou em fullscreen — mostrando escolha');
-    // notify server (optional)
+    // ensure video/canvas hidden (defensive)
+    videoEl.style.display = 'none';
+    canvasEl.style.display = 'none';
+    stopDrawLoop();
+    debugLog('Entrou em fullscreen — mostrando escolha (não inicia câmera ainda)');
     if(socket && socket.connected) socket.emit('cell_entered_fullscreen_local', { ts: Date.now() });
   });
 
@@ -219,25 +211,34 @@
   btnThree.addEventListener('click', async ()=> {
     mode = 'three';
     debugLog('Modo escolhido: 3 Fotos');
-    // ensure camera ready
-    await ensureFrontCamera();
-    startDrawLoop();
-    photos = [];
-    currentPhotoIndex = 0;
-    showScreen(null); // hide UI to show live preview
-    // small delay then start capture flow
-    await sleep(200);
-    runThreePhotosFlow();
+    // ensure camera ready THEN hide choice screen
+    try {
+      await ensureFrontCamera();
+      startDrawLoop();
+      photos = [];
+      currentPhotoIndex = 0;
+      hide(choiceScreen);
+      await sleep(160);
+      runThreePhotosFlow();
+    } catch(e){
+      debugLog('Erro ao ativar câmera: ' + (e.message||e));
+      showScreen(choiceScreen);
+    }
   });
 
   btnBoom.addEventListener('click', async ()=> {
     mode = 'boom';
     debugLog('Modo escolhido: Boomerang');
-    await ensureFrontCamera();
-    startDrawLoop();
-    showScreen(null);
-    await sleep(200);
-    startBoomerangFlow();
+    try {
+      await ensureFrontCamera();
+      startDrawLoop();
+      hide(choiceScreen);
+      await sleep(160);
+      startBoomerangFlow();
+    } catch(e){
+      debugLog('Erro ao ativar câmera: ' + (e.message||e));
+      showScreen(choiceScreen);
+    }
   });
 
   // THREE PHOTOS FLOW
@@ -392,7 +393,6 @@
     // create offscreen canvas sized to video resolution (but limit for perf)
     const vw = videoEl.videoWidth || 1280;
     const vh = videoEl.videoHeight || 720;
-    // target small record resolution (to reduce size)
     const outW = Math.min(1280, vw);
     const aspect = vh / vw;
     const outH = Math.round(outW * aspect);
@@ -409,7 +409,6 @@
     await new Promise((resolve) => {
       function frame(){
         try {
-          // draw mirrored/unmirrored as desired (we draw unmirrored final)
           offCtx.save();
           offCtx.translate(off.width,0); offCtx.scale(-1,1);
           offCtx.drawImage(videoEl, 0, 0, off.width, off.height);
@@ -454,11 +453,9 @@
 
     const startTime = performance.now();
 
-    // draw helper (we fill black background)
     function drawFrameFromVideoFrame(){
       ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
       try {
-        // fit video into area centered (we'll use full canvas for mobile boomerang)
         const vw = v.videoWidth || 320, vh = v.videoHeight || 240;
         const scale = Math.max(canvas.width / vw, canvas.height / vh);
         const w = vw * scale, h = vh * scale;
@@ -466,7 +463,6 @@
       } catch(e){}
     }
 
-    // play forward
     async function playForward(){
       return new Promise((res) => {
         v.currentTime = 0;
@@ -480,7 +476,6 @@
       });
     }
 
-    // play reverse manually
     async function playReverse(){
       return new Promise((res) => {
         v.pause();
@@ -548,9 +543,6 @@
     debugEl.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + debugEl.textContent;
     console.log(msg);
   }
-
-  // final: when 3 photos done, send photos_submit
-  // already emitted inside finalizeThreePhotos()
 
   // initial screen ready
   showScreen(enterFs);
