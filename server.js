@@ -1,5 +1,5 @@
 /**
- * server.js
+ * server.js - CORRIGIDO
  *
  * Node/Express + Socket.IO server for Festadodavi
  *
@@ -244,6 +244,22 @@ io.on('connection', (socket) => {
     }
   });
 
+  // CORREÇÃO: Adicionar handler para cell_connected
+  socket.on('cell_connected', ({ session }) => {
+    console.log(`[cell_connected] Celular conectado na sessão: ${session}`);
+    ensureSession(session);
+    // Opcional: notificar operadores que um celular se conectou
+    io.to(`session:${session}`).emit('cell_connected', { viewerId: socket.id });
+  });
+
+  // CORREÇÃO: Adicionar handler para cell_entered_fullscreen
+  socket.on('cell_entered_fullscreen', ({ session, viewerId }) => {
+    console.log(`[cell_entered_fullscreen] Celular ${viewerId} entrou em fullscreen na sessão: ${session}`);
+    ensureSession(session);
+    // Notificar operadores que um celular entrou em fullscreen
+    io.to(`session:${session}`).emit('cell_entered_fullscreen', { viewerId });
+  });
+
   // Relay stream_frame from operator → cache last frame & broadcast to viewers in session
   socket.on('stream_frame', ({ session, frame }) => {
     if (!session || !frame) return;
@@ -406,6 +422,64 @@ io.on('connection', (socket) => {
     }
   });
 
+  // CORREÇÃO: Handler para boomerang com dados binários
+  socket.on('boomerang_binary', async ({ session, viewerId, filename, data }) => {
+    try {
+      console.log(`[boomerang_binary] viewer=${viewerId} session=${session}, data size: ${data ? data.byteLength : 0}`);
+      
+      if (!data || !session) return;
+
+      // Converter ArrayBuffer para Buffer
+      const buffer = Buffer.from(data);
+      
+      // Criar data URL para o vídeo
+      const dataUrl = `data:video/webm;base64,${buffer.toString('base64')}`;
+
+      // Criar thumbnail (primeiro frame) para preview
+      let previewFrame = null;
+      try {
+        // Aqui você poderia extrair o primeiro frame do vídeo usando ffmpeg
+        // Por enquanto, vamos usar um placeholder
+        previewFrame = null; // Implementar extração de thumbnail se necessário
+      } catch (e) {
+        console.warn('Erro ao criar thumbnail do boomerang:', e);
+      }
+
+      // Processar como o boomerang_ready normal
+      ensureSession(session);
+      const vid = viewerId || uuidv4();
+      sessions[session].viewers[vid] = {
+        photos: sessions[session].viewers[vid] ? sessions[session].viewers[vid].photos : [],
+        storiesMontage: previewFrame,
+        print: null,
+        boomerang: dataUrl,
+        createdAt: (new Date()).toISOString()
+      };
+
+      const viewerPayload = {
+        photos: sessions[session].viewers[vid].photos || [],
+        storiesMontage: previewFrame,
+        print: null,
+        boomerang: dataUrl,
+        createdAt: sessions[session].viewers[vid].createdAt
+      };
+      
+      const payloadStr = JSON.stringify(viewerPayload);
+      const b64 = Buffer.from(payloadStr, 'utf8').toString('base64');
+      const visualizadorUrl = `${process.env.VISUALIZADOR_ORIGIN || ('http://'+(process.env.HOSTNAME || 'localhost:'+PORT))}/visualizador.html?data=${encodeURIComponent(b64)}`;
+
+      io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
+      io.to(`viewer:${vid}`).emit('viewer_photos_ready', viewerPayload);
+      io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
+      io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
+
+      console.log(`[boomerang_binary] processed viewer=${vid}`);
+
+    } catch (err) {
+      console.error('boomerang_binary handler error', err);
+    }
+  });
+
   // create_viewer_session (operator created viewer entry directly)
   socket.on('create_viewer_session', ({ session, photos, storiesMontage, print, boomerang }) => {
     try {
@@ -461,14 +535,6 @@ io.on('connection', (socket) => {
       sessions[session].lastStreamFrame = null;
     }
     io.to(`session:${session}`).emit('reset_session', { session });
-  });
-
-  // CORREÇÃO: Adicionar handler para cell_connected
-  socket.on('cell_connected', ({ session }) => {
-    console.log(`[cell_connected] Celular conectado na sessão: ${session}`);
-    ensureSession(session);
-    // Opcional: notificar operadores que um celular se conectou
-    io.to(`session:${session}`).emit('cell_connected', { viewerId: socket.id });
   });
 
   socket.on('disconnect', () => {
