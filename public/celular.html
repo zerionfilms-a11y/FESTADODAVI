@@ -9,13 +9,109 @@
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
     .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-    #enterFsBtn{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px;transition: all 0.3s ease;box-shadow: 0 4px 15px rgba(0,0,0,0.3);}
-    #enterFsBtn:hover{background:#ffed4a;transform:translateY(-2px)}
-    #enterFsBtn:disabled{background:#ccc;cursor:not-allowed;transform:none}
+    
+    /* BOTÃO PRINCIPAL - CORRIGIDO PARA FICAR CLARAMENTE CLICÁVEL */
+    #enterFsBtn{
+      padding:20px 30px;
+      border-radius:15px;
+      border:none;
+      background:linear-gradient(145deg, #ffd600, #ffaa00);
+      color:#000;
+      font-weight:800;
+      cursor:pointer;
+      font-size:22px;
+      margin:20px;
+      width:90%;
+      max-width:320px;
+      transition: all 0.3s ease;
+      box-shadow: 0 6px 20px rgba(255, 214, 0, 0.4),
+                  0 4px 10px rgba(0,0,0,0.3),
+                  inset 0 1px 0 rgba(255,255,255,0.4);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    #enterFsBtn:hover{
+      background:linear-gradient(145deg, #ffed4a, #ffc400);
+      transform:translateY(-3px) scale(1.02);
+      box-shadow: 0 8px 25px rgba(255, 214, 0, 0.6),
+                  0 6px 15px rgba(0,0,0,0.4),
+                  inset 0 1px 0 rgba(255,255,255,0.5);
+    }
+    
+    #enterFsBtn:active{
+      transform:translateY(1px) scale(0.98);
+      box-shadow: 0 3px 10px rgba(255, 214, 0, 0.3),
+                  0 2px 5px rgba(0,0,0,0.2),
+                  inset 0 1px 0 rgba(255,255,255,0.3);
+    }
+    
+    #enterFsBtn:disabled{
+      background:linear-gradient(145deg, #666, #888);
+      cursor:not-allowed;
+      transform:none;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+      color:#ccc;
+    }
+    
+    /* Efeito de brilho no hover */
+    #enterFsBtn::after{
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+      transition: left 0.5s;
+    }
+    
+    #enterFsBtn:hover::after{
+      left: 100%;
+    }
+
     #welcome{background:rgba(255,255,255,0.15);padding:25px;text-align:center;border-radius:15px;width:95%;max-width:400px;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
     #welcome h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
     #welcome p{font-size:18px;margin-bottom:15px}
-    #startBtn{padding:18px 25px;border-radius:12px;border:none;background:#fff;color:#0b84ff;font-weight:700;cursor:pointer;font-size:20px;margin-top:5px;box-shadow:0 4px 15px rgba(0,0,0,0.3);width:100%;max-width:300px;transition:all 0.3s ease}
+    
+    /* Botões da tela de boas-vindas também melhorados */
+    #startBtn, #startBoomBtn{
+      padding:18px 25px;
+      border-radius:12px;
+      border:none;
+      font-weight:700;
+      cursor:pointer;
+      font-size:18px;
+      margin-top:8px;
+      width:100%;
+      transition:all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+    
+    #startBtn{
+      background:linear-gradient(145deg, #ffffff, #e6e6e6);
+      color:#0b84ff;
+    }
+    
+    #startBtn:hover{
+      background:linear-gradient(145deg, #f0f0f0, #ffffff);
+      transform:translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    }
+    
+    #startBoomBtn{
+      background:linear-gradient(135deg,#2a9df4,#0b6fb3);
+      color:#fff;
+    }
+    
+    #startBoomBtn:hover{
+      background:linear-gradient(135deg,#3aa8ff,#1c7fd6);
+      transform:translateY(-2px);
+      box-shadow: 0 6px 20px rgba(42, 157, 244, 0.4);
+    }
+
     .logo{max-width:180px;margin-bottom:20px;border-radius:10px}
     /* video & canvas */
     #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:block; transform: scaleX(-1); opacity:0.0001; z-index:0;} /* quase invisível mas renderiza frames */
@@ -46,11 +142,12 @@
 </head>
 <body>
   <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
-    <div style="text-align:center;background:rgba(0,0,0,0.3);padding:20px;border-radius:15px;backdrop-filter:blur(10px);width:95%;max-width:400px">
+    <div style="text-align:center;background:rgba(0,0,0,0.3);padding:30px;border-radius:20px;backdrop-filter:blur(15px);width:95%;max-width:400px;border:2px solid rgba(255,255,255,0.2);box-shadow: 0 10px 30px rgba(0,0,0,0.3)">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1 style="font-size:24px;margin-bottom:20px">📸 Cabine Fotográfica</h1>
-      <p style="font-size:16px;margin-bottom:20px">Para melhor experiência, entre em tela cheia</p>
-      <button id="enterFsBtn" tabindex="0">🎬 Entrar em Tela Cheia</button>
+      <h1 style="font-size:28px;margin-bottom:25px;text-shadow:2px 2px 8px rgba(0,0,0,0.5)">📸 Cabine Fotográfica</h1>
+      <p style="font-size:18px;margin-bottom:25px;line-height:1.4">Para melhor experiência, entre em tela cheia</p>
+      <button id="enterFsBtn" tabindex="0">🎬 ENTRAR EM TELA CHEIA</button>
+      <p style="font-size:14px;margin-top:15px;color:rgba(255,255,255,0.8)">Toque no botão acima para começar</p>
     </div>
   </div>
 
@@ -63,7 +160,7 @@
         <button id="startBtn" style="width:100%">🎬 Iniciar Sessão de Fotos (3x)</button>
       </div>
       <div style="margin-top:12px;width:100%;max-width:320px">
-        <button id="startBoomBtn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#2a9df4,#0b6fb3);color:#fff;padding:14px;border-radius:12px;border:none;font-weight:700;cursor:pointer">🔁 Fazer Boomerang</button>
+        <button id="startBoomBtn" style="width:100%;margin-top:8px;">🔁 Fazer Boomerang</button>
       </div>
     </div>
   </div>
@@ -194,72 +291,61 @@
     function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
     function log(txt){ const t=(new Date()).toLocaleTimeString(); debugEl.textContent = `[${t}] ${txt}\n` + debugEl.textContent; console.log(txt); }
 
-    // Fullscreen helper - muito robusto e com feedback ao usuário
+    // CORREÇÃO: Função fullscreen mais simples e direta
     async function attemptFullscreen() {
       if (fullscreenAttempting) return;
       fullscreenAttempting = true;
       enterFsBtn.disabled = true;
-      enterFsBtn.textContent = 'Carregando...';
+      enterFsBtn.textContent = 'CARREGANDO...';
       
       log('Tentando entrar em tela cheia...');
       
       try {
-        // Tenta fullscreen no documentElement (melhor compatibilidade)
-        const el = document.documentElement;
+        // Método mais direto para fullscreen
+        const element = document.documentElement;
         
-        if (el.requestFullscreen) {
-          await el.requestFullscreen();
-        } else if (el.webkitRequestFullscreen) {
-          await el.webkitRequestFullscreen();
-        } else if (el.mozRequestFullScreen) {
-          await el.mozRequestFullScreen();
-        } else if (el.msRequestFullscreen) {
-          await el.msRequestFullscreen();
-        } else {
-          throw new Error('Fullscreen não suportado');
+        if (element.requestFullscreen) {
+          await element.requestFullscreen();
+        } else if (element.webkitRequestFullscreen) {
+          await element.webkitRequestFullscreen();
+        } else if (element.mozRequestFullScreen) {
+          await element.mozRequestFullScreen();
+        } else if (element.msRequestFullscreen) {
+          await element.msRequestFullscreen();
         }
         
         log('Fullscreen ativado com sucesso');
         isFullscreen = true;
         
         // Pequeno delay para estabilizar
-        await sleep(500);
+        await sleep(300);
         
-        // Inicia a câmera antes de mostrar welcome
+        // Inicia a câmera e mostra welcome
         try {
           await startCamera();
           showScreen(welcomeScreen);
           if(session) socket.emit('cell_entered_fullscreen', { session, viewerId: socket.id });
         } catch (cameraError) {
           log('Câmera falhou: ' + cameraError);
+          // Mostra welcome mesmo sem câmera
           showScreen(welcomeScreen);
         }
         
       } catch (err) {
         log('Erro fullscreen: ' + (err.message || err));
         
-        // Fallback: tenta entrar em tela cheia de forma diferente
+        // Fallback: mostra welcome mesmo sem fullscreen
         try {
-          // Tenta no body como fallback
-          const body = document.body;
-          if (body.webkitRequestFullscreen) {
-            body.webkitRequestFullscreen();
-          }
-          
-          // Mostra welcome mesmo sem fullscreen
           await startCamera();
           showScreen(welcomeScreen);
-          
-        } catch (fallbackError) {
-          log('Fallback também falhou: ' + fallbackError);
-          alert('Para melhor experiência, use Chrome, Edge ou Safari. O modo tela cheia pode não estar disponível neste navegador.');
-          await startCamera();
+        } catch (cameraError) {
+          log('Câmera falhou no fallback: ' + cameraError);
           showScreen(welcomeScreen);
         }
       } finally {
         fullscreenAttempting = false;
         enterFsBtn.disabled = false;
-        enterFsBtn.textContent = '🎬 Entrar em Tela Cheia';
+        enterFsBtn.textContent = '🎬 ENTRAR EM TELA CHEIA';
       }
     }
 
@@ -297,27 +383,44 @@
     // Start camera front
     async function startCamera(){
       try{
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width:{ideal:1080}, height:{ideal:1920} }, audio:false });
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: "user", 
+            width: { ideal: 1080 }, 
+            height: { ideal: 1920 } 
+          }, 
+          audio: false 
+        });
         videoEl.srcObject = stream;
         videoEl.style.display = 'block';
-        // ensure video plays and metadata available
-        await new Promise(res => {
-          const t = setTimeout(()=>res(), 1000);
-          videoEl.onloadedmetadata = ()=>{ clearTimeout(t); res(); };
-          videoEl.play().catch(()=>{ clearTimeout(t); res(); });
+        
+        // Esperar o vídeo carregar
+        await new Promise((resolve, reject) => {
+          videoEl.onloadedmetadata = () => resolve();
+          videoEl.onerror = reject;
+          setTimeout(resolve, 1000); // Timeout de segurança
         });
+        
         startPreviewLoop();
+        return true;
       }catch(e){
         log('Erro camera: ' + e);
         alert('Permissão da câmera negada ou indisponível. Verifique as permissões.');
-        showScreen(welcomeScreen);
         throw e;
       }
     }
 
     function stopCamera(){
-      try{ if(stream) { stream.getTracks().forEach(t=>t.stop()); stream=null; } } catch(e){}
-      try{ videoEl.pause(); videoEl.srcObject = null; } catch(e){}
+      try{ 
+        if(stream) { 
+          stream.getTracks().forEach(t=>t.stop()); 
+          stream=null; 
+        } 
+      } catch(e){}
+      try{ 
+        videoEl.pause(); 
+        videoEl.srcObject = null; 
+      } catch(e){}
       stopPreviewLoop();
     }
 
@@ -348,25 +451,38 @@
         ctx.save();
         ctx.clearRect(0,0,cw,ch);
         ctx.translate(cw,0); ctx.scale(-1,1); // mirror
-        try { ctx.drawImage(videoEl, 0,0,vw,vh, cw - (dx + drawW), dy, drawW, drawH); } catch(e){}
+        try { 
+          ctx.drawImage(videoEl, 0,0,vw,vh, cw - (dx + drawW), dy, drawW, drawH); 
+        } catch(e){}
         ctx.restore();
         rafId = requestAnimationFrame(loop);
       }
       loop();
     }
     
-    function stopPreviewLoop(){ if(rafId) cancelAnimationFrame(rafId); rafId=null; canvasEl.style.display='none'; }
+    function stopPreviewLoop(){ 
+      if(rafId) cancelAnimationFrame(rafId); 
+      rafId=null; 
+      canvasEl.style.display='none'; 
+    }
 
     // capture mirrored photo from video (high-res)
     function capturePhotoFromVideo(){
       const vw = videoEl.videoWidth || 1080;
       const vh = videoEl.videoHeight || 1920;
-      const cap = document.createElement('canvas'); cap.width = vw; cap.height = vh;
+      const cap = document.createElement('canvas'); 
+      cap.width = vw; 
+      cap.height = vh;
       const cctx = cap.getContext('2d');
       cctx.save();
-      cctx.translate(cap.width,0); cctx.scale(-1,1);
-      try { cctx.drawImage(videoEl, 0,0,cap.width,cap.height); } catch(e){
-        try { cctx.drawImage(canvasEl, 0,0,cap.width,cap.height); } catch(e){}
+      cctx.translate(cap.width,0); 
+      cctx.scale(-1,1);
+      try { 
+        cctx.drawImage(videoEl, 0,0,cap.width,cap.height); 
+      } catch(e){
+        try { 
+          cctx.drawImage(canvasEl, 0,0,cap.width,cap.height); 
+        } catch(e){}
       }
       cctx.restore();
       return cap.toDataURL('image/jpeg', 0.95);
@@ -374,10 +490,23 @@
 
     // ---- 3-photo flow (preserve original) ----
     async function captureSinglePhoto(){
-      progressEl.textContent = `${currentPhotoIndex+1}/3`; progressEl.classList.remove('hidden');
+      progressEl.textContent = `${currentPhotoIndex+1}/3`; 
+      progressEl.classList.remove('hidden');
+      
       for(let t=5;t>0;t--){
-        if(t<=2){ countdownEl.textContent='SORRIA!'; countdownEl.style.color='#ffd600'; if(t===2){ try{ clack.currentTime=0; clack.play().catch(()=>{}); }catch(e){} } }
-        else{ countdownEl.textContent=String(t); countdownEl.style.color='#fff'; }
+        if(t<=2){ 
+          countdownEl.textContent='SORRIA!'; 
+          countdownEl.style.color='#ffd600'; 
+          if(t===2){ 
+            try{ 
+              clack.currentTime=0; 
+              clack.play().catch(()=>{}); 
+            }catch(e){} 
+          } 
+        } else { 
+          countdownEl.textContent=String(t); 
+          countdownEl.style.color='#fff'; 
+        }
         await sleep(1000);
       }
       countdownEl.textContent='';
@@ -425,33 +554,56 @@
 
     // ---- BOOMERANG flow ----
     async function recordShortClip(msDuration=2000){
-      if(!videoEl || (videoEl.readyState < 2)) { await new Promise(res=>setTimeout(res,200)); }
+      if(!videoEl || (videoEl.readyState < 2)) { 
+        await new Promise(res=>setTimeout(res,200)); 
+      }
       const vw = videoEl.videoWidth || 720;
       const vh = videoEl.videoHeight || 1280;
       const outW = Math.min(720, vw);
       const outH = Math.round(outW * (vh / vw));
-      const off = document.createElement('canvas'); off.width = outW; off.height = outH;
+      const off = document.createElement('canvas'); 
+      off.width = outW; 
+      off.height = outH;
       const offCtx = off.getContext('2d');
       const captureStream = off.captureStream(30);
       const chunks = [];
       let recorder;
-      try { recorder = new MediaRecorder(captureStream, { mimeType:'video/webm;codecs=vp8' }); }
-      catch(e){ recorder = new MediaRecorder(captureStream); }
-      recorder.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+      
+      try { 
+        recorder = new MediaRecorder(captureStream, { mimeType:'video/webm;codecs=vp8' }); 
+      } catch(e){ 
+        recorder = new MediaRecorder(captureStream); 
+      }
+      
+      recorder.ondataavailable = e => { 
+        if(e.data && e.data.size) chunks.push(e.data); 
+      };
       recorder.start();
+      
       const start = performance.now();
       await new Promise((resolve) => {
         function frame(){
           offCtx.save();
           offCtx.clearRect(0,0,outW,outH);
-          offCtx.translate(outW,0); offCtx.scale(-1,1);
-          try { offCtx.drawImage(videoEl, 0,0,vw,vh, 0,0,outW,outH); } catch(e){}
+          offCtx.translate(outW,0); 
+          offCtx.scale(-1,1);
+          try { 
+            offCtx.drawImage(videoEl, 0,0,vw,vh, 0,0,outW,outH); 
+          } catch(e){}
           offCtx.restore();
-          if(performance.now() - start < msDuration) requestAnimationFrame(frame);
-          else setTimeout(()=>{ recorder.stop(); resolve(); }, 60);
+          
+          if(performance.now() - start < msDuration) {
+            requestAnimationFrame(frame);
+          } else {
+            setTimeout(()=>{ 
+              recorder.stop(); 
+              resolve(); 
+            }, 60);
+          }
         }
         frame();
       });
+      
       await new Promise(r=>{ recorder.onstop = r; });
       if(chunks.length===0) return null;
       return new Blob(chunks, { type:'video/webm' });
@@ -459,49 +611,105 @@
 
     async function generateBoomerang(shortBlob, loopMs=15000, targetW=1080){
       try{
-        const v = document.createElement('video'); v.muted=true; v.playsInline=true; v.src = URL.createObjectURL(shortBlob);
-        await new Promise((res, rej)=>{ v.onloadedmetadata = res; v.onerror = rej; });
+        const v = document.createElement('video'); 
+        v.muted=true; 
+        v.playsInline=true; 
+        v.src = URL.createObjectURL(shortBlob);
+        
+        await new Promise((res, rej)=>{ 
+          v.onloadedmetadata = res; 
+          v.onerror = rej; 
+        });
+        
         const aspect = v.videoHeight / v.videoWidth || 16/9;
         const targetH = Math.round(targetW * aspect);
-        const canvas = document.createElement('canvas'); canvas.width = targetW; canvas.height = targetH;
+        const canvas = document.createElement('canvas'); 
+        canvas.width = targetW; 
+        canvas.height = targetH;
         const ctx = canvas.getContext('2d');
-        const template = new Image(); template.crossOrigin='anonymous'; template.src='bomerang.png';
-        await new Promise(res=>{ template.onload = res; template.onerror = res; });
+        
+        const template = new Image(); 
+        template.crossOrigin='anonymous'; 
+        template.src='bomerang.png';
+        await new Promise(res=>{ 
+          template.onload = res; 
+          template.onerror = res; 
+        });
+        
         const recStream = canvas.captureStream(30);
         const chunks = [];
         let rec;
-        try { rec = new MediaRecorder(recStream, { mimeType:'video/webm;codecs=vp8' }); } catch(e){ rec = new MediaRecorder(recStream); }
-        rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
-        rec.start();
-        const start = performance.now();
-        function drawFrame(){
-          if(template && template.complete && template.naturalWidth) ctx.drawImage(template, 0,0, template.width, template.height, 0,0, canvas.width, canvas.height);
-          else { ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height); }
-          try { ctx.drawImage(v, 0,0, v.videoWidth, v.videoHeight, 0,0, canvas.width, canvas.height); } catch(e){}
+        
+        try { 
+          rec = new MediaRecorder(recStream, { mimeType:'video/webm;codecs=vp8' }); 
+        } catch(e){ 
+          rec = new MediaRecorder(recStream); 
         }
+        
+        rec.ondataavailable = e => { 
+          if(e.data && e.data.size) chunks.push(e.data); 
+        };
+        rec.start();
+        
+        const start = performance.now();
+        
+        function drawFrame(){
+          if(template && template.complete && template.naturalWidth) {
+            ctx.drawImage(template, 0,0, template.width, template.height, 0,0, canvas.width, canvas.height);
+          } else { 
+            ctx.fillStyle='#000'; 
+            ctx.fillRect(0,0,canvas.width,canvas.height); 
+          }
+          try { 
+            ctx.drawImage(v, 0,0, v.videoWidth, v.videoHeight, 0,0, canvas.width, canvas.height); 
+          } catch(e){}
+        }
+        
         async function playForward(){
           return new Promise(res=>{
-            v.currentTime = 0; v.play().catch(()=>{});
-            const onTick = () => { drawFrame(); if(v.ended || v.currentTime >= v.duration - 0.001){ v.pause(); v.removeEventListener('timeupdate', onTick); res(); } };
+            v.currentTime = 0; 
+            v.play().catch(()=>{});
+            const onTick = () => { 
+              drawFrame(); 
+              if(v.ended || v.currentTime >= v.duration - 0.001){ 
+                v.pause(); 
+                v.removeEventListener('timeupdate', onTick); 
+                res(); 
+              } 
+            };
             v.addEventListener('timeupdate', onTick);
             drawFrame();
           });
         }
+        
         async function playReverse(){
           return new Promise(res=>{
-            v.pause(); v.currentTime = v.duration;
-            function step(){ const stepMs = 1000/30; v.currentTime = Math.max(0, v.currentTime - (stepMs/1000)); drawFrame(); if(v.currentTime > 0.02) requestAnimationFrame(step); else res(); }
+            v.pause(); 
+            v.currentTime = v.duration;
+            function step(){ 
+              const stepMs = 1000/30; 
+              v.currentTime = Math.max(0, v.currentTime - (stepMs/1000)); 
+              drawFrame(); 
+              if(v.currentTime > 0.02) {
+                requestAnimationFrame(step); 
+              } else {
+                res(); 
+              }
+            }
             step();
           });
         }
+        
         while(performance.now() - start < loopMs){
           await playForward();
           if(performance.now() - start >= loopMs) break;
           await playReverse();
         }
+        
         await sleep(120);
         await new Promise(r=>{ rec.onstop = r; rec.stop(); });
         return new Blob(chunks, { type:'video/webm' });
+        
       }catch(e){
         log('generateBoomerang error: ' + e);
         return null;
@@ -516,8 +724,26 @@
           r.onerror = reject;
           r.readAsDataURL(blob);
         } else {
-          const v = document.createElement('video'); v.muted=true; v.playsInline=true; v.src = URL.createObjectURL(blob);
-          v.onloadeddata = async ()=>{ try{ v.currentTime = 0.05; }catch(e){} await sleep(60); const c = document.createElement('canvas'); c.width = v.videoWidth || 640; c.height = v.videoHeight || 480; const ctx = c.getContext('2d'); try{ ctx.drawImage(v,0,0,c.width,c.height); resolve(c.toDataURL('image/jpeg',0.85)); }catch(e){ reject(e); } };
+          const v = document.createElement('video'); 
+          v.muted=true; 
+          v.playsInline=true; 
+          v.src = URL.createObjectURL(blob);
+          v.onloadeddata = async ()=>{ 
+            try{ 
+              v.currentTime = 0.05; 
+            }catch(e){} 
+            await sleep(60); 
+            const c = document.createElement('canvas'); 
+            c.width = v.videoWidth || 640; 
+            c.height = v.videoHeight || 480; 
+            const ctx = c.getContext('2d'); 
+            try{ 
+              ctx.drawImage(v,0,0,c.width,c.height); 
+              resolve(c.toDataURL('image/jpeg',0.85)); 
+            }catch(e){ 
+              reject(e); 
+            } 
+          };
           v.onerror = (e)=> reject(e);
         }
       });
@@ -526,7 +752,10 @@
     async function startBoomerangFlow(){
       try {
         if(!stream) await startCamera();
-      } catch(e){ return; }
+      } catch(e){ 
+        startBoomBtn.disabled = false;
+        return; 
+      }
       
       // Mostra a tela de gravação com a câmera visível
       showScreen(recordingScreen);
@@ -538,18 +767,30 @@
       }
       recordingMsg.textContent = '🎥 Movimente-se...';
       
-      progressEl.textContent = 'Gravando...'; progressEl.classList.remove('hidden');
+      progressEl.textContent = 'Gravando...'; 
+      progressEl.classList.remove('hidden');
       const shortBlob = await recordShortClip(BOOM_SHORT_MS);
       progressEl.classList.add('hidden');
       
-      if(!shortBlob){ log('shortBlob nulo'); showScreen(welcomeScreen); return; }
+      if(!shortBlob){ 
+        log('shortBlob nulo'); 
+        showScreen(welcomeScreen); 
+        startBoomBtn.disabled = false;
+        return; 
+      }
 
       // Processar o boomerang imediatamente para mostrar o preview com loop
-      progressEl.textContent = 'Processando boomerang...'; progressEl.classList.remove('hidden');
+      progressEl.textContent = 'Processando boomerang...'; 
+      progressEl.classList.remove('hidden');
       const finalBlob = await generateBoomerang(shortBlob, BOOM_FINAL_MS, BOOM_TARGET_W);
       progressEl.classList.add('hidden');
       
-      if(!finalBlob){ log('finalBlob nulo'); showScreen(welcomeScreen); return; }
+      if(!finalBlob){ 
+        log('finalBlob nulo'); 
+        showScreen(welcomeScreen); 
+        startBoomBtn.disabled = false;
+        return; 
+      }
 
       const finalUrl = URL.createObjectURL(finalBlob);
       boomPreviewVideo.src = finalUrl;
@@ -561,7 +802,9 @@
         boomPreviewVideo.pause();
         boomPreviewVideo.src = '';
         showScreen(null);
-        try { await startCamera(); } catch(e){}
+        try { 
+          await startCamera(); 
+        } catch(e){}
         startBoomBtn.disabled = false;
       };
       
@@ -575,7 +818,9 @@
           if(thumb){ 
             socket.emit('photo_ready', { session, index: 0, viewerId: socket.id, photo: thumb });
           }
-        } catch(e){ log('thumb emit error: '+e); }
+        } catch(e){ 
+          log('thumb emit error: '+e); 
+        }
         
         try {
           const ab = await finalBlob.arrayBuffer();
@@ -587,12 +832,17 @@
           }, finalBlob);
           
           const thumb2 = await blobToDataURL(finalBlob, true).catch(()=>null);
-          if(thumb2) socket.emit('photos_submit', { session, viewerId: socket.id, photos: [thumb2] });
+          if(thumb2) {
+            socket.emit('photos_submit', { session, viewerId: socket.id, photos: [thumb2] });
+          }
           
           log('boomerang flow finished');
           stopCamera();
           showScreen(thankScreen);
-          try{ fim.currentTime=0; fim.play().catch(()=>{}); } catch(e){}
+          try{ 
+            fim.currentTime=0; 
+            fim.play().catch(()=>{}); 
+          } catch(e){}
         } catch(e){
           log('erro ao enviar boomerang: ' + e);
           showScreen(welcomeScreen);
@@ -617,17 +867,31 @@
         try {
           socket.timeout(timeoutMs).emit(event, data, (err, resp) => {
             done = true;
-            if(err){ log(event + ' ack error: ' + JSON.stringify(err)); fallback(); }
-            else { log(event + ' ack resp: ' + JSON.stringify(resp||'ok')); resolve(resp); return; }
+            if(err){ 
+              log(event + ' ack error: ' + JSON.stringify(err)); 
+              fallback(); 
+            } else { 
+              log(event + ' ack resp: ' + JSON.stringify(resp||'ok')); 
+              resolve(resp); 
+              return; 
+            }
           });
         } catch (e) {
           log('emit try-catch: ' + e);
-          try { socket.emit(event, data); } catch(e){}
-          setTimeout(()=>{ if(!done) fallback(); }, timeoutMs);
+          try { 
+            socket.emit(event, data); 
+          } catch(e){}
+          setTimeout(()=>{ 
+            if(!done) fallback(); 
+          }, timeoutMs);
         }
+        
         async function fallback(){
           if(done) return;
-          if(!fallbackBlob) { reject(new Error('No fallback blob')); return; }
+          if(!fallbackBlob) { 
+            reject(new Error('No fallback blob')); 
+            return; 
+          }
           try {
             const form = new FormData();
             form.append('session', session);
@@ -671,9 +935,20 @@
     });
 
     // Socket handlers
-    socket.on('connect', ()=>{ if(session) socket.emit('cell_connected', { session }); log('socket connected'); });
-    socket.on('disconnect', ()=>{ log('socket disconnected'); });
-    socket.on('reset_session', ()=>{ stopCamera(); photos=[]; currentPhotoIndex=0; currentPhotoData=null; showScreen(welcomeScreen); });
+    socket.on('connect', ()=>{ 
+      if(session) socket.emit('cell_connected', { session }); 
+      log('socket connected'); 
+    });
+    socket.on('disconnect', ()=>{ 
+      log('socket disconnected'); 
+    });
+    socket.on('reset_session', ()=>{ 
+      stopCamera(); 
+      photos=[]; 
+      currentPhotoIndex=0; 
+      currentPhotoData=null; 
+      showScreen(welcomeScreen); 
+    });
 
     // Event listeners para detectar mudanças de fullscreen
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -687,27 +962,47 @@
     // Verificar se já está em fullscreen ao carregar
     setTimeout(checkFullscreenOnLoad, 1000);
 
-    // Robust fullscreen attempt
+    // CORREÇÃO: Event listener mais robusto para o botão de fullscreen
     enterFsBtn.addEventListener('click', async (e)=>{
       e.preventDefault();
-      try { await attemptFullscreen(); } catch(err){ log('attemptFullscreen throw: '+err); }
+      try { 
+        await attemptFullscreen(); 
+      } catch(err){ 
+        log('attemptFullscreen throw: '+err); 
+      }
     });
 
     startBtn.addEventListener('click', async ()=>{
-      startBtn.disabled = true; startBtn.textContent = '🎵 Preparando...';
-      await inicio.play().catch(()=>{});
-      startBtn.disabled = false; startBtn.textContent = '🎬 Iniciar Sessão de Fotos';
+      startBtn.disabled = true; 
+      startBtn.textContent = '🎵 Preparando...';
+      try {
+        await inicio.play().catch(()=>{});
+      } catch(e) {}
+      startBtn.disabled = false; 
+      startBtn.textContent = '🎬 Iniciar Sessão de Fotos';
       showScreen(null);
-      try { await startCamera(); } catch(e){ return; }
-      currentPhotoIndex = 0; photos = [];
+      try { 
+        await startCamera(); 
+      } catch(e){ 
+        return; 
+      }
+      currentPhotoIndex = 0; 
+      photos = [];
       await runCaptureSequence();
     });
 
     startBoomBtn.addEventListener('click', async ()=>{
       startBoomBtn.disabled = true;
-      try{ await inicio.play().catch(()=>{}); }catch(e){}
+      try{ 
+        await inicio.play().catch(()=>{}); 
+      }catch(e){}
       showScreen(null);
-      try { await startCamera(); } catch(e){ startBoomBtn.disabled=false; return; }
+      try { 
+        await startCamera(); 
+      } catch(e){ 
+        startBoomBtn.disabled=false; 
+        return; 
+      }
       await startBoomerangFlow();
     });
 
