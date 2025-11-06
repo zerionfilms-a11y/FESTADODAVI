@@ -10,20 +10,22 @@
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
     .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
     #enterFsBtn{padding:18px 25px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:20px;margin:15px;width:90%;max-width:300px}
-    #welcome{background:rgba(255,255,255,0.15);padding:25px;text-align:center;border-radius:15px;width:95%;max-width:400px;backdrop-filter:blur(15px);border:2px solid rgba(255,255,255,0.3)}
+    /* welcome screen will show event-specific background image (iniciar.png) */
+    #welcomeScreen{background:#001e3c; background-size:cover; background-position:center; background-repeat:no-repeat;}
+    #welcomeBox{background:rgba(0,0,0,0.28);padding:20px;border-radius:15px;backdrop-filter:blur(6px);width:95%;max-width:420px;text-align:center}
     #welcome h1{font-size:26px;margin-bottom:15px;text-shadow:2px 2px 4px rgba(0,0,0,0.5)}
     #welcome p{font-size:18px;margin-bottom:15px}
     #startBtn{padding:18px 25px;border-radius:12px;border:none;background:#fff;color:#0b84ff;font-weight:700;cursor:pointer;font-size:20px;margin-top:5px;box-shadow:0 4px 15px rgba(0,0,0,0.3);width:100%;max-width:300px;transition:all 0.3s ease}
     .logo{max-width:180px;margin-bottom:20px;border-radius:10px}
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none; transform: scaleX(-1);}
+    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none; transform: scaleX(-1);z-index:5}
     #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:10}
     #progress{position:fixed;top:20px;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:150;color:#fff;text-shadow:0 0 10px #000;background:rgba(0,0,0,0.5);padding:10px;backdrop-filter:blur(5px)}
-    #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000, 0 0 30px #000;z-index:100;color:#fff}
+    #countdown{position:fixed;top:30%;left:0;right:0;text-align:center;font-size:120px;font-weight:800;text-shadow:0 0 20px #000, 0 0 30px #000;z-index:100;color:#fff;pointer-events:none}
     #msg{position:fixed;top:50%;left:0;right:0;text-align:center;font-size:28px;font-weight:700;z-index:100;color:#fff;text-shadow:0 0 10px #000}
     #previewScreen{background:rgba(0,0,0,0.9);z-index:20;padding:0}
     #previewContainer{position:relative;width:100%;height:100%;display:flex;flex-direction:column}
     #previewImage{width:100%;height:100%;object-fit:contain;display:block}
-    .preview-buttons{position:absolute;bottom:30px;left:0;right:0;display:flex;gap:15px;justify-content:center;padding:0 20px}
+    .preview-buttons{position:absolute;bottom:30px;left:0;right:0;display:flex;gap:15px;justify-content:center;padding:0 20px;z-index:30}
     .preview-btn{padding:12px 18px;border-radius:8px;border:none;font-weight:700;cursor:pointer;font-size:16px;flex:1;max-width:140px;background:rgba(0,0,0,0.7);color:white;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.3)}
     #refazerBtn{background:rgba(220,53,69,0.8)}
     #continuarBtn{background:rgba(40,167,69,0.8)}
@@ -33,11 +35,11 @@
     .hidden { display: none !important; }
     .visible { display: flex !important; }
     #debugInfo {position:fixed;bottom:10px;left:10px;font-size:10px;color:#888;background:rgba(0,0,0,0.7);padding:4px;border-radius:4px;z-index:1000}
-    @keyframes superPulse {0%{transform:scale(1);background:#fff;color:#0b84ff;box-shadow:0 0 0 0 rgba(255,255,255,0.7);}25%{transform:scale(1.08);background:#0b84ff;color:#fff;box-shadow:0 0 0 10px rgba(11,132,255,0.3);}50%{transform:scale(1.05);background:#ff4081;color:#fff;box-shadow:0 0 0 15px rgba(255,64,129,0.2);}75%{transform:scale(1.08);background:#0b84ff;color:#fff;box-shadow:0 0 0 10px rgba(11,132,255,0.3);}100%{transform:scale(1);background:#fff;color:#0b84ff;box-shadow:0 0 0 0 rgba(255,255,255,0);}}
-    .super-pulse-animation{animation:superPulse 2.5s infinite;}
+    @media (max-width:480px){ #countdown { font-size:72px } }
   </style>
 </head>
 <body>
+  <!-- initial "enter fullscreen" splash (keeps original gradient for safety) -->
   <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
     <div style="text-align:center;background:rgba(0,0,0,0.3);padding:20px;border-radius:15px;backdrop-filter:blur(10px);width:95%;max-width:400px">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
@@ -47,11 +49,10 @@
     </div>
   </div>
 
-  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
-    <div id="welcome">
-      <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1>📸 Bem-vindo à Cabine Fotográfica</h1>
-      <p>Clique abaixo para iniciar</p>
+  <!-- welcome screen: THIS will display event-specific background image 'iniciar.png' -->
+  <div id="welcomeScreen" class="screen hidden">
+    <div id="welcomeBox">
+      <!-- You said you will embed text in the background image; keep only the button -->
       <button id="startBtn">🎬 Iniciar Sessão de Fotos</button>
     </div>
   </div>
@@ -87,18 +88,20 @@
   <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
   <script>
-    const SERVER_URL = "festadodavi-production-0591.up.railway.app";
-    const socket = io(SERVER_URL, { transports:["websocket"], reconnection:true, reconnectionAttempts:5, reconnectionDelay:1000, timeout:20000, forceNew:true, withCredentials:true });
+    // --- CONFIG: backend URL (use full https URL) ---
+    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
+    const socket = io(SERVER_URL, { transports:["websocket","polling"], reconnection:true, reconnectionAttempts:6, reconnectionDelay:1000, timeout:20000, forceNew:true, withCredentials:true });
 
     const params = new URLSearchParams(location.search);
     const session = params.get('session');
 
     const debugEl = document.getElementById('debugInfo');
-    setInterval(()=>{debugEl.textContent=`Sessão: ${session||'none'} | Socket: ${socket.connected?'🟢':'🔴'}`},1000);
+    setInterval(()=>{ debugEl.textContent=`Sessão: ${session||'none'} | Socket: ${socket.connected?'🟢':'🔴'}` },1000);
 
     const enterFs = document.getElementById('enterFs');
     const enterFsBtn = document.getElementById('enterFsBtn');
     const welcomeScreen = document.getElementById('welcomeScreen');
+    const welcomeBox = document.getElementById('welcomeBox');
     const startBtn = document.getElementById('startBtn');
     const videoEl = document.getElementById('videoEl');
     const canvasEl = document.getElementById('canvasEl');
@@ -117,75 +120,162 @@
 
     function showScreen(screenElement){
       [enterFs,welcomeScreen,previewScreen,thankScreen].forEach(s=>{
-        if(s && !s.classList.contains('hidden')){s.classList.add('hidden');s.classList.remove('visible');s.style.display='none';}
+        if(s){ s.classList.add('hidden'); s.classList.remove('visible'); s.style.display='none'; }
       });
       videoEl.style.display='none'; canvasEl.style.display='none'; countdownEl.textContent=''; progressEl.classList.add('hidden');
-      if(screenElement){screenElement.classList.remove('hidden'); screenElement.classList.add('visible'); screenElement.style.display='flex';}
+      if(screenElement){
+        screenElement.classList.remove('hidden');
+        screenElement.classList.add('visible');
+        screenElement.style.display='flex';
+      }
     }
 
     function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 
+    // start front camera (user-facing). Use facingMode:"user" (more compatible than exact)
     async function startCamera(){
       try{
-        stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{exact:"user"}},audio:false});
-        videoEl.srcObject=stream; videoEl.style.display='block'; videoEl.style.transform='scaleX(-1)';
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        videoEl.srcObject = stream;
+        videoEl.style.display = 'block';
+        videoEl.style.transform = 'scaleX(-1)';
         await videoEl.play();
-      }catch(e){alert('Não foi possível acessar a câmera. Verifique as permissões.'); showScreen(welcomeScreen);}
+      }catch(e){
+        alert('Não foi possível acessar a câmera. Verifique as permissões.');
+        showScreen(welcomeScreen);
+      }
     }
 
+    // capture single photo with countdown
     async function captureSinglePhoto(){
-      progressEl.textContent=`${currentPhotoIndex+1}/3`; progressEl.classList.remove('hidden'); videoEl.style.display='block';
-      for(let t=5;t>0;t--){ 
-        if(t<=2){ countdownEl.textContent='SORRIA!'; countdownEl.style.color='#ffd600'; if(t===2){clack.currentTime=0; clack.play().catch(()=>{});} } 
-        else{ countdownEl.textContent=String(t); countdownEl.style.color='#fff'; } 
+      progressEl.textContent = `${currentPhotoIndex+1}/3`; progressEl.classList.remove('hidden'); videoEl.style.display='block';
+      for(let t=5;t>0;t--){
+        if(t<=2){
+          countdownEl.textContent='SORRIA!';
+          countdownEl.style.color='#ffd600';
+          if(t===2){ clack.currentTime = 0; clack.play().catch(()=>{}); }
+        } else {
+          countdownEl.textContent = String(t);
+          countdownEl.style.color = '#fff';
+        }
         await sleep(1000);
       }
-      canvasEl.width=videoEl.videoWidth; canvasEl.height=videoEl.videoHeight;
-      const ctx=canvasEl.getContext('2d'); ctx.translate(canvasEl.width,0); ctx.scale(-1,1); ctx.drawImage(videoEl,0,0,canvasEl.width,canvasEl.height);
-      return canvasEl.toDataURL('image/jpeg',1.0);
+      countdownEl.textContent = '';
+      // draw current frame (un-mirrored) to canvas
+      canvasEl.width = videoEl.videoWidth || Math.round(window.innerWidth * devicePixelRatio);
+      canvasEl.height = videoEl.videoHeight || Math.round(window.innerHeight * devicePixelRatio);
+      const ctx = canvasEl.getContext('2d');
+      // draw mirrored correctly so final image faces user expectation
+      ctx.save();
+      ctx.translate(canvasEl.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
+      ctx.restore();
+      const dataUrl = canvasEl.toDataURL('image/jpeg', 0.95);
+      return dataUrl;
     }
 
-    function showPhotoPreview(photoData){ previewImage.src=photoData; showScreen(previewScreen); }
+    function showPhotoPreview(photoData){ previewImage.src = photoData; showScreen(previewScreen); }
 
+    // main flow for 3 photos
     async function runCaptureSequence(){
-      if(currentPhotoIndex>=3){stopCamera(); progressEl.classList.add('hidden'); showScreen(thankScreen); sendPhotosToServer(); return;}
-      currentPhotoData=await captureSinglePhoto();
+      if(currentPhotoIndex >= 3){
+        stopCamera();
+        progressEl.classList.add('hidden');
+        showScreen(thankScreen);
+        sendPhotosToServer();
+        return;
+      }
+      currentPhotoData = await captureSinglePhoto();
       showPhotoPreview(currentPhotoData);
     }
 
-    function stopCamera(){ if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} videoEl.style.display='none'; canvasEl.style.display='none'; }
+    function stopCamera(){
+      if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+      videoEl.style.display='none';
+      canvasEl.style.display='none';
+    }
 
-    refazerBtn.addEventListener('click',async()=>{ showScreen(null); videoEl.style.display='block'; await runCaptureSequence(); });
-    continuarBtn.addEventListener('click',async()=>{ photos.push(currentPhotoData); currentPhotoIndex++; showScreen(null); videoEl.style.display='block'; await runCaptureSequence(); });
+    // preview buttons
+    refazerBtn.addEventListener('click', async () => {
+      // keep index same and re-run capture
+      showScreen(null);
+      videoEl.style.display = 'block';
+      await startCamera(); // ensure camera restarted if was stopped
+      await runCaptureSequence();
+    });
+
+    continuarBtn.addEventListener('click', async () => {
+      // save photo, increment and continue
+      photos.push(currentPhotoData);
+      currentPhotoIndex++;
+      showScreen(null);
+      videoEl.style.display='block';
+      // small delay to ensure UI updates
+      await sleep(180);
+      await runCaptureSequence();
+    });
 
     function sendPhotosToServer(){
       if(session && photos.length>0){
-        const sendPhotosWithRetry=(attempt=1,maxAttempts=5)=>{
-          if(socket.connected){ socket.emit('photos_from_cell',{photos,attempt,totalAttempts:maxAttempts}); 
-            if(attempt<maxAttempts){ setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),1500);}
-          }else if(attempt<maxAttempts){ socket.connect(); setTimeout(()=>sendPhotosWithRetry(attempt+1,maxAttempts),2000);}
+        // Use retry in case socket is not ready. Server expects 'photos_from_cell'
+        const sendPhotosWithRetry = (attempt=1, maxAttempts=6) => {
+          if(socket.connected){
+            socket.emit('photos_from_cell', { session, photos });
+          } else if(attempt < maxAttempts){
+            socket.connect();
+            setTimeout(()=> sendPhotosWithRetry(attempt+1, maxAttempts), 1200);
+          }
         };
         sendPhotosWithRetry();
       }
     }
 
-    socket.on('connect',()=>{ if(session) socket.emit('cell_connected'); });
-    socket.on('disconnect',()=>{});
-    socket.on('reset_session',()=>{ stopCamera(); currentPhotoIndex=0; photos=[]; currentPhotoData=null; showScreen(welcomeScreen); });
+    // socket events
+    socket.on('connect', ()=>{ if(session) socket.emit('cell_connected', { session }); });
+    socket.on('disconnect', ()=>{});
+    socket.on('reset_session', ()=>{ stopCamera(); currentPhotoIndex=0; photos=[]; currentPhotoData=null; showScreen(welcomeScreen); });
 
+    // show initial enter fullscreen splash
     showScreen(enterFs);
 
-    enterFsBtn.addEventListener('click',async()=>{
+    // When entering fullscreen, show welcome screen — and set background image (iniciar.png)
+    enterFsBtn.addEventListener('click', async () => {
       try{ await document.documentElement.requestFullscreen(); }catch(e){}
+      // set welcomeScreen background image dynamically so you can change file per event
+      // Put your event background in the public folder named 'iniciar.png'
+      welcomeScreen.style.backgroundImage = "url('iniciar.png')";
+      welcomeScreen.style.backgroundSize = "cover";
+      welcomeScreen.style.backgroundPosition = "center";
+      welcomeScreen.style.backgroundRepeat = "no-repeat";
+      // show welcome screen (which contains only the start button over the background)
       showScreen(welcomeScreen);
-      if(session) socket.emit('cell_entered_fullscreen');
+      if(session) socket.emit('cell_entered_fullscreen', { session });
     });
 
-    startBtn.addEventListener('click',async()=>{
-      startBtn.disabled=true; startBtn.textContent='🎵 Preparando...';
+    // start session flow: start camera and run capture sequence
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled=true;
+      startBtn.textContent='🎵 Preparando...';
       await inicio.play().catch(()=>{});
-      startBtn.disabled=false; startBtn.textContent='🎬 Iniciar Sessão de Fotos';
-      showScreen(null); await startCamera(); currentPhotoIndex=0; photos=[]; await runCaptureSequence();
+      startBtn.disabled=false;
+      startBtn.textContent='🎬 Iniciar Sessão de Fotos';
+      showScreen(null); // hide welcome and go to camera view
+      await startCamera();
+      currentPhotoIndex = 0;
+      photos = [];
+      await runCaptureSequence();
+    });
+
+    // safety: if user exits fullscreen mid-flow reset to welcome
+    document.addEventListener('fullscreenchange', () => {
+      if(!document.fullscreenElement){
+        // user left fullscreen: stop camera and return to enter splash
+        stopCamera();
+        currentPhotoIndex = 0;
+        photos = [];
+        showScreen(enterFs);
+      }
     });
   </script>
 </body>
