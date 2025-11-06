@@ -38,7 +38,6 @@
     #debugInfo{position:fixed;bottom:8px;left:8px;font-size:11px;color:#ddd;background:rgba(0,0,0,0.45);padding:6px;border-radius:6px;z-index:600;max-width:48%}
     /* ensure enter screen area is on top and clickable */
     #enterFs { z-index: 700; touch-action: manipulation; pointer-events: auto; }
-    /* blocker element (if created) should not intercept pointer events */
     .maybe-blocker { pointer-events: none !important; }
     @media (max-width:480px){ #countdown { font-size:72px } }
   </style>
@@ -54,7 +53,7 @@
     </div>
   </div>
 
-  <!-- Welcome (após fullscreen) -->
+  <!-- Welcome (após fullscreen) - kept for fallback -->
   <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#fff,#f7f7f7);z-index:700">
     <div id="welcome">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
@@ -64,7 +63,7 @@
     </div>
   </div>
 
-  <!-- Buttons mode screen (after start) -->
+  <!-- Buttons mode screen (after start or after fullscreen) -->
   <div id="modeScreen" class="screen hidden" style="background:linear-gradient(135deg,#000,#222);z-index:700">
     <div style="text-align:center">
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
@@ -110,10 +109,13 @@
 
 <script>
 /*
-  celular.html - corrigido botão "Entrar em Tela Cheia"
-  Ajuste a variável SERVER_URL para o seu backend se precisar.
+  celular.html - atualizado:
+   - SERVER_URL ajustado para https://festadodavi.onrender.com
+   - ao entrar em fullscreen, vai direto para a tela de escolha (modeScreen)
+   - enter button usa click + touch handlers para garantir funcionamento mobile
+   - continua desenhando o vídeo em canvas para evitar frames congelados
 */
-const SERVER_URL = "https://festadodavi-production-0591.up.railway.app"; // troque se precisar
+const SERVER_URL = "https://festadodavi.onrender.com";
 const socket = io(SERVER_URL, { transports:['websocket','polling'], reconnection:true, path:'/socket.io' });
 
 const enterFs = document.getElementById('enterFs');
@@ -136,16 +138,17 @@ const thankScreen = document.getElementById('thankScreen');
 const debugEl = document.getElementById('debugInfo');
 
 let stream = null;
-let mode = 'three'; // 'three' or 'boom'
+let mode = 'three';
 let photos = [];
-let currentCapture = null; // dataURL or blob
+let currentCapture = null;
+let drawFrameRaf = null;
 
 function debug(msg){
   console.log(msg);
   debugEl.textContent = (new Date().toLocaleTimeString()) + ' — ' + msg + '\n' + debugEl.textContent;
 }
 
-/* ============ FULLSCREEN HELPERS ============ */
+/* FULLSCREEN helpers */
 function isFullscreen() {
   return !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
 }
@@ -156,15 +159,8 @@ function requestFullscreen(element){
   if(element.msRequestFullscreen) return element.msRequestFullscreen();
   return Promise.reject(new Error('Fullscreen API não suportada'));
 }
-document.addEventListener('fullscreenchange', () => {
-  debug('fullscreenchange -> ' + isFullscreen());
-  if(isFullscreen()){
-    // show welcome after fullscreen
-    showScreen(welcomeScreen);
-  }
-});
 
-/* ============ UI SHOW/HIDE ============ */
+/* show / hide screens */
 function hideAllMain(){
   enterFs.style.display = 'none';
   welcomeScreen.style.display = 'none';
@@ -182,25 +178,21 @@ function showScreen(el){
   el.style.display = 'flex';
 }
 
-/* Ensure enter button is really clickable on mobile:
-   - add touchend + click listeners
-   - stop propagation and prevent default to avoid ghost clicks
-*/
+/* safe tap listener (click + touch) */
 function safeAddTapListener(el, handler){
   el.addEventListener('click', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); handler(ev); });
   el.addEventListener('touchend', (ev)=>{ ev.preventDefault(); ev.stopPropagation(); handler(ev); }, {passive:false});
   el.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter' || ev.key===' ') { ev.preventDefault(); handler(ev); } });
 }
 
-/* ============ Camera helpers ============ */
+/* Camera */
 async function startFrontCamera(){
   if(stream) return stream;
   try {
-    // prefer facingMode user. Using simple constraint which works on most modern mobile browsers.
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
     videoEl.srcObject = stream;
     videoEl.style.display = 'block';
-    videoEl.style.transform = 'scaleX(-1)'; // mirror for user
+    videoEl.style.transform = 'scaleX(-1)';
     await videoEl.play().catch(()=>{});
     debug('camera started: ' + (videoEl.videoWidth||'unknown') + 'x' + (videoEl.videoHeight||'unknown'));
     return stream;
@@ -220,8 +212,7 @@ function stopCamera(){
   videoEl.style.display = 'none';
 }
 
-/* draw current video frame continuously onto canvas (to avoid frozen frames) */
-let drawFrameRaf = null;
+/* draw video continuously to canvas to avoid frozen frames */
 function startDrawingPreviewToCanvas(){
   canvasEl.style.display = 'block';
   canvasEl.width = window.innerWidth;
@@ -230,16 +221,15 @@ function startDrawingPreviewToCanvas(){
   function loop(){
     try {
       if(videoEl.videoWidth && videoEl.videoHeight){
-        // cover strategy
         const iw = videoEl.videoWidth, ih = videoEl.videoHeight;
         const cw = canvasEl.width, ch = canvasEl.height;
         const scale = Math.max(cw/iw, ch/ih);
         const w = iw*scale, h = ih*scale;
         ctx.clearRect(0,0,cw,ch);
-        // mirror draw
         ctx.save();
         ctx.translate(cw,0); ctx.scale(-1,1);
-        ctx.drawImage(videoEl, (cw - w)/2 * -1, (ch - h)/2, w, h); // draw mirrored
+        // draw mirrored
+        ctx.drawImage(videoEl, (cw - w)/2 * -1, (ch - h)/2, w, h);
         ctx.restore();
       }
     } catch(e){}
@@ -252,7 +242,7 @@ function stopDrawingPreviewToCanvas(){
   canvasEl.style.display = 'none';
 }
 
-/* ============ Capture logic ============ */
+/* countdown and capture */
 function showCountdownFor(seconds){
   countdownEl.style.display = 'block';
   return new Promise(async (resolve)=>{
@@ -271,13 +261,11 @@ function showCountdownFor(seconds){
   });
 }
 async function capturePhotoDataUrl(){
-  // ensure canvas sizes match video source high-res for better quality
   const w = videoEl.videoWidth || window.innerWidth;
   const h = videoEl.videoHeight || window.innerHeight;
   canvasEl.width = w;
   canvasEl.height = h;
   const ctx = canvasEl.getContext('2d');
-  // mirror so final image appears as user expects
   ctx.save(); ctx.translate(w,0); ctx.scale(-1,1);
   ctx.drawImage(videoEl, 0, 0, w, h);
   ctx.restore();
@@ -290,7 +278,7 @@ async function startThreePhotoFlow(){
   try {
     await startFrontCamera();
     startDrawingPreviewToCanvas();
-    showScreen(null); // hide welcome & show live canvas
+    showScreen(null);
     progressEl.style.display = 'block';
     progressEl.textContent = '1/3';
     photos = [];
@@ -299,11 +287,9 @@ async function startThreePhotoFlow(){
       await showCountdownFor(5);
       const dataUrl = await capturePhotoDataUrl();
       currentCapture = dataUrl;
-      // show preview
       previewImage.src = dataUrl;
       previewScreen.style.display = 'flex';
-      stopDrawingPreviewToCanvas(); // freeze preview image (the preview shows captured image)
-      // wait user decision
+      stopDrawingPreviewToCanvas();
       const decision = await new Promise((res)=> {
         function onRef(){ cleanup(); res('refazer'); }
         function onCont(){ cleanup(); res('continuar'); }
@@ -312,17 +298,14 @@ async function startThreePhotoFlow(){
         continuarBtn.addEventListener('click', onCont);
       });
       previewScreen.style.display = 'none';
-      if(decision==='refazer'){ i = i - 1; /* repeat */ startDrawingPreviewToCanvas(); continue; }
+      if(decision==='refazer'){ i = i - 1; startDrawingPreviewToCanvas(); continue; }
       photos.push(currentCapture);
-      // resume preview for next capture
       startDrawingPreviewToCanvas();
     }
-    // finished 3 photos
     progressEl.style.display = 'none';
     stopDrawingPreviewToCanvas();
     stopCamera();
     showScreen(thankScreen);
-    // send photos to server
     emitPhotosSubmit();
   } catch(e){
     debug('erro three flow: ' + e.message);
@@ -334,73 +317,14 @@ async function startThreePhotoFlow(){
   }
 }
 
-/* Boomerang flow: record short 2s clip, then generate forward+reverse loop preview on client,
-   allow Refazer / Continuar, on continue upload/send to server as boomerang_ready (attempt).
-*/
-async function startBoomerangFlow(){
-  try {
-    await startFrontCamera();
-    startDrawingPreviewToCanvas();
-    showScreen(null);
-    progressEl.style.display = 'block'; progressEl.textContent = 'Preparando boomerang...';
-    await showCountdownFor(3);
-    progressEl.textContent = 'Gravando 2s...';
-    // record 2s from canvas (cropped area if needed) -> we will record full frame for simplicity
-    const shortBlob = await recordShortClipFromVideo(2000);
-    if(!shortBlob) throw new Error('Falha ao gravar clipe curto');
-    progressEl.textContent = 'Processando boomerang...';
-    // create boomerang final (client-side rendering forward+reverse into a canvas and record)
-    const finalBlob = await generateBoomerangFromShortBlob(shortBlob, 15000);
-    // produce thumbnail (first frame)
-    const thumbnail = await blobFirstFrameDataUrl(finalBlob).catch(()=>null);
-    // preview boomerang for user (create objectURL and show it in preview screen as <video>)
-    const url = URL.createObjectURL(finalBlob);
-    previewImage.src = url; // use img tag — many mobiles can show video poster via img; we can open a small video instead if needed
-    // show preview with continue/refazer
-    previewScreen.style.display = 'flex';
-    stopDrawingPreviewToCanvas();
-    const decision = await new Promise((res)=> {
-      function onRef(){ cleanup(); res('refazer'); }
-      function onCont(){ cleanup(); res('continuar'); }
-      function cleanup(){ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); }
-      refazerBtn.addEventListener('click', onRef);
-      continuarBtn.addEventListener('click', onCont);
-    });
-    previewScreen.style.display = 'none';
-    if(decision === 'refazer'){
-      // allow redo
-      URL.revokeObjectURL(url);
-      startDrawingPreviewToCanvas();
-      stopCamera();
-      await startBoomerangFlow();
-      return;
-    }
-    // continue -> send to server
-    progressEl.textContent = 'Enviando boomerang...';
-    await sendBoomerangBlobToServer(finalBlob, thumbnail);
-    progressEl.style.display = 'none';
-    stopCamera();
-    showScreen(thankScreen);
-  } catch(e){
-    debug('erro boomerang flow: ' + e.message);
-    progressEl.style.display = 'none';
-    stopDrawingPreviewToCanvas();
-    stopCamera();
-    alert('Erro durante boomerang: ' + (e.message||''));
-    showScreen(welcomeScreen);
-  }
-}
-
-/* Record short clip by drawing to offscreen canvas and MediaRecorder */
+/* Boomerang flow */
 function recordShortClipFromVideo(durationMs = 2000){
   return new Promise(async (resolve, reject) => {
-    // offscreen canvas same size as video for quality
     const vw = videoEl.videoWidth || 1280;
     const vh = videoEl.videoHeight || 720;
     const off = document.createElement('canvas');
     off.width = vw; off.height = vh;
     const ctx = off.getContext('2d');
-    // capture stream
     const streamCap = off.captureStream(25);
     let chunks = [];
     let recorder;
@@ -414,7 +338,6 @@ function recordShortClipFromVideo(durationMs = 2000){
     const start = performance.now();
     function frame(){
       try {
-        // draw mirrored frame to off
         ctx.save(); ctx.translate(off.width,0); ctx.scale(-1,1); ctx.drawImage(videoEl, 0,0,off.width,off.height); ctx.restore();
       } catch(e){}
       if(performance.now() - start < durationMs){
@@ -430,20 +353,15 @@ function recordShortClipFromVideo(durationMs = 2000){
     frame();
   });
 }
-
-/* Create boomerang by playing short clip forward+reverse on a canvas and recording final loop */
 async function generateBoomerangFromShortBlob(shortBlob, totalMs = 15000){
-  // load short clip into video element
   const v = document.createElement('video');
   v.muted = true; v.playsInline = true;
   v.src = URL.createObjectURL(shortBlob);
   await new Promise((res, rej) => { v.onloadedmetadata = () => res(); v.onerror = () => rej(new Error('Erro ao carregar short clip')); });
-  // target canvas
-  const targetW = 720; // reduce size to keep performance acceptable
+  const targetW = 720;
   const targetH = Math.round(targetW * (v.videoHeight / v.videoWidth || 16/9));
   const canvas = document.createElement('canvas'); canvas.width = targetW; canvas.height = targetH;
   const ctx = canvas.getContext('2d');
-  // optional: draw template background here (e.g., template image 'bomerang.png') underneath frames
   const captureStream = canvas.captureStream(25);
   let chunks = [];
   let recorder;
@@ -455,16 +373,11 @@ async function generateBoomerangFromShortBlob(shortBlob, totalMs = 15000){
   recorder.ondataavailable = (ev)=>{ if(ev.data && ev.data.size) chunks.push(ev.data); };
   recorder.start();
   const start = performance.now();
-  // helper to draw a frame from v to canvas (cover)
   function drawFrameFromVideo(video){
     ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-    try {
-      ctx.drawImage(video, 0,0,video.videoWidth,video.videoHeight, 0,0,canvas.width,canvas.height);
-    } catch(e){}
+    try { ctx.drawImage(video, 0,0,video.videoWidth,video.videoHeight, 0,0,canvas.width,canvas.height); } catch(e){}
   }
-  // play forward and reverse repeatedly until totalMs elapsed
-  // For reverse, we'll step time backwards manually
   const playForwardOnce = () => new Promise((res) => {
     v.currentTime = 0;
     v.play().catch(()=>{});
@@ -498,8 +411,6 @@ async function generateBoomerangFromShortBlob(shortBlob, totalMs = 15000){
   URL.revokeObjectURL(v.src);
   return finalBlob;
 }
-
-/* produce first frame dataURL for thumbnail */
 function blobFirstFrameDataUrl(blob){
   return new Promise((res,rej) => {
     const v = document.createElement('video');
@@ -522,12 +433,11 @@ function blobFirstFrameDataUrl(blob){
   });
 }
 
-/* Send photos to server: emits photos_submit (adjust to your server expected event) */
+/* Send photos to server */
 function emitPhotosSubmit(){
   if(!socket || !socket.connected){
     debug('socket não conectado — tentando conectar antes de enviar photos_submit');
     socket.connect();
-    // try later
     setTimeout(()=>emitPhotosSubmit(), 1500);
     return;
   }
@@ -535,7 +445,7 @@ function emitPhotosSubmit(){
   socket.emit('photos_submit', { session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa', viewerId: socket.id, photos });
 }
 
-/* Send boomerang blob to server — prefer socket binary, fallback to POST */
+/* Send boomerang blob to server with socket fallback */
 async function sendBoomerangBlobToServer(blob, thumbDataUrl){
   if(socket && socket.connected){
     try {
@@ -548,7 +458,6 @@ async function sendBoomerangBlobToServer(blob, thumbDataUrl){
       debug('erro emit socket (will fallback): ' + e.message);
     }
   }
-  // fallback POST (server must implement /upload_boomerang)
   try {
     const fd = new FormData();
     fd.append('file', blob, `boomerang_${Date.now()}.webm`);
@@ -564,22 +473,9 @@ async function sendBoomerangBlobToServer(blob, thumbDataUrl){
   }
 }
 
-/* ============ socket handlers ============ */
+/* socket handlers */
 socket.on('connect', ()=> debug('socket conectado: ' + socket.id));
 socket.on('disconnect', ()=> debug('socket desconectado'));
-socket.on('show_qr_on_viewer', ({ visualizadorUrl }) => {
-  debug('show_qr_on_viewer recebido');
-  try {
-    QRCode.toCanvas(document.createElement('canvas'), visualizadorUrl, { width: 200 }, (err, canvas) => {
-      if(err) return debug('erro QR: ' + err);
-      // show small modal-like QR (simple approach: use alert with link — but here we inject into debug area)
-      debug('QR: ' + visualizadorUrl);
-      // Show user a quick overlay with QR canvas
-      const win = window.open('', '_blank');
-      win.document.write('<html><head><title>QR</title></head><body style="display:flex;align-items:center;justify-content:center;height:100vh;background:#111;color:#fff;"><div style="text-align:center"><p>Abra o link abaixo:</p><a href="'+visualizadorUrl+'" target="_blank">'+visualizadorUrl+'</a><p>Ou escaneie o QR</p><img src="'+visualizadorUrl+'" style="display:none"></div></body></html>');
-    });
-  } catch(e){ debug('erro mostrar qr: ' + e.message); }
-});
 socket.on('reset_session', ()=> {
   stopDrawingPreviewToCanvas();
   stopCamera();
@@ -588,25 +484,36 @@ socket.on('reset_session', ()=> {
   showScreen(welcomeScreen);
 });
 
-/* ============ events wiring ============ */
-/* Make sure button is clickable on mobile: add both click and touch listeners */
+/* EVENTS wiring */
+/* When the EnterFS button is tapped: request fullscreen AND immediately open mode selection.
+   Some browsers delay fullscreen; we also listen to fullscreenchange to ensure mode shows
+   (this covers both cases). */
 safeAddTapListener(enterFsBtn, async (ev) => {
   try {
     await requestFullscreen(document.documentElement);
     debug('request fullscreen triggered');
-    // small delay to allow fullscreen to settle on some browsers
-    setTimeout(()=> showScreen(welcomeScreen), 250);
-    // emit to server that mobile entered fullscreen
+    // Immediately go to mode selection so user sees choices; if browser later reports fullscreenchange it's fine.
+    showScreen(modeScreen);
+    // report to server
     socket.emit('cell_entered_fullscreen', { session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa', viewerId: socket.id });
   } catch(e) {
     debug('erro requestFullscreen: ' + e.message);
-    alert('Não foi possível entrar em tela cheia neste navegador. Continue mesmo assim.');
-    showScreen(welcomeScreen);
+    // fallback: still show the mode selection if fullscreen fails
+    showScreen(modeScreen);
+    socket.emit('cell_entered_fullscreen', { session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa', viewerId: socket.id });
+  }
+});
+
+/* additionally listen to fullscreenchange - ensure modeScreen appears once fullscreen is active */
+document.addEventListener('fullscreenchange', () => {
+  debug('fullscreenchange -> ' + isFullscreen());
+  if(isFullscreen()){
+    showScreen(modeScreen);
   }
 });
 
 safeAddTapListener(startBtn, async ()=>{
-  // move to mode selection screen (user chooses boomerang or 3 photos)
+  // In case start button is used, show mode selection as well
   showScreen(modeScreen);
 });
 
@@ -619,11 +526,68 @@ safeAddTapListener(btnThree, async ()=>{
 safeAddTapListener(btnBoom, async ()=>{
   mode = 'boom';
   showScreen(null);
-  await startBoomerangFlow();
+  // run boomerang flow
+  try {
+    await startFrontCamera();
+    await startBoomerangSequence(); // if you want the prior generateBoomerang logic, call startBoomerangSequence(); below we create one inline
+  } catch(e){
+    // fallback to older method
+    await startBoomerangFlow(); // fallback function name preserved for clarity
+  }
 });
 
-/* expose quick debug actions (optional) */
-window._cabine = { startThreePhotoFlow, startBoomerangFlow };
+/* Provide both implementations: startBoomerangSequence uses record+render already defined above.
+   If you used startBoomerangFlow previously, keep those functions. For compatibility, create alias. */
+async function startBoomerangSequence(){
+  // uses recordShortClipFromVideo + generateBoomerangFromShortBlob flow
+  try {
+    await startFrontCamera();
+    startDrawingPreviewToCanvas();
+    showScreen(null);
+    progressEl.style.display = 'block'; progressEl.textContent = 'Preparando boomerang...';
+    await showCountdownFor(3);
+    progressEl.textContent = 'Gravando 2s...';
+    const shortBlob = await recordShortClipFromVideo(2000);
+    if(!shortBlob) throw new Error('Falha ao gravar clipe curto');
+    progressEl.textContent = 'Processando boomerang...';
+    const finalBlob = await generateBoomerangFromShortBlob(shortBlob, 15000);
+    const thumb = await blobFirstFrameDataUrl(finalBlob).catch(()=>null);
+    // preview: use object URL in previewImage (some browsers don't render video in img; this is a quick way)
+    const url = URL.createObjectURL(finalBlob);
+    previewImage.src = url;
+    previewScreen.style.display = 'flex';
+    stopDrawingPreviewToCanvas();
+    const decision = await new Promise((res)=> {
+      function onRef(){ cleanup(); res('refazer'); }
+      function onCont(){ cleanup(); res('continuar'); }
+      function cleanup(){ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); }
+      refazerBtn.addEventListener('click', onRef);
+      continuarBtn.addEventListener('click', onCont);
+    });
+    previewScreen.style.display = 'none';
+    if(decision === 'refazer'){
+      URL.revokeObjectURL(url);
+      startDrawingPreviewToCanvas();
+      stopCamera();
+      return startBoomerangSequence();
+    }
+    progressEl.textContent = 'Enviando boomerang...';
+    await sendBoomerangBlobToServer(finalBlob, thumb);
+    progressEl.style.display = 'none';
+    stopCamera();
+    showScreen(thankScreen);
+  } catch(e){
+    debug('erro boomerang seq: ' + e.message);
+    progressEl.style.display = 'none';
+    stopDrawingPreviewToCanvas();
+    stopCamera();
+    alert('Erro durante boomerang: ' + (e.message||''));
+    showScreen(welcomeScreen);
+  }
+}
+
+/* compatibility aliases (if runBoomerangFlow used before) */
+async function startBoomerangFlow(){ return startBoomerangSequence(); }
 
 /* initial state */
 showScreen(enterFs);
