@@ -8,219 +8,198 @@
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
-    .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-    .hidden{display:none !important}
-    .visible{display:flex !important}
-    button{cursor:pointer}
-    /* Screens */
-    #enterFs{background:linear-gradient(135deg,#001e3c,#0b84ff)}
-    #welcome{background:linear-gradient(135deg,#001e3c,#0b84ff)}
-    .card{background:rgba(0,0,0,0.35);padding:18px;border-radius:12px;width:95%;max-width:420px;text-align:center}
-    .logo{max-width:160px;margin-bottom:16px;border-radius:8px}
-    #enterFsBtn{padding:14px 22px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;font-size:18px;width:100%}
-    #startBtn{padding:12px 20px;border-radius:10px;border:none;background:#fff;color:#0b84ff;font-weight:700;font-size:18px;width:100%}
-    .mode-buttons{display:flex;gap:12px;justify-content:center;margin-top:14px}
-    .mode-btn{flex:1;padding:14px;border-radius:10px;border:none;font-size:18px}
+    .screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:18px}
+    .card{background:rgba(0,0,0,0.35);padding:16px;border-radius:12px;text-align:center;width:95%;max-width:420px}
+    .logo{max-width:160px;margin-bottom:12px}
+    button{cursor:pointer;border:none;border-radius:10px;padding:12px 16px;font-weight:700}
+    #enterFsBtn{background:#ffd600;color:#000}
+    #startBtn{background:#fff;color:#0b84ff}
+    .mode-btn{flex:1;padding:12px 10px;border-radius:12px}
     .boom-btn{background:linear-gradient(135deg,#5bd,#07a);color:#fff}
     .three-btn{background:linear-gradient(135deg,#f4b400,#d18a00);color:#fff}
-    /* camera & canvas */
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);z-index:10;display:none}
-    #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:20;display:none}
-    #countdown{position:fixed;top:28%;left:0;right:0;text-align:center;font-size:110px;font-weight:800;z-index:60;color:#fff;pointer-events:none;text-shadow:0 0 20px #000}
-    #progress{position:fixed;top:20px;left:50%;transform:translateX(-50%);font-weight:800;z-index:70;background:rgba(0,0,0,0.5);padding:8px 12px;border-radius:8px}
-    #previewScreen{z-index:80;display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);align-items:center;justify-content:center}
-    #previewImage{max-width:95%;max-height:78%}
-    .preview-buttons{display:flex;gap:12px;margin-top:16px}
-    .preview-btn{padding:12px 18px;border-radius:10px;border:none;font-weight:700}
-    #previewVideo{max-width:95%;max-height:78%;border-radius:8px;background:#000}
-    #debugInfo{position:fixed;bottom:8px;left:8px;font-size:11px;color:#ddd;background:rgba(0,0,0,0.5);padding:6px;border-radius:6px;z-index:999}
-    .small-muted{font-size:13px;color:#ddd;margin-top:8px}
-    .recording-dot{width:12px;height:12px;border-radius:50%;background:#f44336;display:inline-block;margin-right:8px;vertical-align:middle}
+    .mode-buttons{display:flex;gap:12px;margin-top:12px}
+
+    /* camera and canvas */
+    #videoEl{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:10;display:none;transform:rotate(90deg) scaleX(-1);} 
+    /* rotate to treat device in landscape: we'll draw frames correctly on canvas */
+    #canvasEl{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:20;display:none}
+    #countdown{position:fixed;top:20%;left:0;right:0;text-align:center;font-size:100px;font-weight:800;z-index:90;text-shadow:0 0 20px #000}
+    #progress{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:95;background:rgba(0,0,0,0.6);padding:8px 12px;border-radius:8px}
+
+    /* preview overlay */
+    #previewScreen{position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;padding:12px}
+    #previewVideo{max-width:92%;max-height:66%;border-radius:8px;background:#000}
+    #previewImage{max-width:92%;max-height:66%;border-radius:8px}
+    .preview-controls{position:fixed;left:0;right:0;bottom:18px;display:flex;gap:12px;justify-content:center;z-index:210}
+    .preview-btn{padding:12px 18px;border-radius:10px;font-weight:800}
+    #refazerBtn{background:#e74c3c;color:#fff}
+    #continuarBtn{background:#2ecc71;color:#fff}
+
+    #debugInfo{position:fixed;left:8px;bottom:8px;background:rgba(255,255,255,0.05);padding:6px;border-radius:6px;font-size:12px;z-index:999}
+    .recording-indicator{position:fixed;top:12px;left:12px;z-index:999;color:#fff;background:rgba(0,0,0,0.4);padding:6px;border-radius:8px;display:flex;gap:8px;align-items:center}
+    .dot{width:10px;height:10px;border-radius:50%;background:#f44336;box-shadow:0 0 8px rgba(244,67,54,0.6)}
+    .hidden{display:none !important}
+    .visible{display:flex !important}
   </style>
 </head>
 <body>
-  <!-- 1) Enter fullscreen only -->
-  <div id="enterFs" class="screen visible">
+  <!-- 1) Only fullscreen prompt -->
+  <div id="enterFs" class="screen visible" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
     <div class="card">
-      <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h2 style="margin-bottom:8px">📸 Cabine Fotográfica</h2>
-      <p class="small-muted">Escaneou o QR? Para começar entre em tela cheia.</p>
+      <img src="logo.png" class="logo" alt="logo" onerror="this.style.display='none'">
+      <h2>📸 Cabine Fotográfica</h2>
+      <p style="margin-top:8px">Escaneou o QR? Entre em tela cheia para começar.</p>
       <div style="margin-top:12px">
         <button id="enterFsBtn">🎬 Entrar em Tela Cheia</button>
       </div>
     </div>
   </div>
 
-  <!-- 2) Welcome screen (logo + start) -->
-  <div id="welcomeScreen" class="screen hidden">
+  <!-- 2) Welcome (logo + start) -->
+  <div id="welcomeScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
     <div class="card">
-      <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h2 style="margin-bottom:8px">📸 Pronto para a sessão?</h2>
-      <p class="small-muted">Toque em iniciar para escolher entre Boomerang ou 3 Fotos</p>
-      <div style="margin-top:12px">
-        <button id="startBtn">🎬 Iniciar Sessão</button>
-      </div>
+      <img src="logo.png" class="logo" alt="logo" onerror="this.style.display='none'">
+      <h2>📸 Pronto para iniciar?</h2>
+      <p style="margin:8px 0">Clique em iniciar para escolher o modo</p>
+      <button id="startBtn">🎬 Iniciar Sessão</button>
     </div>
   </div>
 
-  <!-- 3) Choose mode (only appears after clicking start) -->
-  <div id="chooseScreen" class="screen hidden">
-    <div class="card" style="max-width:560px">
-      <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h2 style="margin-bottom:8px">Escolha o modo</h2>
-      <div class="mode-buttons" style="margin-top:18px">
+  <!-- 3) Choose mode -->
+  <div id="chooseScreen" class="screen hidden" style="background:linear-gradient(135deg,#001e3c,#0b84ff)">
+    <div class="card">
+      <img src="logo.png" class="logo" alt="logo" onerror="this.style.display='none'">
+      <h3>Escolha o modo</h3>
+      <div class="mode-buttons" style="margin-top:12px">
         <button id="modeBoom" class="mode-btn boom-btn">🎞️ Boomerang</button>
         <button id="modeThree" class="mode-btn three-btn">📷 3 Fotos</button>
       </div>
-      <p class="small-muted" style="margin-top:12px">Só aparecerá essa tela depois que você clicar em Iniciar Sessão.</p>
     </div>
   </div>
 
-  <!-- Camera / live -->
+  <!-- Live camera (we rotate video element to handle landscape capture properly) -->
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="canvasEl"></canvas>
-  <div id="progress" class="hidden"></div>
   <div id="countdown"></div>
+  <div id="progress" class="hidden"></div>
+  <div id="debugInfo"></div>
 
-  <!-- Preview screen (used for photo preview or boomerang preview) -->
-  <div id="previewScreen" class="hidden">
-    <div style="text-align:center;color:#fff">
-      <video id="previewVideo" controls playsinline style="display:none"></video>
-      <img id="previewImage" src="" alt="Preview" style="display:none">
-      <div class="preview-buttons" style="justify-content:center">
-        <button id="refazerBtn" class="preview-btn" style="background:#e74c3c;color:#fff">🔄 Refazer</button>
-        <button id="continuarBtn" class="preview-btn" style="background:#2ecc71;color:#fff">✅ Continuar</button>
-      </div>
+  <!-- Preview overlay with controls always visible over video -->
+  <div id="previewScreen" class="hidden" role="dialog" aria-modal="true">
+    <video id="previewVideo" playsinline controls style="display:none"></video>
+    <img id="previewImage" style="display:none" alt="preview">
+    <div class="preview-controls">
+      <button id="refazerBtn" class="preview-btn">🔄 Refazer</button>
+      <button id="continuarBtn" class="preview-btn">✅ Continuar</button>
     </div>
   </div>
 
   <div id="thankScreen" class="screen hidden">
     <div class="card">
       <h2>✨ Obrigado!</h2>
-      <p class="small-muted">Espere o operador finalizar ou o QR aparecer na tela.</p>
+      <p>Espere o operador processar ou verificar o QR no index.</p>
     </div>
   </div>
 
-  <div id="debugInfo"></div>
+  <div class="recording-indicator hidden" id="recIndicator"><span class="dot"></span><div>GRAVANDO</div></div>
 
   <audio id="clack" src="clack.mp3" preload="auto"></audio>
   <audio id="inicio" src="inicio.mp3" preload="auto"></audio>
   <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
 <script>
+/*
+  celular.html — versão com boomerang real (forward+reverse loop até BOOM_FINAL_MS),
+  preview com botões visíveis, gravação horizontal e ajustes de performance.
+  Ajuste SERVER_URL e SESSION de acordo com sua instalação.
+*/
+
 (async function(){
-  const SERVER_URL = "festadodavi-production-0591.up.railway.app"; // ajuste se precisar
+  const SERVER_URL = "https://agoraequeeuquerover-production.up.railway.app"; // ajuste se necessário
   const socket = io(SERVER_URL, { transports:['websocket','polling'], path:'/socket.io' });
 
-  const params = new URLSearchParams(location.search);
-  const SESSION = params.get('session') || 'cabine-fixa';
+  // Configurações do boomerang
+  const SHORT_MS = 2000;      // duração do clipe curto gravado (2s)
+  const BOOM_FINAL_MS = 15000; // duração final do boomerang (15s)
+  const CAPTURE_WIDTH = 720;  // largura para gravação/performance (horizontal)
+  const CAPTURE_HEIGHT = 1280; // altura — we'll flip orientation if needed
 
   // DOM
+  const $ = id => document.getElementById(id);
   const enterFs = $('enterFs'), enterFsBtn = $('enterFsBtn');
   const welcomeScreen = $('welcomeScreen'), startBtn = $('startBtn');
   const chooseScreen = $('chooseScreen'), modeBoom = $('modeBoom'), modeThree = $('modeThree');
-  const videoEl = $('videoEl'), canvasEl = $('canvasEl');
-  const countdownEl = $('countdown'), progressEl = $('progress');
-  const previewScreen = $('previewScreen'), previewImage = $('previewImage'), previewVideo = $('previewVideo');
+  const videoEl = $('videoEl'), canvasEl = $('canvasEl'), countdownEl = $('countdown'), progressEl = $('progress');
+  const previewScreen = $('previewScreen'), previewVideo = $('previewVideo'), previewImage = $('previewImage');
   const refazerBtn = $('refazerBtn'), continuarBtn = $('continuarBtn');
   const thankScreen = $('thankScreen');
-  const debugEl = $('debugInfo');
+  const debugInfo = $('debugInfo'), recIndicator = $('recIndicator');
   const clack = $('clack'), inicio = $('inicio'), fim = $('fim');
 
-  // state
+  const SESSION = (new URLSearchParams(location.search)).get('session') || 'cabine-fixa';
+
   let stream = null;
   let photos = [];
-  let currentPhotoData = null;
-  let currentBoomerangBlob = null;
-  let waitingForOperator = false;
+  let currentPhoto = null;
 
-  // debug
-  setInterval(()=>{ debugEl.textContent = `sess: ${SESSION} | socket: ${socket.connected?'🟢':'🔴'}` }, 800);
-
-  // helpers
-  function $(id){ return document.getElementById(id); }
+  // helpers UI
   function showScreen(el){
-    [enterFs,welcomeScreen,chooseScreen,previewScreen,thankScreen].forEach(s => {
+    [enterFs, welcomeScreen, chooseScreen, previewScreen, thankScreen].forEach(s=>{
       if(!s) return;
-      s.classList.add('hidden');
-      s.classList.remove('visible');
-      s.style.display='none';
+      s.classList.add('hidden'); s.style.display='none';
     });
-    // hide camera/canvas UI if not used
-    videoEl.style.display='none';
-    canvasEl.style.display='none';
-    countdownEl.textContent='';
-    progressEl.classList.add('hidden');
-
-    if(el){
-      el.classList.remove('hidden');
-      el.classList.add('visible');
-      el.style.display='flex';
-    }
+    videoEl.style.display='none'; canvasEl.style.display='none'; countdownEl.textContent=''; progressEl.classList.add('hidden');
+    if(el){ el.classList.remove('hidden'); el.style.display='flex'; }
   }
-  function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+  function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
-  // Start: show Enter fullscreen only
+  setInterval(()=>{ debugInfo.textContent = `sess:${SESSION} | socket:${socket.connected?'online':'offline'}` }, 800);
+
+  // Start state
   showScreen(enterFs);
 
-  // Safe getUserMedia for front camera (use ideal instead of exact)
+  // -------- camera helpers (landscape capture) ----------
   async function startCamera(){
-    if (stream) return stream;
+    if(stream) return stream;
     try {
-      const constraints = { video: { facingMode: { ideal: "user" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+      // ask for front camera; use ideal not exact for compatibility
+      const constraints = {
+        video: {
+          facingMode: { ideal: "user" },
+          width: { ideal: CAPTURE_HEIGHT },   // note: we request rotated sizes for landscape handling
+          height: { ideal: CAPTURE_WIDTH },
+        },
+        audio: false
+      };
       stream = await navigator.mediaDevices.getUserMedia(constraints);
       videoEl.srcObject = stream;
+      // For consistent capture we rotate video element visually to landscape (mobile rotated)
       videoEl.style.display = 'block';
-      videoEl.style.transform = 'scaleX(-1)';
       await videoEl.play().catch(()=>{});
       return stream;
     } catch (err) {
-      console.error('camera err', err);
-      alert('Não foi possível acessar a câmera frontal. Verifique permissões.');
+      console.error('startCamera err', err);
+      alert('Não foi possível acessar a câmera. Verifique permissões.');
       throw err;
     }
   }
 
   function stopCamera(){
     if(stream){
-      try{ stream.getTracks().forEach(t => t.stop()); }catch(e){}
-      stream = null;
+      try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){}
     }
-    videoEl.pause();
-    videoEl.srcObject = null;
+    stream = null;
+    try{ videoEl.pause(); videoEl.srcObject = null; }catch(e){}
     videoEl.style.display='none';
-    canvasEl.style.display='none';
   }
 
-  // Capture a single photo (mirrored fix)
-  async function capturePhoto(){
-    // ensure camera running
-    await startCamera();
-    // show live
-    videoEl.style.display='block';
-    countdown(5, true);
-    // draw
-    const w = videoEl.videoWidth || 1280;
-    const h = videoEl.videoHeight || 720;
-    canvasEl.width = w; canvasEl.height = h;
-    const ctx = canvasEl.getContext('2d');
-    // unmirror when drawing so previews are correct orientation for viewer
-    ctx.save();
-    ctx.translate(w,0);
-    ctx.scale(-1,1);
-    ctx.drawImage(videoEl, 0, 0, w, h);
-    ctx.restore();
-    const data = canvasEl.toDataURL('image/jpeg', 0.95);
-    return data;
-  }
-
-  // Countdown helper (shows numbers / SORRIA)
-  async function countdown(seconds=3, playClack=false){
+  // Countdown helper (shows numbers or SORRIA)
+  async function runCountdown(sec=3, playClack=false){
     progressEl.classList.remove('hidden');
-    for(let t=seconds; t>0; t--){
-      if(t <= 2){
+    for(let t=sec;t>0;t--){
+      if(t<=2){
         countdownEl.textContent = 'SORRIA!';
-        if(playClack && t===2){ clack.currentTime=0; clack.play().catch(()=>{}); }
+        if(playClack && t===2){ try{ clack.currentTime=0; clack.play().catch(()=>{}); }catch(e){}}
       } else {
         countdownEl.textContent = String(t);
       }
@@ -230,211 +209,134 @@
     progressEl.classList.add('hidden');
   }
 
-  // Show image/video preview UI
-  function openPhotoPreview(dataUrl){
+  // Capture single photo into dataURL (unmirror so preview looks natural)
+  async function capturePhoto(){
+    await startCamera();
+    videoEl.style.display='block';
+    await runCountdown(5, true);
+
+    // draw to canvas oriented horizontally
+    // We'll draw rotated frames so user holds device horizontal while preview remains correct.
+    const vw = videoEl.videoWidth || CAPTURE_HEIGHT;
+    const vh = videoEl.videoHeight || CAPTURE_WIDTH;
+
+    // We want horizontal capture: ensure canvas has width>height
+    const cw = Math.max(vw, vh);
+    const ch = Math.min(vw, vh);
+    canvasEl.width = cw; canvasEl.height = ch;
+    const ctx = canvasEl.getContext('2d');
+
+    // draw mirrored (flip horizontally) so final image matches user expectation
+    ctx.save();
+    ctx.translate(cw, 0); ctx.scale(-1, 1);
+    // draw video rotated if needed (video element has been rotated visually), drawImage will map frames correctly
+    ctx.drawImage(videoEl, 0, 0, cw, ch);
+    ctx.restore();
+
+    const dataUrl = canvasEl.toDataURL('image/jpeg', 0.92);
+    return dataUrl;
+  }
+
+  // Show image preview overlay (with buttons visible)
+  function showImagePreview(dataUrl){
     previewVideo.style.display='none';
-    previewVideo.src='';
+    previewVideo.src = '';
     previewImage.style.display='block';
     previewImage.src = dataUrl;
-    previewScreen.classList.remove('hidden'); previewScreen.classList.add('visible'); previewScreen.style.display='flex';
-  }
-  function openVideoPreview(blob){
-    previewImage.style.display='none';
-    previewImage.src='';
-    previewVideo.style.display='block';
-    previewVideo.src = URL.createObjectURL(blob);
-    previewVideo.controls = true;
-    previewVideo.loop = false;
-    previewVideo.play().catch(()=>{});
-    previewScreen.classList.remove('hidden'); previewScreen.classList.add('visible'); previewScreen.style.display='flex';
-  }
-  function closePreview(){
-    previewVideo.pause();
-    try{ URL.revokeObjectURL(previewVideo.src);}catch(e){}
-    previewVideo.src='';
-    previewImage.src='';
-    previewScreen.classList.add('hidden'); previewScreen.classList.remove('visible'); previewScreen.style.display='none';
+    previewScreen.style.display='flex';
+    previewScreen.classList.remove('hidden');
   }
 
-  // 3-photo flow
-  async function runThreePhotosFlow(){
-    photos = [];
-    try {
-      for(let i=0;i<3;i++){
-        currentPhotoData = await capturePhoto();
-        openPhotoPreview(currentPhotoData);
-        // wait for user decision (refazer / continuar)
-        const choice = await new Promise((res) => {
-          const onRef = () => { refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); res('refazer'); };
-          const onCont = () => { refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); res('continuar'); };
-          refazerBtn.addEventListener('click', onRef);
-          continuarBtn.addEventListener('click', onCont);
-        });
-        closePreview();
-        if(choice === 'refazer'){ i--; continue; }
-        photos.push(currentPhotoData);
-      }
-
-      // finished: show thank and send photos
-      showScreen(thankScreen);
-      stopCamera();
-      await sendPhotosToServer(photos);
-    } catch (err) {
-      console.error('3photos error', err);
-      alert('Erro na captura das fotos: ' + (err.message || err));
-      stopCamera();
-      showScreen(welcomeScreen);
-    }
-  }
-
-  // Boomerang flow:
-  // 1) start camera, 2) short recording ~2s from front camera (MediaRecorder)
-  // 3) build boomerang by playing forward+reverse onto a canvas for ~15s and record it
-  // 4) show preview (loop ida/volta already applied) -> user can refazer/continuar
-  // 5) if continuar -> send to server as binary (boomerang_binary)
-  async function runBoomerangFlow(){
-    try {
-      await startCamera();
-      videoEl.style.display='block';
-      // small countdown
-      progressEl.textContent = 'Preparando boomerang...'; progressEl.classList.remove('hidden');
-      await countdown(3,false);
-      progressEl.textContent = 'Gravando...';
-      // record short clip ~2s from videoEl (cropped full frame)
-      const shortBlob = await recordShortClipFromVideoEl(2000);
-      if(!shortBlob){ throw new Error('Falha ao gravar clipe curto'); }
-
-      // generate boomerang final blob by looping forward+reverse until ~15s
-      progressEl.textContent = 'Processando boomerang...';
-      const finalBlob = await generateBoomerangFromShortClip(shortBlob, 15000);
-      if(!finalBlob) throw new Error('Falha ao gerar boomerang final');
-
-      // show preview to user (looped video). The preview itself will be normal playback;
-      // the server expects the full webm blob (we'll send it binary)
-      openVideoPreview(finalBlob);
-
-      // wait for decision
-      const choice = await new Promise((res) => {
-        const onRef = () => { refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); res('refazer'); };
-        const onCont = () => { refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); res('continuar'); };
-        refazerBtn.addEventListener('click', onRef);
-        continuarBtn.addEventListener('click', onCont);
-      });
-
-      closePreview();
-      if(choice === 'refazer'){
-        // let user try again
-        showScreen(chooseScreen);
-        return;
-      }
-
-      // continue: send boomerang binary to server (server handler boomerang_binary)
-      showScreen(thankScreen);
-      stopCamera();
-      await sendBoomerangToServer(finalBlob);
-
-    } catch (err) {
-      console.error('boomerang error', err);
-      alert('Erro no boomerang: ' + (err.message || err));
-      stopCamera();
-      showScreen(welcomeScreen);
-    }
-  }
-
-  // Record short raw clip from the live video element using an offscreen canvas (cropped=full)
-  async function recordShortClipFromVideoEl(msDuration = 2000){
-    // create an offscreen canvas matching video resolution (scale if needed)
-    const vw = videoEl.videoWidth || 1280;
-    const vh = videoEl.videoHeight || 720;
-    const off = document.createElement('canvas'); off.width = vw; off.height = vh;
+  // -------- Boomerang implementation ----------
+  // 1) record SHORT_MS clip from videoEl using offscreen canvas
+  async function recordShortClip(ms=SHORT_MS){
+    await startCamera();
+    // prepare offscreen canvas with reduced resolution for performance (landscape)
+    // capture width: CAPTURE_HEIGHT x CAPTURE_WIDTH is what we asked earlier, but to reduce load:
+    const outW = 640; // smaller width for mobile-friendly performance
+    const outH = 360; // horizontal clip (landscape)
+    const off = document.createElement('canvas');
+    off.width = outW; off.height = outH;
     const ctx = off.getContext('2d');
 
-    const streamCapture = off.captureStream(30);
+    const streamCap = off.captureStream(24);
     const recorded = [];
-    const rec = new MediaRecorder(streamCapture, { mimeType: 'video/webm;codecs=vp8' });
-    rec.ondataavailable = e => { if(e.data && e.data.size) recorded.push(e.data); };
-    rec.start();
+    const recorder = new MediaRecorder(streamCap, { mimeType: 'video/webm;codecs=vp8' });
+    recorder.ondataavailable = e => { if(e.data && e.data.size) recorded.push(e.data); };
+    recorder.start();
 
     const start = performance.now();
-    await new Promise((resolve) => {
+    await new Promise((res) => {
       function frame(){
         try {
-          // draw mirrored video (flip horizontally to match user preview) so final feels consistent
+          // draw current video frame scaled to outW/outH (fit cover)
           ctx.save();
-          ctx.translate(off.width, 0); ctx.scale(-1, 1);
-          ctx.drawImage(videoEl, 0, 0, off.width, off.height);
+          ctx.fillStyle = '#000'; ctx.fillRect(0,0,outW,outH);
+          // draw video into canvas scaled
+          ctx.drawImage(videoEl, 0, 0, outW, outH);
           ctx.restore();
         } catch(e){}
-        if(performance.now() - start < msDuration) requestAnimationFrame(frame);
-        else setTimeout(()=>{ rec.stop(); resolve(); }, 70);
+        if(performance.now() - start < ms) requestAnimationFrame(frame);
+        else setTimeout(()=>{ recorder.stop(); res(); }, 80);
       }
       frame();
     });
-
-    await new Promise(r => rec.onstop = r);
+    await new Promise(r => recorder.onstop = r);
     return new Blob(recorded, { type: 'video/webm' });
   }
 
-  // Generate boomerang by playing the short clip forward+reverse repeatedly onto a canvas and recording it
-  async function generateBoomerangFromShortClip(shortBlob, loopMs = 15000){
-    // load short clip into video element
+  // 2) generate final boomerang by playing short clip forward+reverse repeatedly until BOOM_FINAL_MS
+  async function makeBoomerangFromShort(shortBlob, finalMs = BOOM_FINAL_MS){
+    // load short clip into a video element (hidden)
     const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.src = URL.createObjectURL(shortBlob);
-    await new Promise((res, rej) => {
-      v.onloadedmetadata = () => res();
-      v.onerror = (e) => rej(new Error('Erro ao carregar short clip'));
-    });
+    await new Promise((res, rej) => { v.onloadedmetadata = () => res(); v.onerror = (e)=>rej(e); });
 
-    // canvas sized to short clip resolution
-    const targetW = v.videoWidth || 640;
-    const targetH = v.videoHeight || 960; // preserve vertical feel if necessary
+    // use canvas sized to small preview to minimize CPU
+    const targetW = 640, targetH = 360;
     const canvas = document.createElement('canvas'); canvas.width = targetW; canvas.height = targetH;
     const ctx = canvas.getContext('2d');
 
-    const streamCapture = canvas.captureStream(30);
-    const recordedChunks = [];
-    const rec = new MediaRecorder(streamCapture, { mimeType: 'video/webm;codecs=vp8' });
-    rec.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); };
+    // set up recorder
+    const s = canvas.captureStream(24);
+    const chunks = [];
+    const rec = new MediaRecorder(s, { mimeType: 'video/webm;codecs=vp8' });
+    rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
     rec.start();
 
-    const startTime = performance.now();
-
-    function drawFrameFromVideo(){
+    function drawFrame(){
       try {
-        // fill bg
+        ctx.clearRect(0,0,canvas.width,canvas.height);
         ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-        // draw video frame covering canvas (we assume clip matches orientation)
         ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight, 0, 0, canvas.width, canvas.height);
       } catch(e){}
     }
 
-    // Helper to play forward once and resolve
+    // helpers to play forward and reverse
     async function playForward(){
       return new Promise(res => {
         v.currentTime = 0;
         v.play().catch(()=>{});
         const onTick = () => {
-          drawFrameFromVideo();
-          if (v.ended || v.currentTime >= v.duration - 0.001) {
+          drawFrame();
+          if(v.ended || v.currentTime >= v.duration - 0.001){
             v.pause();
             v.removeEventListener('timeupdate', onTick);
             res();
           }
         };
         v.addEventListener('timeupdate', onTick);
-        drawFrameFromVideo();
+        drawFrame();
       });
     }
-
-    // Helper to play reverse by stepping back manually
     async function playReverse(){
       return new Promise(res => {
         v.pause();
         v.currentTime = v.duration;
         function step(){
-          const stepMs = 1000/30;
+          const stepMs = 1000/24;
           v.currentTime = Math.max(0, v.currentTime - (stepMs/1000));
-          drawFrameFromVideo();
+          drawFrame();
           if(v.currentTime > 0.02) requestAnimationFrame(step);
           else res();
         }
@@ -442,56 +344,69 @@
       });
     }
 
-    // Loop forward+reverse until time elapsed
-    while(performance.now() - startTime < loopMs){
+    const tStart = performance.now();
+    // loop forward+reverse until time elapsed
+    while(performance.now() - tStart < finalMs){
       await playForward();
-      if(performance.now() - startTime >= loopMs) break;
+      if(performance.now() - tStart >= finalMs) break;
       await playReverse();
     }
 
+    // stop and return blob
     await sleep(120);
-    await new Promise(res => { rec.onstop = res; rec.stop(); });
-
-    return new Blob(recordedChunks, { type: 'video/webm' });
+    await new Promise(r => { rec.onstop = r; rec.stop(); });
+    const finalBlob = new Blob(chunks, { type: 'video/webm' });
+    try{ URL.revokeObjectURL(v.src); }catch(e){}
+    return finalBlob;
   }
 
-  // Send photos array (dataURLs) to server via photos_submit (server expects this). Server will upload/emit QR. See server handlers. :contentReference[oaicite:2]{index=2}
-  async function sendPhotosToServer(photosArray){
-    try {
-      progressEl.textContent = 'Enviando fotos...'; progressEl.classList.remove('hidden');
-      if(!Array.isArray(photosArray) || photosArray.length===0) return;
-      // ensure connected
-      if(!socket.connected) socket.connect();
-      socket.emit('photos_submit', { session: SESSION, viewerId: socket.id, photos: photosArray });
-      // safety: emit a second time shortly after to improve reliability
-      setTimeout(()=>{ if(socket.connected) socket.emit('photos_submit', { session: SESSION, viewerId: socket.id, photos: photosArray }); }, 1200);
-      progressEl.classList.add('hidden');
-    } catch (err) {
-      console.error('sendPhotos err', err);
-      progressEl.classList.add('hidden');
-    }
+  // preview helpers (ensuring buttons visible)
+  function openVideoPreview(blob){
+    previewImage.style.display='none';
+    previewImage.src='';
+    previewVideo.style.display='block';
+    previewVideo.src = URL.createObjectURL(blob);
+    previewVideo.controls = true;
+    previewVideo.loop = true; // loop for preview
+    previewScreen.style.display='flex';
+    previewScreen.classList.remove('hidden');
+    // ensure buttons are visible (they are fixed in CSS)
+  }
+  function openImagePreview(dataUrl){
+    previewVideo.style.display='none';
+    previewVideo.src='';
+    previewImage.style.display='block';
+    previewImage.src = dataUrl;
+    previewScreen.style.display='flex';
+    previewScreen.classList.remove('hidden');
+  }
+  function closePreview(){
+    try{ previewVideo.pause(); URL.revokeObjectURL(previewVideo.src); }catch(e){}
+    previewVideo.src = '';
+    previewImage.src = '';
+    previewScreen.style.display='none';
+    previewScreen.classList.add('hidden');
   }
 
-  // Send boomerang blob to server as binary using boomerang_binary (server has handler). :contentReference[oaicite:3]{index=3}
-  async function sendBoomerangToServer(blob){
+  // send boomerang binary (ArrayBuffer) to server
+  async function sendBoomerang(blob){
     try {
       progressEl.textContent = 'Enviando boomerang...'; progressEl.classList.remove('hidden');
-      const arrayBuffer = await blob.arrayBuffer();
-      // emit binary to server
-      socket.emit('boomerang_binary', { session: SESSION, viewerId: socket.id, filename: `boomerang_${Date.now()}.webm`, data: arrayBuffer });
-      // also emit a small thumbnail preview as photo_ready (optional)
+      const buf = await blob.arrayBuffer();
+      socket.emit('boomerang_binary', { session: SESSION, viewerId: socket.id, filename: `boom_${Date.now()}.webm`, data: buf });
+      // also send a thumbnail
       try {
         const thumb = await extractFirstFrameAsDataUrl(blob);
         if(thumb) socket.emit('photo_ready', { session: SESSION, index: 0, viewerId: socket.id, photo: thumb });
       } catch(e){}
       progressEl.classList.add('hidden');
-    } catch (err) {
+    } catch(err){
       console.error('sendBoomerang err', err);
       progressEl.classList.add('hidden');
     }
   }
 
-  // extract first frame from video blob as dataURL for thumbnail
+  // extract first frame of video blob for thumbnail
   async function extractFirstFrameAsDataUrl(blob){
     return new Promise((res, rej) => {
       const v = document.createElement('video');
@@ -499,12 +414,10 @@
       v.src = URL.createObjectURL(blob);
       v.onloadeddata = async () => {
         try {
-          v.currentTime = 0.05;
-          await sleep(80);
-          const c = document.createElement('canvas');
-          c.width = v.videoWidth || 320; c.height = v.videoHeight || 240;
-          const ctx = c.getContext('2d');
-          ctx.drawImage(v,0,0,c.width,c.height);
+          v.currentTime = 0.02;
+          await sleep(60);
+          const c = document.createElement('canvas'); c.width = v.videoWidth || 320; c.height = v.videoHeight || 180;
+          const ctx = c.getContext('2d'); ctx.drawImage(v, 0, 0, c.width, c.height);
           const d = c.toDataURL('image/jpeg', 0.8);
           res(d);
           URL.revokeObjectURL(v.src);
@@ -514,74 +427,123 @@
     });
   }
 
-  // -------------------------
-  // UI event wiring
-  // -------------------------
+  // -------- 3 photos flow ----------
+  async function takeThreePhotosFlow(){
+    photos = [];
+    try {
+      for(let i=0;i<3;i++){
+        await startCamera();
+        videoEl.style.display='block';
+        const data = await capturePhoto();
+        currentPhoto = data;
+        openImagePreview(data);
+        const choice = await new Promise(res => {
+          const onRef = ()=>{ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); res('refazer'); };
+          const onCont = ()=>{ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); res('continuar'); };
+          refazerBtn.addEventListener('click', onRef);
+          continuarBtn.addEventListener('click', onCont);
+        });
+        closePreview();
+        if(choice === 'refazer'){ i--; continue; }
+        photos.push(currentPhoto);
+      }
+      // after 3 photos, send to server (server will create montagens and QR)
+      stopCamera();
+      showScreen(thankScreen);
+      if(socket.connected) socket.emit('photos_submit', { session: SESSION, viewerId: socket.id, photos });
+      else { socket.connect(); setTimeout(()=>socket.emit('photos_submit', { session: SESSION, viewerId: socket.id, photos }), 1000); }
+    } catch(err){
+      console.error('3photos err', err);
+      alert('Erro ao tirar fotos: '+(err.message||err));
+      stopCamera();
+      showScreen(welcomeScreen);
+    }
+  }
+
+  // -------- boomerang flow ----------
+  async function boomerangFlow(){
+    try {
+      await startCamera();
+      videoEl.style.display='block';
+      await runCountdown(3, false);
+
+      // show recording indicator
+      recIndicator.classList.remove('hidden');
+
+      // record short clip
+      const shortBlob = await recordShortClip(SHORT_MS);
+      recIndicator.classList.add('hidden');
+
+      if(!shortBlob) throw new Error('Erro gravando curto');
+
+      // generate boomerang by forward+reverse loops
+      progressEl.textContent = 'Processando boomerang...'; progressEl.classList.remove('hidden');
+      const finalBoom = await makeBoomerangFromShort(shortBlob, BOOM_FINAL_MS);
+      progressEl.classList.add('hidden');
+
+      if(!finalBoom) throw new Error('Erro processando boomerang');
+
+      // preview final boomerang (loop)
+      openVideoPreview(finalBoom);
+
+      // wait decision
+      const choice = await new Promise(res => {
+        const onRef = ()=>{ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); res('refazer'); };
+        const onCont = ()=>{ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); res('continuar'); };
+        refazerBtn.addEventListener('click', onRef);
+        continuarBtn.addEventListener('click', onCont);
+      });
+
+      closePreview();
+      if(choice === 'refazer'){ showScreen(chooseScreen); return; }
+
+      // send to server
+      stopCamera();
+      showScreen(thankScreen);
+      await sendBoomerang(finalBoom);
+
+    } catch(err){
+      console.error('boomerangFlow err', err);
+      alert('Erro bumerangue: '+(err.message||err));
+      stopCamera();
+      showScreen(welcomeScreen);
+    }
+  }
+
+  // -------- UI wiring ----------
   enterFsBtn.addEventListener('click', async ()=>{
-    try { await document.documentElement.requestFullscreen(); } catch(e){}
-    // after fullscreen, go to welcome (logo + start)
+    try{ await document.documentElement.requestFullscreen(); }catch(e){}
     showScreen(welcomeScreen);
-    // notify server optionally
     socket.emit('cell_entered_fullscreen', { session: SESSION, viewerId: socket.id });
   });
 
   startBtn.addEventListener('click', async ()=>{
-    // show choose mode screen (only after user explicitly clicked start)
     showScreen(chooseScreen);
   });
 
   modeThree.addEventListener('click', async ()=>{
-    // start 3-photo flow
+    // 3 photos flow
     showScreen(null);
-    await startCamera();
-    photos = []; currentPhotoData = null;
-    await runThreePhotosFlow();
+    await takeThreePhotosFlow();
   });
 
   modeBoom.addEventListener('click', async ()=>{
-    // start boomerang flow
     showScreen(null);
-    await runBoomerangFlow();
+    await boomerangFlow();
   });
 
-  refazerBtn.addEventListener('click', ()=>{}); // handled dynamically in promises
-  continuarBtn.addEventListener('click', ()=>{}); // handled dynamically
-
-  // socket events
-  socket.on('connect', ()=>{ socket.emit('join_session', { session: SESSION, role: 'viewer' }); socket.emit('cell_connected', { session: SESSION }); });
-  socket.on('show_qr', ({ visualizadorUrl }) => {
-    // server may send show_qr for this viewer -> open it in new tab or show notification
-    console.log('show_qr', visualizadorUrl);
-    try { /* show on device automatically: open new window with visualizador */ window.open(visualizadorUrl, '_blank'); } catch(e){}
+  // socket events basic
+  socket.on('connect', ()=>{ socket.emit('join_session', { session: SESSION, role: 'viewer' }); });
+  socket.on('reset_session', ()=>{ stopCamera(); showScreen(welcomeScreen); });
+  socket.on('show_qr', ({ visualizadorUrl })=>{
+    // server may send visualizador url -> open new tab so user sees QR or visualizador
+    if(visualizadorUrl) try { window.open(visualizadorUrl, '_blank'); } catch(e){}
   });
 
-  socket.on('stream_frame', ({ frame }) => {
-    // optional: if operators stream frames (not used in phone-driven flow)
-    if(frame && canvasEl){
-      // draw operator frame as background when needed
-      const img = new Image();
-      img.onload = () => {
-        canvasEl.getContext('2d').clearRect(0,0,canvasEl.width,canvasEl.height);
-        canvasEl.width = window.innerWidth; canvasEl.height = window.innerHeight;
-        const ctx = canvasEl.getContext('2d');
-        const scale = Math.max(canvasEl.width / img.width, canvasEl.height / img.height);
-        const w = img.width * scale, h = img.height * scale;
-        ctx.drawImage(img, (canvasEl.width-w)/2, (canvasEl.height-h)/2, w, h);
-      };
-      img.src = frame;
-    }
-  });
+  // expose for debug
+  window._cell = { startCamera, stopCamera };
 
-  socket.on('reset_session', () => {
-    stopCamera();
-    showScreen(welcomeScreen);
-  });
-
-  // Utility: safe element getter repeated earlier
-  function $(id){ return document.getElementById(id); }
-
-  // End of IIFE
-})();
+})(); // IIFE end
 </script>
 </body>
 </html>
