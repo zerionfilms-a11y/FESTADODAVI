@@ -45,6 +45,9 @@
     label.inline{display:inline-flex;align-items:center;gap:8px}
     #log{color:#9f9;margin-top:12px;white-space:pre-wrap;font-family:monospace;font-size:12px;max-height:240px;overflow-y:auto;background:#071010;padding:10px;border-radius:8px}
     canvas{max-width:100%;display:block;margin-top:12px;border:1px solid #222;background:#000}
+    /* NOVO: Estilos para preview do boomerang */
+    #boomerangPreview{max-width:100%;margin-top:12px;border:2px solid #333;border-radius:8px}
+    .boomerang-section{margin-top:20px}
     @media (max-width:900px){ header{padding:12px} }
   </style>
 </head>
@@ -97,6 +100,15 @@
       <h3>Histórico de Visualizadores</h3>
       <div id="viewerHistory" class="viewer-history">
         <div class="viewer-item">Nenhum visualizador gerado ainda</div>
+      </div>
+    </section>
+
+    <!-- NOVA SEÇÃO: Preview do Boomerang -->
+    <section class="panel boomerang-section">
+      <h3>🎬 Preview do Boomerang</h3>
+      <video id="boomerangPreview" controls playsinline loop style="display:none; max-width:400px;"></video>
+      <div id="boomerangStatus" style="margin-top:8px; font-size:14px; color:var(--muted)">
+        Nenhum boomerang recebido ainda
       </div>
     </section>
 
@@ -176,6 +188,9 @@
     const startStreamBtn = $('startStreamBtn'), stopStreamBtn = $('stopStreamBtn');
     const streamSelect = $('streamSelect'), webcamPreview = $('webcamPreview');
     const autoStartWebcamCheckbox = $('autoStartWebcam');
+    // NOVO: Elementos do boomerang
+    const boomerangPreview = $('boomerangPreview');
+    const boomerangStatus = $('boomerangStatus');
 
     // -----------------------
     // State
@@ -188,6 +203,7 @@
     let currentStoriesMontageDataUrl = null;
     let currentPrintMontageDataUrl = null;
     let currentBoomerangUrl = null;
+    let currentBoomerangBlob = null;
 
     // -----------------------
     // Utilities
@@ -277,11 +293,43 @@
         processPhotosAndUpload(lastPhotos, viewerId).catch(e => log('❌ process error: ' + e));
       });
 
-      // boomerang (video) ready
-      socket.on('boomerang_ready', ({ viewerId, videoUrl, dataUrl }) => {
-        log('🎞 boomerang_ready recebido (viewer:' + viewerId + ')');
-        currentBoomerangUrl = videoUrl || dataUrl || null;
-        processBoomerangAndPublish(currentBoomerangUrl, viewerId).catch(e => log('❌ boomerang process error: ' + e));
+      // boomerang (video) ready - MODIFICADO para lidar com dados binários
+      socket.on('boomerang_ready', async ({ viewerId, filename, data }) => {
+        log('🎞 boomerang_ready recebido (viewer:' + viewerId + ', tamanho: ' + (data ? data.byteLength : 0) + ' bytes)');
+        
+        try {
+          if (data && data.byteLength > 0) {
+            // Converter ArrayBuffer para Blob
+            const blob = new Blob([data], { type: 'video/webm' });
+            currentBoomerangBlob = blob;
+            
+            // Criar URL local para preview
+            const localUrl = URL.createObjectURL(blob);
+            currentBoomerangUrl = localUrl;
+            
+            // Mostrar preview
+            boomerangPreview.src = localUrl;
+            boomerangPreview.style.display = 'block';
+            boomerangPreview.loop = true;
+            boomerangPreview.play().catch(e => log('⚠️ Erro ao reproduzir boomerang: ' + e));
+            
+            boomerangStatus.textContent = 'Boomerang recebido! Processando...';
+            boomerangStatus.style.color = '#4CAF50';
+            
+            log('✅ Boomerang carregado para preview local');
+            
+            // Processar e enviar para IMGBB ou servidor
+            await processBoomerangAndPublish(blob, viewerId);
+          } else {
+            log('⚠️ Boomerang sem dados recebido');
+            boomerangStatus.textContent = 'Erro: Boomerang sem dados';
+            boomerangStatus.style.color = '#f44336';
+          }
+        } catch (e) {
+          log('❌ Erro ao processar boomerang: ' + e);
+          boomerangStatus.textContent = 'Erro ao processar boomerang';
+          boomerangStatus.style.color = '#f44336';
+        }
       });
 
       socket.on('viewer_session_created', ({ viewerId }) => {
@@ -297,6 +345,15 @@
         qrcodeVisualizadorEl.innerHTML = '';
         genVisualizadorQrBtn.disabled = true;
         printBtn.disabled = true;
+        // Limpar boomerang também
+        boomerangPreview.style.display = 'none';
+        boomerangPreview.src = '';
+        boomerangStatus.textContent = 'Nenhum boomerang recebido ainda';
+        boomerangStatus.style.color = 'var(--muted)';
+        if (currentBoomerangUrl) {
+          URL.revokeObjectURL(currentBoomerangUrl);
+          currentBoomerangUrl = null;
+        }
       });
 
       // stream_frame debug relay
@@ -445,6 +502,36 @@
       throw new Error('IMGBB upload failed: ' + JSON.stringify(json));
     }
 
+    // NOVO: Upload de vídeo para servidor alternativo (usando FormData)
+    async function uploadBoomerangToServer(blob, filename = 'boomerang.webm') {
+      try {
+        const form = new FormData();
+        form.append('file', blob, filename);
+        form.append('session', FIXED_SESSION);
+        
+        const response = await fetch(SERVER_URL + '/upload_boomerang', {
+          method: 'POST',
+          body: form
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Upload failed: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        log('✅ Boomerang enviado para servidor: ' + (result.url || 'sucesso'));
+        return result.url || `${SERVER_URL}/boomerangs/${filename}`;
+      } catch (error) {
+        log('❌ Erro no upload do boomerang: ' + error.message);
+        // Fallback: criar data URL (não ideal para vídeos grandes)
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+      }
+    }
+
     // -----------------------
     // Process photos, upload and create visualizador
     // -----------------------
@@ -478,7 +565,14 @@
         let printUrl = null;
         try { printUrl = await uploadToImgbb(printMontage, `cabine_print_${Date.now()}`); } catch(e){ log('⚠️ Falha upload print: ' + (e.message || e)); }
 
-        const viewerPayload = { photos: uploadedPhotos, storiesMontage: storiesUrl, print: printUrl, createdAt: new Date().toISOString() };
+        const viewerPayload = { 
+          photos: uploadedPhotos, 
+          storiesMontage: storiesUrl, 
+          print: printUrl, 
+          boomerang: currentBoomerangUrl, // Incluir boomerang se disponível
+          createdAt: new Date().toISOString() 
+        };
+        
         const payloadStr = JSON.stringify(viewerPayload);
         const b64 = btoa(unescape(encodeURIComponent(payloadStr)));
         const visualizadorUrl = `${location.origin}/visualizador.html?data=${encodeURIComponent(b64)}`;
@@ -491,14 +585,20 @@
         viewerSessionIdEl.textContent = visualizadorUrl;
         viewerInfoEl.style.display = 'block';
 
-        // notify viewers
+        // Enviar QR code para o celular também
         if (viewerId) {
           socket.emit('show_qr_on_viewer', { viewerId, visualizadorUrl });
         } else {
           socket.emit('show_qr_to_session', { session: FIXED_SESSION, visualizadorUrl });
         }
 
-        socket.emit('create_viewer_session', { session: FIXED_SESSION, photos: uploadedPhotos, storiesMontage: storiesUrl, print: printUrl });
+        socket.emit('create_viewer_session', { 
+          session: FIXED_SESSION, 
+          photos: uploadedPhotos, 
+          storiesMontage: storiesUrl, 
+          print: printUrl,
+          boomerang: currentBoomerangUrl 
+        });
 
         genVisualizadorQrBtn.disabled = false;
         printBtn.disabled = false;
@@ -513,62 +613,61 @@
     }
 
     // -----------------------
-    // Boomerang handling
+    // Boomerang handling - MODIFICADO
     // -----------------------
-    async function processBoomerangAndPublish(videoUrlOrData, viewerId){
+    async function processBoomerangAndPublish(boomerangBlob, viewerId){
       try {
-        if (!videoUrlOrData) { log('⚠️ boomerang sem URL/data'); return; }
-
-        let finalVideoUrl = videoUrlOrData;
-
-        // If it's data:video, forward to server for upload (server must implement upload)
-        if (typeof videoUrlOrData === 'string' && videoUrlOrData.startsWith('data:video')) {
-          log('⏫ Enviando boomerang (dataURL) para servidor para upload...');
-          socket.emit('upload_boomerang', { session: FIXED_SESSION, viewerId, dataUrl: videoUrlOrData });
-          // wait for server event with uploaded url
-          finalVideoUrl = await waitForServerBoomerangUrl(15000);
-          if (!finalVideoUrl) log('⚠️ Servidor não retornou URL de boomerang em tempo');
+        if (!boomerangBlob) { 
+          log('⚠️ boomerang sem blob'); 
+          return; 
         }
 
-        const viewerPayload = { photos: lastPhotos.slice(0,3), boomerang: finalVideoUrl || null, createdAt: new Date().toISOString() };
+        log('⏫ Enviando boomerang para servidor...');
+        const finalVideoUrl = await uploadBoomerangToServer(boomerangBlob, `boomerang_${Date.now()}.webm`);
+        
+        log('✅ Boomerang processado: ' + finalVideoUrl);
+
+        const viewerPayload = { 
+          photos: lastPhotos.slice(0,3), 
+          boomerang: finalVideoUrl, 
+          createdAt: new Date().toISOString() 
+        };
+        
         const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(viewerPayload))));
         const visualizadorUrl = `${location.origin}/visualizador.html?data=${encodeURIComponent(b64)}`;
 
         qrcodeVisualizadorEl.innerHTML = '';
         const qrCanvas = document.createElement('canvas');
-        QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => { if (err) log('❌ Erro ao gerar QR: ' + err); });
+        QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => { 
+          if (err) log('❌ Erro ao gerar QR: ' + err); 
+        });
         qrcodeVisualizadorEl.appendChild(qrCanvas);
         viewerSessionIdEl.textContent = visualizadorUrl;
         viewerInfoEl.style.display = 'block';
 
+        // Enviar para todos os dispositivos conectados
         socket.emit('show_qr_to_session', { session: FIXED_SESSION, visualizadorUrl });
-        socket.emit('create_viewer_session', { session: FIXED_SESSION, photos: lastPhotos, boomerang: finalVideoUrl });
+        socket.emit('create_viewer_session', { 
+          session: FIXED_SESSION, 
+          photos: lastPhotos, 
+          boomerang: finalVideoUrl 
+        });
+
+        // Enviar QR code específico para o celular que gravou o boomerang
+        if (viewerId) {
+          socket.emit('show_qr_on_viewer', { viewerId, visualizadorUrl });
+        }
 
         addToViewerHistory(visualizadorUrl, lastPhotos.length);
         log('🎉 Visualizador do boomerang criado: ' + visualizadorUrl);
+        
+        boomerangStatus.textContent = 'Boomerang processado e QR code gerado!';
+        
       } catch(e){
         log('❌ ERRO processBoomerangAndPublish: ' + (e.message || e));
+        boomerangStatus.textContent = 'Erro ao processar boomerang';
+        boomerangStatus.style.color = '#f44336';
       }
-    }
-
-    function waitForServerBoomerangUrl(timeoutMs = 10000){
-      return new Promise((resolve) => {
-        let resolved = false;
-        function onEvent(data){
-          if (data && data.url) {
-            resolved = true;
-            socket.off('viewer_boomerang_uploaded', onEvent);
-            resolve(data.url);
-          }
-        }
-        socket.on('viewer_boomerang_uploaded', onEvent);
-        setTimeout(() => {
-          if (!resolved) {
-            socket.off('viewer_boomerang_uploaded', onEvent);
-            resolve(null);
-          }
-        }, timeoutMs);
-      });
     }
 
     // -----------------------
@@ -578,9 +677,14 @@
       viewerHistory.unshift({ id, timestamp: new Date().toLocaleString(), photosCount });
       updateViewerHistory();
     }
+    
     function updateViewerHistory(){
       viewerHistoryEl.innerHTML = '';
-      if (!viewerHistory.length) { viewerHistoryEl.innerHTML = '<div class="viewer-item">Nenhum visualizador gerado ainda</div>'; return; }
+      if (!viewerHistory.length) { 
+        viewerHistoryEl.innerHTML = '<div class="viewer-item">Nenhum visualizador gerado ainda</div>'; 
+        return; 
+      }
+      
       viewerHistory.forEach(it => {
         const div = document.createElement('div');
         div.className = 'viewer-item';
@@ -773,6 +877,15 @@
       qrcodeVisualizadorEl.innerHTML = '';
       genVisualizadorQrBtn.disabled = true;
       printBtn.disabled = true;
+      // Limpar boomerang também
+      boomerangPreview.style.display = 'none';
+      boomerangPreview.src = '';
+      boomerangStatus.textContent = 'Nenhum boomerang recebido ainda';
+      boomerangStatus.style.color = 'var(--muted)';
+      if (currentBoomerangUrl) {
+        URL.revokeObjectURL(currentBoomerangUrl);
+        currentBoomerangUrl = null;
+      }
       try { socket && socket.emit('reset_session', { session: FIXED_SESSION }); log('🔁 reset_session emitido'); } catch(e){ log('Erro ao emitir reset_session: ' + e); }
     });
 
@@ -811,36 +924,10 @@
     // safety
     if (typeof streamingInterval === 'undefined') streamingInterval = null;
 
-    // -----------------------
-    // Helper: add to viewer history UI
-    // -----------------------
-    function addToViewerHistoryEntry(id, photosCount){
-      // expose to both addToViewerHistory and others
-      addToViewerHistory(id, photosCount);
-    }
-
     // Expose some functions for console debugging (optional)
     window._operator = {
       initSocket, startWebcam, stopWebcam, startStreamingToSession, stopStream, processPhotosAndUpload, processBoomerangAndPublish
     };
-
-    // backward-compat helper: implement addToViewerHistory used above
-    function addToViewerHistory(id, photosCount){
-      viewerHistory.unshift({ id, timestamp: new Date().toLocaleString(), photosCount });
-      updateViewerHistory();
-    }
-
-    // update UI
-    function updateViewerHistory(){
-      viewerHistoryEl.innerHTML = '';
-      if (!viewerHistory.length) { viewerHistoryEl.innerHTML = '<div class="viewer-item">Nenhum visualizador gerado ainda</div>'; return; }
-      viewerHistory.forEach(it => {
-        const div = document.createElement('div');
-        div.className = 'viewer-item';
-        div.innerHTML = `<strong>${it.timestamp}</strong> — ${it.photosCount || 0} fotos<br><small style="color:#999;word-break:break-all">${it.id}</small>`;
-        viewerHistoryEl.appendChild(div);
-      });
-    }
 
   })();
   </script>
