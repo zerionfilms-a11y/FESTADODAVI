@@ -6,49 +6,44 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="icon" href="/favicon.ico">
 
-  <!-- Socket.IO + QR lib -->
+  <!-- Socket.io + QRCode (CDN) -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
   <style>
-    /* ============================
-       Estilos gerais
-       ============================ */
-    :root{
-      --bg:#0f1113;
-      --panel:#0b0c0d;
-      --muted:#888;
-      --accent:#b07e09;
-      --accent-dark:#8a6406;
-      --glass: rgba(255,255,255,0.03);
-    }
-    html,body{height:100%;margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:var(--bg);color:#eee}
-    header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:18px}
-    h1{margin:0;font-size:20px}
+    /* --- Layout / aparência --- */
+    :root{--bg:#0f1113;--panel:#0b0d0f;--accent:#0b84ff;--muted:#7f8c8d}
+    *{box-sizing:border-box}
+    body{font-family:Inter, Arial, Helvetica, sans-serif;background:var(--bg);color:#eee;margin:0;padding:18px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    h1{margin:0 0 8px 0;font-size:20px}
     .buttons-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    button{background:#0b84ff;color:#fff;border:0;padding:10px 14px;border-radius:8px;cursor:pointer;margin-right:8px}
-    button.small{padding:8px 10px;font-size:13px}
-    button.secondary{background:#333;color:#fff}
+    button{background:var(--accent);color:#fff;border:0;padding:10px 14px;border-radius:8px;cursor:pointer;margin-right:8px}
+    button.secondary{background:#333}
     button.danger{background:#dc3545}
-    button:disabled{background:#444;cursor:not-allowed;opacity:0.6}
+    button:disabled{background:#444;cursor:not-allowed;opacity:0.7}
     .qrcode-container{margin:12px 0;padding:10px;background:#111;border-radius:8px;display:inline-block}
     .qrcode-section{margin:20px 0}
     #thumbs{display:flex;flex-wrap:wrap;gap:8px}
     #thumbs img{width:170px;height:auto;border-radius:6px;border:2px solid #222;object-fit:cover}
-    .panel{background:var(--panel);padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,0.02);margin:10px 0}
-    .status{background:var(--panel);padding:8px;border-radius:6px;margin:8px 0;display:inline-block;border:1px solid rgba(255,255,255,0.02)}
-    .connected{color:#4CAF50}
-    .disconnected{color:#f44336}
-    .viewer-history{background:#08090a;padding:10px;border-radius:8px;margin-top:8px;max-height:260px;overflow:auto}
-    .viewer-item{padding:8px;border-radius:6px;background:#070809;margin-bottom:6px;word-break:break-word}
+    canvas{max-width:100%;display:block;margin-top:12px;border:1px solid #333;background:#000}
+    #log{color:#9f9;margin-top:12px;white-space:pre-wrap;font-family:monospace;font-size:12px;max-height:360px;overflow-y:auto;background:#091012;padding:10px;border-radius:8px}
+    .status{background:#111;padding:8px;border-radius:4px;margin:8px 0;display:inline-block;border:1px solid rgba(255,255,255,0.03)}
+    .connected{color:#4CAF50;}
+    .disconnected{color:#f44336;}
+    .viewer-info{background:#0b0d0f;padding:10px;border-radius:5px;margin:10px 0}
+    .viewer-history{background:#08090a;padding:10px;border-radius:5px;margin:10px 0;max-height:240px;overflow-y:auto}
+    .viewer-item{margin:5px 0;padding:5px;background:#0a0b0c;border-radius:3px}
     .controls-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
-    label.inline{display:inline-flex;align-items:center;gap:8px}
-    #log{color:#9f9;margin-top:12px;white-space:pre-wrap;font-family:monospace;font-size:12px;max-height:240px;overflow-y:auto;background:#071010;padding:10px;border-radius:8px}
-    canvas{max-width:100%;display:block;margin-top:12px;border:1px solid #222;background:#000}
-    /* NOVO: Estilos para preview do boomerang */
-    #boomerangPreview{max-width:100%;margin-top:12px;border:2px solid #333;border-radius:8px}
-    .boomerang-section{margin-top:20px}
-    @media (max-width:900px){ header{padding:12px} }
+    label.inline{display:inline-flex;gap:8px;align-items:center}
+    .small{font-size:13px;padding:6px 10px}
+    .info-block{background:#0b0c0d;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.02);margin-bottom:12px;max-width:100%}
+    #webcamPreview{width:480px;height:360px;background:#000;border:1px solid #222;display:block;margin-top:10px;border-radius:6px;object-fit:cover}
+    @media(max-width:900px){#webcamPreview{width:320px;height:240px}}
+
+    /* extra UI niceties */
+    .muted{color:var(--muted)}
+    .flex-col{display:flex;flex-direction:column}
   </style>
 </head>
 <body>
@@ -68,202 +63,155 @@
     </div>
   </header>
 
-  <main style="padding:18px;max-width:1200px;margin:auto">
-    <section class="panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-        <div>
-          <div>Sessão: <strong id="sessionId">—</strong></div>
-          <div style="font-size:13px;color:var(--muted)">ID fixo da cabine / sessão</div>
-        </div>
+  <div class="info-block">
+    <div>Sessão: <strong id="sessionId">—</strong></div>
+    <div style="margin-top:6px" id="sessionControls">
+      <label class="inline"><input id="autoStartWebcam" type="checkbox"> Auto-start webcam ao conectar</label>
+    </div>
+  </div>
 
-        <div>
-          <label class="inline"><input id="autoStartWebcam" type="checkbox"> Auto-start webcam (opcional)</label>
-        </div>
-      </div>
-    </section>
+  <div class="qrcode-section">
+    <h3>QR Code para Celular (Cabine)</h3>
+    <div id="qrcode" class="qrcode-container"></div>
+  </div>
 
-    <section class="qrcode-section panel">
-      <h3>QR Code para Celular (Cabine)</h3>
-      <div id="qrcode" class="qrcode-container"></div>
-    </section>
+  <div class="qrcode-section">
+    <h3>QR Code do Visualizador (Convidado)</h3>
+    <div id="qrcodeVisualizador" class="qrcode-container"></div>
+    <div id="viewerInfo" class="viewer-info" style="display:none;">
+      <p><strong>Visualizador link:</strong> <span id="viewerSessionId">—</span></p>
+      <p><strong>Expira em:</strong> 7 dias</p>
+    </div>
+  </div>
 
-    <section class="qrcode-section panel">
-      <h3>QR Code do Visualizador (Convidado)</h3>
-      <div id="qrcodeVisualizador" class="qrcode-container"></div>
-      <div id="viewerInfo" style="display:none;margin-top:10px">
-        <p><strong>Visualizador link:</strong> <span id="viewerSessionId">—</span></p>
-        <p><strong>Expira em:</strong> 7 dias</p>
-      </div>
-    </section>
+  <div class="qrcode-section">
+    <h3>Histórico de Visualizadores</h3>
+    <div id="viewerHistory" class="viewer-history">
+      <div class="viewer-item">Nenhum visualizador gerado ainda</div>
+    </div>
+  </div>
 
-    <section class="panel">
-      <h3>Histórico de Visualizadores</h3>
-      <div id="viewerHistory" class="viewer-history">
-        <div class="viewer-item">Nenhum visualizador gerado ainda</div>
-      </div>
-    </section>
+  <h3>Controle da Webcam (opcional)</h3>
+  <div class="controls-row">
+    <button id="startWebcamBtn">Iniciar Webcam</button>
+    <button id="stopWebcamBtn" disabled>Parar Webcam</button>
+    <button id="startStreamBtn" disabled>Iniciar Stream</button>
+    <button id="stopStreamBtn" disabled>Parar Stream</button>
+    <select id="streamSelect" style="min-width:220px">
+      <option value="">Enviar para sessão (automático request)</option>
+    </select>
+  </div>
+  <video id="webcamPreview" autoplay muted playsinline></video>
 
-    <!-- NOVA SEÇÃO: Preview do Boomerang -->
-    <section class="panel boomerang-section">
-      <h3>🎬 Preview do Boomerang</h3>
-      <video id="boomerangPreview" controls playsinline loop style="display:none; max-width:400px;"></video>
-      <div id="boomerangStatus" style="margin-top:8px; font-size:14px; color:var(--muted)">
-        Nenhum boomerang recebido ainda
-      </div>
-    </section>
+  <h3>Fotos recebidas (últimas)</h3>
+  <div id="thumbs"></div>
 
-    <section class="panel">
-      <h3>Controle da Webcam (opcional)</h3>
-      <div class="controls-row">
-        <button id="startWebcamBtn">Iniciar Webcam</button>
-        <button id="stopWebcamBtn" disabled>Parar Webcam</button>
-        <button id="startStreamBtn" disabled>Iniciar Stream</button>
-        <button id="stopStreamBtn" disabled>Parar Stream</button>
-        <select id="streamSelect" style="min-width:220px">
-          <option value="">Enviar para sessão (automático request)</option>
-        </select>
-      </div>
-      <video id="webcamPreview" autoplay muted playsinline style="width:100%;max-width:480px;margin-top:12px;border-radius:8px;background:#000;display:none"></video>
-      <div style="font-size:13px;color:var(--muted);margin-top:8px">
-        Nota: A webcam é opcional — a cabine pode usar somente a câmera do celular. Marque o checkbox "Auto-start webcam" para permitir auto-start.
-      </div>
-    </section>
+  <h3>Preview — Montagem Stories (alto-res)</h3>
+  <canvas id="storiesCanvas" width="3375" height="6000" style="display:block;border:1px solid #222;margin-top:12px;max-width:100%"></canvas>
 
-    <section class="panel">
-      <h3>Fotos recebidas (últimas)</h3>
-      <div id="thumbs" style="display:flex;flex-wrap:wrap;gap:10px"></div>
-    </section>
+  <h3>Preview — Impressão (10x15)</h3>
+  <canvas id="printCanvas" width="3691" height="5536" style="display:block;border:1px solid #222;margin-top:12px;max-width:100%"></canvas>
 
-    <section class="panel">
-      <h3>Preview — Montagem Stories (alto-res)</h3>
-      <canvas id="storiesCanvas" width="3375" height="6000"></canvas>
-    </section>
+  <div id="log"></div>
 
-    <section class="panel">
-      <h3>Preview — Impressão (10x15)</h3>
-      <canvas id="printCanvas" width="3691" height="5536"></canvas>
-    </section>
-
-    <section class="panel">
-      <h3>Log / Debug</h3>
-      <div id="log"></div>
-    </section>
-  </main>
-
-  <!-- ============================
-       Script principal (index.js embutido)
-       ============================ -->
   <script>
-  (function(){
-    /**
-     * index.html (OPERADOR) - completo
-     * - Backend URL atualizado para: festadodavi-production-0591.up.railway.app
-     * - Mantive todas as funções (webcam opcional, streaming, upload, montagem, QR, histórico)
-     * - NÃO REMOVI funcionalidades do seu fluxo original
-     */
+  /*
+    index.html (Operador) — completo
+    - Conecta com servidor em https://festadodavi.onrender.com
+    - Recebe eventos: photos_submit, photos_ready, boomerang_ready
+    - Pode processar e subir fotos para IMGBB (opcional, configure IMGBB_KEY)
+    - Gera QR para celular e visualizador
+    - Mantém compatibilidade com flows do celular e do servidor
+  */
 
+  (function(){
     // -----------------------
     // CONFIG
     // -----------------------
-    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
+    const SERVER_URL = "https://festadodavi.onrender.com"; // usar sempre esse backend conforme preferência
     const FIXED_SESSION = "cabine-fixa";
-    const IMGBB_KEY = "fc52605669365cdf28ea379d10f2a341"; // troque se precisar
-    const STORIES_TEMPLATE = "storiesdavi.png";
+    const IMGBB_KEY = ""; // coloque sua chave IMGBB se quiser que o index faça upload direto. Se preferir que o server faça upload, deixe vazio.
+    const STORIES_TEMPLATE = "storiesdavi.png"; // caminho do template (coloque no public)
     const PRINT_TEMPLATE = "imprimirdavi.png";
-    const BOOMERANG_TEMPLATE = "bomerang.png"; // opcional
+    const BOOMERANG_TEMPLATE = "bomerang.png"; // overlay template para boomerang (opcional)
 
     // -----------------------
-    // DOM helpers
+    // DOM refs
     // -----------------------
-    const $ = id => document.getElementById(id);
-    const qrcodeEl = $('qrcode'), qrcodeVisualizadorEl = $('qrcodeVisualizador');
-    const sessionIdEl = $('sessionId'), viewerSessionIdEl = $('viewerSessionId');
-    const viewerInfoEl = $('viewerInfo'), viewerHistoryEl = $('viewerHistory');
-    const thumbsEl = $('thumbs'), storiesCanvas = $('storiesCanvas'), printCanvas = $('printCanvas');
-    const logEl = $('log'), connectionStatusEl = $('connectionStatus');
-    const genQrBtn = $('genQr'), genVisualizadorQrBtn = $('genVisualizadorQr');
-    const finalizarBtn = $('finalizarSessao'), printBtn = $('printBtn');
-    const limparVisualizadorBtn = $('limparVisualizadorBtn'), debugBtn = $('debugBtn');
-    const startWebcamBtn = $('startWebcamBtn'), stopWebcamBtn = $('stopWebcamBtn');
-    const startStreamBtn = $('startStreamBtn'), stopStreamBtn = $('stopStreamBtn');
-    const streamSelect = $('streamSelect'), webcamPreview = $('webcamPreview');
-    const autoStartWebcamCheckbox = $('autoStartWebcam');
-    // NOVO: Elementos do boomerang
-    const boomerangPreview = $('boomerangPreview');
-    const boomerangStatus = $('boomerangStatus');
+    const el = id => document.getElementById(id);
+    const qrcodeEl = el('qrcode'), qrcodeVisualizadorEl = el('qrcodeVisualizador');
+    const sessionIdEl = el('sessionId'), viewerSessionIdEl = el('viewerSessionId');
+    const viewerInfoEl = el('viewerInfo'), viewerHistoryEl = el('viewerHistory');
+    const thumbsEl = el('thumbs'), storiesCanvas = el('storiesCanvas'), printCanvas = el('printCanvas');
+    const logEl = el('log'), connectionStatusEl = el('connectionStatus');
+
+    const genQrBtn = el('genQr'), finalizarBtn = el('finalizarSessao');
+    const genVisualizadorQrBtn = el('genVisualizadorQr'), printBtn = el('printBtn');
+    const debugBtn = el('debugBtn'), limparVisualizadorBtn = el('limparVisualizadorBtn');
+
+    const startWebcamBtn = el('startWebcamBtn'), stopWebcamBtn = el('stopWebcamBtn');
+    const startStreamBtn = el('startStreamBtn'), stopStreamBtn = el('stopStreamBtn');
+    const streamSelect = el('streamSelect'), webcamPreview = el('webcamPreview');
+    const autoStartWebcamCheckbox = el('autoStartWebcam');
 
     // -----------------------
-    // State
+    // STATE
     // -----------------------
     let socket = null;
-    let lastPhotos = [];
+    let lastPhotos = []; // dataURLs (strings) - últimas recebidas
     let viewerHistory = [];
     let localStream = null;
     let streamingInterval = null;
     let currentStoriesMontageDataUrl = null;
     let currentPrintMontageDataUrl = null;
-    let currentBoomerangUrl = null;
-    let currentBoomerangBlob = null;
+    let currentBoomerangUrl = null; // remote URL or dataURL
 
     // -----------------------
-    // Utilities
+    // UTIL / LOG
     // -----------------------
     function log(msg){
-      const ts = new Date().toLocaleString();
+      const ts = new Date().toLocaleTimeString();
       logEl.textContent = `[${ts}] ${msg}\n` + logEl.textContent;
       console.log(msg);
     }
-
     function setStatus(text, cssClass){
       connectionStatusEl.textContent = text;
       connectionStatusEl.className = 'status';
       if(cssClass) connectionStatusEl.classList.add(cssClass);
     }
 
-    function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
-
     // -----------------------
-    // Socket initialization
+    // SOCKET INIT
     // -----------------------
     function initSocket(){
       if (socket && socket.connected) return;
-      log('📡 Inicializando conexão com backend: ' + SERVER_URL);
-
-      try {
-        socket = io(SERVER_URL, {
-          transports: ['websocket','polling'],
-          reconnection: true,
-          reconnectionAttempts: 20,
-          reconnectionDelay: 2000,
-          timeout: 20000,
-          withCredentials: true,
-          path: '/socket.io'
-        });
-      } catch(err){
-        log('❌ Erro ao criar socket: ' + err);
-        return;
-      }
+      log('📡 Inicializando socket para ' + SERVER_URL);
+      socket = io(SERVER_URL, {
+        transports: ['websocket','polling'],
+        reconnection: true,
+        reconnectionAttempts: 20,
+        reconnectionDelay: 2000,
+        timeout: 20000,
+        withCredentials: true,
+        path: '/socket.io'
+      });
 
       socket.on('connect', () => {
-        log('✅ Conectado ao servidor (id: ' + socket.id + ')');
+        log('✅ Conectado ao servidor: ' + SERVER_URL + ' (id: ' + socket.id + ')');
         setStatus('🟢 Conectado', 'connected');
         socket.emit('join_session', { session: FIXED_SESSION, role: 'operator' });
         sessionIdEl.textContent = FIXED_SESSION;
         genQrBtn.disabled = false;
-        genVisualizadorQrBtn.disabled = false;
         finalizarBtn.disabled = false;
+        genVisualizadorQrBtn.disabled = false;
         printBtn.disabled = false;
-
-        if (autoStartWebcamCheckbox.checked) {
-          attemptAutoStartWebcam().catch(e => log('⚠️ autoStartWebcam falhou: ' + e));
-        }
+        if (autoStartWebcamCheckbox.checked) attemptAutoStartWebcam();
       });
 
       socket.on('disconnect', (reason) => {
         log('❌ Desconectado: ' + reason);
         setStatus('🔴 Desconectado', 'disconnected');
         genQrBtn.disabled = true;
-        genVisualizadorQrBtn.disabled = true;
         finalizarBtn.disabled = true;
       });
 
@@ -272,63 +220,34 @@
         setStatus('⚠️ Erro de conexão', null);
       });
 
-      // Requests that operator should stream (viewer requests stream)
-      socket.on('request_stream', ({ session, viewerId }) => {
-        log('📡 Pedido de stream recebido para sessão: ' + session + (viewerId ? ' (viewer: ' + viewerId + ')' : ''));
-        if (localStream) startStreamingToSession(session || FIXED_SESSION);
-      });
-
-      // When server instructs operator to take a photo via local webcam
-      socket.on('take_photo', ({ session, index, viewerId }) => {
-        log('📸 Pedido take_photo (index:' + index + ', viewer:' + viewerId + ')');
-        if (localStream) captureHighResAndSend(index, viewerId);
-        else log('⚠️ Webcam não ativa — phone-driven flow deve enviar fotos_submit');
-      });
-
-      // Client (phone) submitted photos array
+      // When cellphone submits raw photos (flow: celular -> server -> this event) OR direct from celular: 'photos_submit'
       socket.on('photos_submit', ({ viewerId, photos }) => {
-        log('📥 photos_submit recebido (viewer:' + viewerId + ', fotos:' + (Array.isArray(photos)?photos.length:0) + ')');
+        log('📥 photos_submit recebido (viewer:' + viewerId + ', fotos:' + (Array.isArray(photos) ? photos.length : 0) + ')');
         lastPhotos = Array.isArray(photos) ? photos.slice(0,3) : [];
         renderThumbs();
-        processPhotosAndUpload(lastPhotos, viewerId).catch(e => log('❌ process error: ' + e));
+        // build montages locally, upload to IMGBB if configured, produce visualizador
+        processPhotosAndUpload(lastPhotos, viewerId).catch(e => log('❌ processPhotosAndUpload error: ' + (e.message||e)));
       });
 
-      // boomerang (video) ready - MODIFICADO para lidar com dados binários
-      socket.on('boomerang_ready', async ({ viewerId, filename, data }) => {
-        log('🎞 boomerang_ready recebido (viewer:' + viewerId + ', tamanho: ' + (data ? data.byteLength : 0) + ' bytes)');
-        
-        try {
-          if (data && data.byteLength > 0) {
-            // Converter ArrayBuffer para Blob
-            const blob = new Blob([data], { type: 'video/webm' });
-            currentBoomerangBlob = blob;
-            
-            // Criar URL local para preview
-            const localUrl = URL.createObjectURL(blob);
-            currentBoomerangUrl = localUrl;
-            
-            // Mostrar preview
-            boomerangPreview.src = localUrl;
-            boomerangPreview.style.display = 'block';
-            boomerangPreview.loop = true;
-            boomerangPreview.play().catch(e => log('⚠️ Erro ao reproduzir boomerang: ' + e));
-            
-            boomerangStatus.textContent = 'Boomerang recebido! Processando...';
-            boomerangStatus.style.color = '#4CAF50';
-            
-            log('✅ Boomerang carregado para preview local');
-            
-            // Processar e enviar para IMGBB ou servidor
-            await processBoomerangAndPublish(blob, viewerId);
-          } else {
-            log('⚠️ Boomerang sem dados recebido');
-            boomerangStatus.textContent = 'Erro: Boomerang sem dados';
-            boomerangStatus.style.color = '#f44336';
-          }
-        } catch (e) {
-          log('❌ Erro ao processar boomerang: ' + e);
-          boomerangStatus.textContent = 'Erro ao processar boomerang';
-          boomerangStatus.style.color = '#f44336';
+      // server might emit photos_ready with uploaded URLs (server uploaded)
+      socket.on('photos_ready', ({ session, uploaded, visualizadorUrl }) => {
+        log('📥 photos_ready recebido (uploaded:' + (uploaded ? uploaded.length : 0) + ')');
+        if (uploaded && uploaded.length) {
+          // set remote images as thumbs
+          lastPhotos = uploaded.slice(0,3);
+          renderThumbs();
+        }
+        if (visualizadorUrl) {
+          showVisualizadorQr(visualizadorUrl);
+        }
+      });
+
+      socket.on('boomerang_ready', ({ session, videoUrl, visualizadorUrl }) => {
+        log('🎞 boomerang_ready recebido (viewer:' + (session||'—') + ')');
+        currentBoomerangUrl = videoUrl || null;
+        renderBoomerangPreview(currentBoomerangUrl);
+        if (visualizadorUrl) {
+          showVisualizadorQr(visualizadorUrl);
         }
       });
 
@@ -345,56 +264,50 @@
         qrcodeVisualizadorEl.innerHTML = '';
         genVisualizadorQrBtn.disabled = true;
         printBtn.disabled = true;
-        // Limpar boomerang também
-        boomerangPreview.style.display = 'none';
-        boomerangPreview.src = '';
-        boomerangStatus.textContent = 'Nenhum boomerang recebido ainda';
-        boomerangStatus.style.color = 'var(--muted)';
-        if (currentBoomerangUrl) {
-          URL.revokeObjectURL(currentBoomerangUrl);
-          currentBoomerangUrl = null;
-        }
       });
 
-      // stream_frame debug relay
+      // debugging relays
       socket.on('stream_frame', ({ session, frame }) => {
-        // little log so operator can see sizes
-        if(frame) log('🔁 stream_frame relay recebido (len=' + frame.length + ')');
+        log('🔁 stream_frame relay recebido (len=' + (frame ? frame.length : 0) + ')');
       });
-    }
+    } // initSocket
 
     // -----------------------
-    // QR generation (cell)
+    // QR (CELULAR) GENERATION
     // -----------------------
     function generateQrCodeForCell(){
       qrcodeEl.innerHTML = '';
-      // direct link to celular.html on same origin with session param
-      const url = `${location.origin}/celular.html?session=${encodeURIComponent(FIXED_SESSION)}`;
+      // Use direct link to celular page on backend domain (assumes celular.html available)
+      const url = `${SERVER_URL}/celular.html?session=${encodeURIComponent(FIXED_SESSION)}`;
       const canvas = document.createElement('canvas');
-      QRCode.toCanvas(canvas, url, { width: 220 }, (err) => { if(err) log('❌ Erro ao gerar QR: ' + err); });
+      QRCode.toCanvas(canvas, url, { width: 220 }, (err) => { if(err) log('❌ Erro ao gerar QR Code: ' + err); });
       qrcodeEl.appendChild(canvas);
       log('📱 QR Code Celular gerado: ' + url);
     }
 
+    // Show visualizador QR on operator UI
+    function showVisualizadorQr(visualizadorUrl){
+      qrcodeVisualizadorEl.innerHTML = '';
+      const qrCanvas = document.createElement('canvas');
+      QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => { if (err) log('❌ Erro ao gerar QR: ' + err); });
+      qrcodeVisualizadorEl.appendChild(qrCanvas);
+      viewerSessionIdEl.textContent = visualizadorUrl;
+      viewerInfoEl.style.display = 'block';
+      log('🔗 Visualizador pronto: ' + visualizadorUrl);
+    }
+
     // -----------------------
-    // THUMBS & MONTAGES (stories / print)
+    // THUMBS AND MONTAGES
     // -----------------------
     function renderThumbs(){
       thumbsEl.innerHTML = '';
       lastPhotos.forEach((p, idx) => {
-        const img = document.createElement('img');
-        img.src = p;
-        img.alt = 'foto-' + (idx+1);
-        img.style.width = '170px';
-        img.style.borderRadius = '6px';
+        const img = document.createElement('img'); img.src = p; img.alt = 'foto-' + (idx+1);
         thumbsEl.appendChild(img);
       });
       if (lastPhotos.length) {
         drawStories(lastPhotos);
         drawPrint(lastPhotos);
-      } else {
-        // clear canvases
-        clearCanvases();
       }
     }
 
@@ -405,7 +318,7 @@
       currentPrintMontageDataUrl = null;
     }
 
-    // cover cropping draw (keeps center)
+    // helper: cover cropping scaling draw
     function drawImageCover(ctx, img, x, y, w, h){
       const imgRatio = img.width / img.height;
       const boxRatio = w / h;
@@ -420,7 +333,7 @@
       ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
     }
 
-    // coordinates (keep same as original requested)
+    // coordinates used previously - kept
     const STORIES_COORDS = [
       { x:289, y:242, w:2776 - 289, h:1809 - 242 },
       { x:292, y:2026, w:2776 - 292, h:3593 - 2026 },
@@ -437,7 +350,6 @@
       ctx.clearRect(0,0,storiesCanvas.width,storiesCanvas.height);
       const bg = new Image();
       bg.src = STORIES_TEMPLATE;
-      bg.crossOrigin = "anonymous";
       bg.onload = () => {
         ctx.drawImage(bg, 0, 0, storiesCanvas.width, storiesCanvas.height);
         photos.forEach((p, i) => {
@@ -451,11 +363,12 @@
           };
           img.onerror = () => log('⚠️ Erro ao carregar foto para stories preview');
         });
+        // after small timeout produce dataURL
         setTimeout(() => {
           try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); }
-        }, 450);
+        }, 400);
       };
-      bg.onerror = () => log('❌ Erro ao carregar background stories (verifique STORIES_TEMPLATE)');
+      bg.onerror = () => log('❌ Erro ao carregar background stories (verifique STORIES_TEMPLATE path)');
     }
 
     function drawPrint(photos){
@@ -463,7 +376,6 @@
       ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
       const bg = new Image();
       bg.src = PRINT_TEMPLATE;
-      bg.crossOrigin = "anonymous";
       bg.onload = () => {
         ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
         photos.forEach((p, i) => {
@@ -475,20 +387,22 @@
             drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
             log(`✅ Foto ${i+1} posicionada no print: ${c.x},${c.y} ${c.w}x${c.h}`);
           };
-          img.onerror = () => log('⚠️ Erro ao carregar foto para print preview');
         });
         setTimeout(() => {
           try { currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL print failed: ' + e); }
-        }, 450);
+        }, 400);
       };
-      bg.onerror = () => log('❌ Erro ao carregar background print (verifique PRINT_TEMPLATE)');
+      bg.onerror = () => log('❌ Erro ao carregar background print (verifique PRINT_TEMPLATE path)');
     }
 
     // -----------------------
-    // IMGBB upload (client side)
+    // IMGBB upload util (client-side optional)
     // -----------------------
     async function uploadToImgbb(dataUrl, name = 'cabine_photo') {
-      if (!IMGBB_KEY) throw new Error('IMGBB key não configurada');
+      if (!IMGBB_KEY) {
+        log('ℹ️ IMGBB_KEY não configurada no index — pulando upload local (use server para upload).');
+        return null;
+      }
       const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
       const form = new FormData();
       form.append('key', IMGBB_KEY);
@@ -502,38 +416,8 @@
       throw new Error('IMGBB upload failed: ' + JSON.stringify(json));
     }
 
-    // NOVO: Upload de vídeo para servidor alternativo (usando FormData)
-    async function uploadBoomerangToServer(blob, filename = 'boomerang.webm') {
-      try {
-        const form = new FormData();
-        form.append('file', blob, filename);
-        form.append('session', FIXED_SESSION);
-        
-        const response = await fetch(SERVER_URL + '/upload_boomerang', {
-          method: 'POST',
-          body: form
-        });
-        
-        if (!response.ok) {
-          throw new Error(`Upload failed: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        log('✅ Boomerang enviado para servidor: ' + (result.url || 'sucesso'));
-        return result.url || `${SERVER_URL}/boomerangs/${filename}`;
-      } catch (error) {
-        log('❌ Erro no upload do boomerang: ' + error.message);
-        // Fallback: criar data URL (não ideal para vídeos grandes)
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.readAsDataURL(blob);
-        });
-      }
-    }
-
     // -----------------------
-    // Process photos, upload and create visualizador
+    // PROCESS PHOTOS / PUBLISH VISUALIZADOR
     // -----------------------
     async function processPhotosAndUpload(photosArray, viewerId){
       try {
@@ -544,170 +428,133 @@
         log('🔄 Gerando montagem stories e print...');
         drawStories(photos);
         drawPrint(photos);
-        await sleep(700);
+        // ensure canvases rendered
+        await sleep(600);
 
         const storiesMontage = currentStoriesMontageDataUrl || storiesCanvas.toDataURL('image/jpeg', 0.95);
         const printMontage = currentPrintMontageDataUrl || printCanvas.toDataURL('image/jpeg', 0.95);
 
         genVisualizadorQrBtn.disabled = true;
-        printBtn.disabled = true;
 
+        // If IMGBB_KEY configured, upload images here. Otherwise ask server to handle upload by emitting photos_submit_saved
         const uploadedPhotos = [];
-        for (let i = 0; i < 3; i++){
-          log('⏫ Upload foto ' + (i+1));
-          const url = await uploadToImgbb(photos[i], `cabine_photo_${Date.now()}_${i+1}`);
-          uploadedPhotos.push(url);
-          log('✅ foto ' + (i+1) + ' uploadada: ' + url);
-        }
+        if (IMGBB_KEY) {
+          for (let i = 0; i < 3; i++){
+            log('⏫ Upload foto ' + (i+1));
+            const url = await uploadToImgbb(photos[i], `cabine_photo_${Date.now()}_${i+1}`);
+            uploadedPhotos.push(url);
+            log('✅ foto ' + (i+1) + ' uploadada: ' + url);
+          }
+          log('⏫ Upload montagem stories...');
+          const storiesUrl = await uploadToImgbb(storiesMontage, `cabine_stories_${Date.now()}`);
+          let printUrl = null;
+          try { printUrl = await uploadToImgbb(printMontage, `cabine_print_${Date.now()}`); } catch(e){ log('⚠️ Falha upload print: ' + (e.message || e)); }
 
-        log('⏫ Upload montagem stories...');
-        const storiesUrl = await uploadToImgbb(storiesMontage, `cabine_stories_${Date.now()}`);
-        let printUrl = null;
-        try { printUrl = await uploadToImgbb(printMontage, `cabine_print_${Date.now()}`); } catch(e){ log('⚠️ Falha upload print: ' + (e.message || e)); }
-
-        const viewerPayload = { 
-          photos: uploadedPhotos, 
-          storiesMontage: storiesUrl, 
-          print: printUrl, 
-          boomerang: currentBoomerangUrl, // Incluir boomerang se disponível
-          createdAt: new Date().toISOString() 
-        };
-        
-        const payloadStr = JSON.stringify(viewerPayload);
-        const b64 = btoa(unescape(encodeURIComponent(payloadStr)));
-        const visualizadorUrl = `${location.origin}/visualizador.html?data=${encodeURIComponent(b64)}`;
-
-        // UI: show QR
-        qrcodeVisualizadorEl.innerHTML = '';
-        const qrCanvas = document.createElement('canvas');
-        QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => { if (err) log('❌ Erro ao gerar QR: ' + err); });
-        qrcodeVisualizadorEl.appendChild(qrCanvas);
-        viewerSessionIdEl.textContent = visualizadorUrl;
-        viewerInfoEl.style.display = 'block';
-
-        // Enviar QR code para o celular também
-        if (viewerId) {
-          socket.emit('show_qr_on_viewer', { viewerId, visualizadorUrl });
+          // notify server (so server can store session & create visualizador route)
+          socket.emit('photos_from_cell', { session: FIXED_SESSION, photos: uploadedPhotos });
+          // server will emit photos_ready with visualizador link (or we can build ours)
+          log('✅ Fotos e montagens enviadas ao servidor via photos_from_cell (uploaded).');
         } else {
-          socket.emit('show_qr_to_session', { session: FIXED_SESSION, visualizadorUrl });
+          // No IMGBB locally — emit raw photos to server and let server handle upload/montage
+          socket.emit('photos_from_cell', { session: FIXED_SESSION, photos: photosArray });
+          log('🔁 Fotos brutas enviadas ao servidor para processamento (server fará upload).');
         }
 
-        socket.emit('create_viewer_session', { 
-          session: FIXED_SESSION, 
-          photos: uploadedPhotos, 
-          storiesMontage: storiesUrl, 
-          print: printUrl,
-          boomerang: currentBoomerangUrl 
-        });
+        // create viewer session entry on server (server may store & notify)
+        socket.emit('create_viewer_session', { session: FIXED_SESSION, photos: uploadedPhotos.length ? uploadedPhotos : photosArray, storiesMontage: currentStoriesMontageDataUrl || null, print: currentPrintMontageDataUrl || null });
 
         genVisualizadorQrBtn.disabled = false;
         printBtn.disabled = false;
 
-        addToViewerHistory(visualizadorUrl, uploadedPhotos.length);
-        log('🎉 Visualizador criado: ' + visualizadorUrl);
+        addToViewerHistory(FIXED_SESSION + ':' + Date.now(), uploadedPhotos.length || photos.length);
+        log('🎉 Visualizador criado (fluxo enviado ao servidor).');
       } catch(e){
-        log('❌ ERRO no processo IMGBB: ' + (e.message || e));
+        log('❌ ERRO no processo IMGBB/local: ' + (e.message || e));
         genVisualizadorQrBtn.disabled = false;
-        printBtn.disabled = false;
       }
     }
 
     // -----------------------
-    // Boomerang handling - MODIFICADO
+    // PROCESS BOOMERANG (video) AND PUBLISH
+    // accepts dataURL or remote URL
     // -----------------------
-    async function processBoomerangAndPublish(boomerangBlob, viewerId){
+    async function processBoomerangAndPublish(videoUrlOrData, viewerId){
       try {
-        if (!boomerangBlob) { 
-          log('⚠️ boomerang sem blob'); 
-          return; 
+        if (!videoUrlOrData) { log('⚠️ boomerang sem URL/data'); return; }
+
+        // If client-side IMGBB upload desired and it's a dataURL image (and IMGBB supports), upload.
+        // For video we rely on server — client will emit binary via socket if needed.
+        if (typeof videoUrlOrData === 'string' && videoUrlOrData.startsWith('data:')) {
+          log('⏫ Enviando boomerang (dataURL) para o servidor (upload server-side recomendado)...');
+          socket.emit('boomerang_ready', { session: FIXED_SESSION, viewerId, data: videoUrlOrData, filename: `boomerang_${Date.now()}.webm` });
+        } else {
+          // remote URL already — notify server
+          socket.emit('boomerang_ready', { session: FIXED_SESSION, viewerId, videoUrl: videoUrlOrData });
         }
 
-        log('⏫ Enviando boomerang para servidor...');
-        const finalVideoUrl = await uploadBoomerangToServer(boomerangBlob, `boomerang_${Date.now()}.webm`);
-        
-        log('✅ Boomerang processado: ' + finalVideoUrl);
-
-        const viewerPayload = { 
-          photos: lastPhotos.slice(0,3), 
-          boomerang: finalVideoUrl, 
-          createdAt: new Date().toISOString() 
-        };
-        
-        const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(viewerPayload))));
-        const visualizadorUrl = `${location.origin}/visualizador.html?data=${encodeURIComponent(b64)}`;
-
-        qrcodeVisualizadorEl.innerHTML = '';
-        const qrCanvas = document.createElement('canvas');
-        QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => { 
-          if (err) log('❌ Erro ao gerar QR: ' + err); 
-        });
-        qrcodeVisualizadorEl.appendChild(qrCanvas);
-        viewerSessionIdEl.textContent = visualizadorUrl;
-        viewerInfoEl.style.display = 'block';
-
-        // Enviar para todos os dispositivos conectados
-        socket.emit('show_qr_to_session', { session: FIXED_SESSION, visualizadorUrl });
-        socket.emit('create_viewer_session', { 
-          session: FIXED_SESSION, 
-          photos: lastPhotos, 
-          boomerang: finalVideoUrl 
-        });
-
-        // Enviar QR code específico para o celular que gravou o boomerang
-        if (viewerId) {
-          socket.emit('show_qr_on_viewer', { viewerId, visualizadorUrl });
-        }
+        // build visualizador link (server typically will create one) but we can also craft ours:
+        const visualizadorUrl = `${location.origin}/visualizador.html?data=${encodeURIComponent(btoa(JSON.stringify({ photos: lastPhotos.slice(0,3), boomerang: videoUrlOrData })))}`;
+        showVisualizadorQr(visualizadorUrl);
 
         addToViewerHistory(visualizadorUrl, lastPhotos.length);
-        log('🎉 Visualizador do boomerang criado: ' + visualizadorUrl);
-        
-        boomerangStatus.textContent = 'Boomerang processado e QR code gerado!';
-        
+        log('🎉 Visualizador do boomerang (fluxo iniciado): ' + visualizadorUrl);
       } catch(e){
         log('❌ ERRO processBoomerangAndPublish: ' + (e.message || e));
-        boomerangStatus.textContent = 'Erro ao processar boomerang';
-        boomerangStatus.style.color = '#f44336';
       }
     }
 
     // -----------------------
-    // Viewer history
+    // RENDER BOOMERANG PREVIEW
+    // -----------------------
+    function renderBoomerangPreview(url){
+      // Shows a small preview canvas or opens a modal. For simplicity: open new window to preview if direct URL, else show log.
+      if (!url) return;
+      log('▶️ Preview boomerang disponível: ' + url);
+      // Create a small video element preview in the UI (below thumbs)
+      const existing = document.getElementById('boomerangPreview');
+      if (existing) existing.remove();
+      const v = document.createElement('video');
+      v.id = 'boomerangPreview';
+      v.style.width = '280px';
+      v.style.display = 'block';
+      v.style.marginTop = '8px';
+      v.controls = true;
+      v.loop = true;
+      v.src = url;
+      thumbsEl.appendChild(v);
+      v.play().catch(()=>{});
+    }
+
+    // -----------------------
+    // HISTORY
     // -----------------------
     function addToViewerHistory(id, photosCount){
       viewerHistory.unshift({ id, timestamp: new Date().toLocaleString(), photosCount });
       updateViewerHistory();
     }
-    
     function updateViewerHistory(){
       viewerHistoryEl.innerHTML = '';
-      if (!viewerHistory.length) { 
-        viewerHistoryEl.innerHTML = '<div class="viewer-item">Nenhum visualizador gerado ainda</div>'; 
-        return; 
-      }
-      
+      if (!viewerHistory.length) { viewerHistoryEl.innerHTML = '<div class="viewer-item">Nenhum visualizador gerado ainda</div>'; return; }
       viewerHistory.forEach(it => {
-        const div = document.createElement('div');
-        div.className = 'viewer-item';
-        div.innerHTML = `<strong>${it.timestamp}</strong> — ${it.photosCount || 0} fotos<br><small style="color:#999;word-break:break-all">${it.id}</small>`;
+        const div = document.createElement('div'); div.className = 'viewer-item';
+        div.innerHTML = `<strong>${it.timestamp}</strong> - ${it.photosCount || 0} fotos - <span style="word-break:break-all">${it.id}</span>`;
         viewerHistoryEl.appendChild(div);
       });
     }
 
     // -----------------------
-    // Webcam optional (operator)
+    // WEBCAM (optional for operator)
     // -----------------------
     async function startWebcam(){
       try {
-        // Only start when user explicitly clicks (no auto-start by default)
         localStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
         webcamPreview.srcObject = localStream;
-        webcamPreview.style.display = 'block';
         await webcamPreview.play().catch(()=>{});
         startWebcamBtn.disabled = true;
         stopWebcamBtn.disabled = false;
         startStreamBtn.disabled = false;
-        log('🎥 Webcam iniciada (operator)');
-        // populate devices
+        log('🎥 Webcam iniciada (operador)');
+        // populate devices (simple)
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
           streamSelect.innerHTML = '<option value="">Enviar para sessão (automático request)</option>';
@@ -723,19 +570,17 @@
         throw e;
       }
     }
-
     function stopWebcam(){
       if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
       webcamPreview.srcObject = null;
-      webcamPreview.style.display = 'none';
       startWebcamBtn.disabled = false;
       stopWebcamBtn.disabled = true;
       startStreamBtn.disabled = true;
       stopStream();
-      log('🛑 Webcam parada (operator)');
+      log('🛑 Webcam parada');
     }
 
-    // capture high-res photo from webcam
+    // capture high-res photo from webcam and send to viewer (if requested)
     async function captureHighResAndSend(index, viewerId){
       if(!localStream){ log('⚠️ Webcam não ativa para captura high-res'); return; }
       try {
@@ -747,8 +592,7 @@
         c.width = v.videoWidth || 1920;
         c.height = v.videoHeight || 1080;
         const ctx = c.getContext('2d');
-        // Mirror (user expects mirrored preview -> send mirrored so preview/print match)
-        ctx.save(); ctx.translate(c.width, 0); ctx.scale(-1, 1);
+        ctx.save(); ctx.translate(c.width, 0); ctx.scale(-1, 1); // mirror capture
         ctx.drawImage(v, 0, 0, c.width, c.height);
         ctx.restore();
         const photo = c.toDataURL('image/jpeg', 0.95);
@@ -760,7 +604,7 @@
     }
 
     // -----------------------
-    // Streaming (low-res frames) from operator webcam
+    // STREAM (low-res) from webcam to server as frames
     // -----------------------
     function startStreamingToSession(session){
       if(!localStream){ log('⚠️ Webcam não iniciada'); return; }
@@ -778,7 +622,7 @@
         try {
           ctx.save();
           ctx.translate(canvas.width, 0);
-          ctx.scale(-1, 1); // mirror for preview consistency on viewer
+          ctx.scale(-1, 1); // mirror for preview consistency
           ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
           ctx.restore();
           const frame = canvas.toDataURL('image/jpeg', 0.6);
@@ -790,7 +634,6 @@
       stopStreamBtn.disabled = false;
       log('▶️ Iniciando stream para sessão ' + (session||FIXED_SESSION) + ' @ ~' + fps + 'fps');
     }
-
     function stopStream(){
       if(streamingInterval){ clearInterval(streamingInterval); streamingInterval = null; log('⏸ Stream parado'); }
       stopStreamBtn.disabled = true;
@@ -798,57 +641,12 @@
     }
 
     // -----------------------
-    // Autos & helpers (permissions)
+    // UTIL sleep
     // -----------------------
-    let __autoStartClickHandlerAdded = false;
-    async function attemptAutoStartWebcam() {
-      if (localStream) return;
-      try {
-        if (navigator.permissions && navigator.permissions.query) {
-          const p = await navigator.permissions.query({ name: 'camera' });
-          if (p.state === 'granted') {
-            log('🔐 Permissão de câmera = granted → iniciando webcam automaticamente');
-            await startWebcam().catch(e => log('❌ Falha auto-start (granted): ' + e));
-            return;
-          } else if (p.state === 'prompt') {
-            log('🔔 Permissão de câmera = prompt → tentando solicitar permissão');
-            try {
-              await startWebcam();
-              return;
-            } catch (e) {
-              log('⚠️ startWebcam solicitou permissão mas foi bloqueado/negado: ' + (e.message||e));
-            }
-          } else {
-            log('🚫 Permissão de câmera = denied (usuário negou)');
-          }
-        } else {
-          log('ℹ️ Permissions API não disponível → tentando startWebcam() (pode abrir prompt)');
-          try { await startWebcam(); return; } catch(e){ log('⚠️ startWebcam falhou (sem Permissions API): '+(e.message||e)); }
-        }
-      } catch (err) {
-        log('⚠️ Erro ao checar permissões: ' + (err.message || err));
-      }
-
-      if (!__autoStartClickHandlerAdded) {
-        const handler = async function userGestureTryStart() {
-          try {
-            log('👆 Primeiro gesto detectado — tentando iniciar webcam');
-            await startWebcam();
-          } catch(e) {
-            log('❌ Ainda não foi possível iniciar a webcam após o gesto: ' + (e.message||e));
-          } finally {
-            document.documentElement.removeEventListener('click', handler);
-            __autoStartClickHandlerAdded = false;
-          }
-        };
-        document.documentElement.addEventListener('click', handler);
-        __autoStartClickHandlerAdded = true;
-        log('ℹ️ Registrado listener para primeiro clique — ao tocar, tentarei iniciar a webcam');
-      }
-    }
+    function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
     // -----------------------
-    // Event wiring (buttons)
+    // UI Buttons wiring
     // -----------------------
     genQrBtn.addEventListener('click', generateQrCodeForCell);
     limparVisualizadorBtn.addEventListener('click', () => {
@@ -877,15 +675,6 @@
       qrcodeVisualizadorEl.innerHTML = '';
       genVisualizadorQrBtn.disabled = true;
       printBtn.disabled = true;
-      // Limpar boomerang também
-      boomerangPreview.style.display = 'none';
-      boomerangPreview.src = '';
-      boomerangStatus.textContent = 'Nenhum boomerang recebido ainda';
-      boomerangStatus.style.color = 'var(--muted)';
-      if (currentBoomerangUrl) {
-        URL.revokeObjectURL(currentBoomerangUrl);
-        currentBoomerangUrl = null;
-      }
       try { socket && socket.emit('reset_session', { session: FIXED_SESSION }); log('🔁 reset_session emitido'); } catch(e){ log('Erro ao emitir reset_session: ' + e); }
     });
 
@@ -900,18 +689,20 @@
       } catch(e){ log('❌ Erro imprimir: ' + (e.message || e)); }
     });
 
+    // webcam buttons
     startWebcamBtn.addEventListener('click', async () => { try { await startWebcam(); } catch(e){} });
     stopWebcamBtn.addEventListener('click', stopWebcam);
     startStreamBtn.addEventListener('click', () => startStreamingToSession(streamSelect.value || FIXED_SESSION));
     stopStreamBtn.addEventListener('click', () => { try { socket && socket.emit('stop_stream', { session: FIXED_SESSION }); } catch(e){} stopStream(); });
 
     genVisualizadorQrBtn.addEventListener('click', async () => {
+      // manual trigger to re-create visualizador from current lastPhotos
       if (!lastPhotos.length) { log('❌ Nenhuma foto para gerar visualizador'); return; }
       await processPhotosAndUpload(lastPhotos, null);
     });
 
     // -----------------------
-    // Render init
+    // RENDER INIT
     // -----------------------
     window.addEventListener('DOMContentLoaded', () => {
       initSocket();
@@ -919,14 +710,24 @@
       printBtn.disabled = true;
       generateQrCodeForCell();
       log('Operador pronto. Aguardando interação e/ou fotos do celular.');
+      // initialize streamingInterval var safety
+      if (typeof streamingInterval === 'undefined') streamingInterval = null;
     });
 
-    // safety
-    if (typeof streamingInterval === 'undefined') streamingInterval = null;
+    // Attempt auto-start webcam (best-effort)
+    async function attemptAutoStartWebcam(){
+      try { await startWebcam(); } catch(e){ log('Auto-start webcam falhou: ' + e.message); }
+    }
 
-    // Expose some functions for console debugging (optional)
+    // expose some helpers for debugging in console
     window._operator = {
-      initSocket, startWebcam, stopWebcam, startStreamingToSession, stopStream, processPhotosAndUpload, processBoomerangAndPublish
+      socketRef: () => socket,
+      lastPhotosRef: () => lastPhotos,
+      sendTestPhotos: () => {
+        // handy: emit photos_from_cell test (only for debug)
+        const fake = [ 'data:image/png;base64, ...' ];
+        socket.emit('photos_from_cell', { session: FIXED_SESSION, photos: fake });
+      }
     };
 
   })();
