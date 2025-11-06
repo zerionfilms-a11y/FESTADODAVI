@@ -39,6 +39,9 @@
     /* Boomerang preview screen placed above */
     #boomPreviewScreen{background:rgba(0,0,0,0.92);z-index:130;display:none;align-items:center;justify-content:center;flex-direction:column;padding:12px}
     #boomPreviewVideo{max-width:100%;max-height:80%;border-radius:8px;background:#000}
+    /* NOVO: Estilo para mostrar a câmera durante a gravação */
+    #recordingScreen{background:rgba(0,0,0,0.7);z-index:110}
+    #recordingMsg{position:fixed;top:20%;left:0;right:0;text-align:center;font-size:32px;font-weight:700;z-index:120;color:#fff;text-shadow:0 0 10px #000}
   </style>
 </head>
 <body>
@@ -65,6 +68,11 @@
     </div>
   </div>
 
+  <!-- NOVA TELA: Para mostrar a câmera durante a gravação do boomerang -->
+  <div id="recordingScreen" class="screen hidden">
+    <div id="recordingMsg">🎥 Movimente-se...</div>
+  </div>
+
   <!-- video (kept visible for rendering frames but nearly invisible) -->
   <video id="videoEl" autoplay playsinline muted></video>
   <canvas id="canvasEl"></canvas>
@@ -86,7 +94,7 @@
 
   <!-- boomerang preview modal -->
   <div id="boomPreviewScreen" class="screen hidden">
-    <video id="boomPreviewVideo" controls playsinline></video>
+    <video id="boomPreviewVideo" controls playsinline loop></video>
     <div class="preview-buttons" style="position:relative;margin-top:12px;max-width:720px">
       <button id="boomRefazerBtn" class="preview-btn">🔄 Refazer</button>
       <button id="boomContinuarBtn" class="preview-btn">✅ Continuar</button>
@@ -98,6 +106,11 @@
       <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <h1>✨ Obrigado por utilizar a cabine!</h1>
       <p>Espere o operador encerrar a sessão.</p>
+      <!-- NOVO: QR Code será mostrado aqui quando disponível -->
+      <div id="qrCodeContainer" style="margin-top:20px; display:none;">
+        <p style="font-size:16px; margin-bottom:10px;">Seu boomerang está pronto!</p>
+        <canvas id="qrCanvas" style="background:white; padding:10px; border-radius:8px;"></canvas>
+      </div>
     </div>
   </div>
 
@@ -106,6 +119,9 @@
   <audio id="clack" src="clack.mp3" preload="auto"></audio>
   <audio id="inicio" src="inicio.mp3" preload="auto"></audio>
   <audio id="fim" src="fim.mp3" preload="auto"></audio>
+
+  <!-- NOVO: Incluir biblioteca QR Code -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 
   <script>
     // Config
@@ -126,6 +142,7 @@
     const canvasEl = document.getElementById('canvasEl');
     const progressEl = document.getElementById('progress');
     const countdownEl = document.getElementById('countdown');
+    const msgEl = document.getElementById('msg');
     const previewScreen = document.getElementById('previewScreen');
     const previewImage = document.getElementById('previewImage');
     const refazerBtn = document.getElementById('refazerBtn');
@@ -135,6 +152,11 @@
     const boomRefazerBtn = document.getElementById('boomRefazerBtn');
     const boomContinuarBtn = document.getElementById('boomContinuarBtn');
     const thankScreen = document.getElementById('thankScreen');
+    const qrCodeContainer = document.getElementById('qrCodeContainer');
+    const qrCanvas = document.getElementById('qrCanvas');
+    // NOVO: Elementos da tela de gravação
+    const recordingScreen = document.getElementById('recordingScreen');
+    const recordingMsg = document.getElementById('recordingMsg');
     const clack = document.getElementById('clack');
     const inicio = document.getElementById('inicio');
     const fim = document.getElementById('fim');
@@ -154,14 +176,16 @@
 
     // helpers
     function showScreen(el){ 
-      [enterFs,welcomeScreen,previewScreen,boomPreviewScreen,thankScreen].forEach(s=>{ 
+      [enterFs,welcomeScreen,previewScreen,boomPreviewScreen,thankScreen,recordingScreen].forEach(s=>{ 
         if(s){ 
           s.classList.add('hidden');
         }
       });
       canvasEl.style.display='none';
       countdownEl.textContent=''; 
+      msgEl.textContent='';
       progressEl.classList.add('hidden');
+      recordingMsg.textContent='🎥 Movimente-se...';
       if(el){ 
         el.classList.remove('hidden');
       }
@@ -503,43 +527,68 @@
       try {
         if(!stream) await startCamera();
       } catch(e){ return; }
-      for(let t=3;t>0;t--){ countdownEl.textContent = String(t); await sleep(700); }
-      countdownEl.textContent='';
+      
+      // Mostra a tela de gravação com a câmera visível
+      showScreen(recordingScreen);
+      canvasEl.style.display = 'block'; // Garante que o canvas (câmera) está visível
+      
+      for(let t=3;t>0;t--){ 
+        recordingMsg.textContent = `Preparando... ${t}`;
+        await sleep(700); 
+      }
+      recordingMsg.textContent = '🎥 Movimente-se...';
+      
       progressEl.textContent = 'Gravando...'; progressEl.classList.remove('hidden');
       const shortBlob = await recordShortClip(BOOM_SHORT_MS);
       progressEl.classList.add('hidden');
+      
       if(!shortBlob){ log('shortBlob nulo'); showScreen(welcomeScreen); return; }
-      const shortUrl = URL.createObjectURL(shortBlob);
-      boomPreviewVideo.src = shortUrl;
+
+      // Processar o boomerang imediatamente para mostrar o preview com loop
+      progressEl.textContent = 'Processando boomerang...'; progressEl.classList.remove('hidden');
+      const finalBlob = await generateBoomerang(shortBlob, BOOM_FINAL_MS, BOOM_TARGET_W);
+      progressEl.classList.add('hidden');
+      
+      if(!finalBlob){ log('finalBlob nulo'); showScreen(welcomeScreen); return; }
+
+      const finalUrl = URL.createObjectURL(finalBlob);
+      boomPreviewVideo.src = finalUrl;
+      boomPreviewVideo.loop = true;
       boomPreviewVideo.play().catch(()=>{});
       showScreen(boomPreviewScreen);
+
       const refazer = async () => {
         boomPreviewVideo.pause();
         boomPreviewVideo.src = '';
         showScreen(null);
         try { await startCamera(); } catch(e){}
+        startBoomBtn.disabled = false;
       };
+      
       const continuar = async () => {
         boomPreviewVideo.pause();
         boomPreviewVideo.src = '';
         showScreen(null);
+        
         try {
-          const thumb = await blobToDataURL(shortBlob, true).catch(()=>null);
-          if(thumb){ socket.emit('photo_ready', { session, index: 0, viewerId: socket.id, photo: thumb }); }
+          const thumb = await blobToDataURL(finalBlob, true).catch(()=>null);
+          if(thumb){ 
+            socket.emit('photo_ready', { session, index: 0, viewerId: socket.id, photo: thumb });
+          }
         } catch(e){ log('thumb emit error: '+e); }
-        progressEl.textContent = 'Processando boomerang...'; progressEl.classList.remove('hidden');
-        const finalBlob = await generateBoomerang(shortBlob, BOOM_FINAL_MS, BOOM_TARGET_W);
-        progressEl.classList.add('hidden');
-        if(!finalBlob){
-          log('finalBlob nulo');
-          showScreen(welcomeScreen);
-          return;
-        }
+        
         try {
           const ab = await finalBlob.arrayBuffer();
-          await emitWithAckFallback('boomerang_ready', { session, viewerId: socket.id, filename: `boomerang_${Date.now()}.webm`, data: ab }, finalBlob);
+          await emitWithAckFallback('boomerang_ready', { 
+            session, 
+            viewerId: socket.id, 
+            filename: `boomerang_${Date.now()}.webm`, 
+            data: ab 
+          }, finalBlob);
+          
           const thumb2 = await blobToDataURL(finalBlob, true).catch(()=>null);
           if(thumb2) socket.emit('photos_submit', { session, viewerId: socket.id, photos: [thumb2] });
+          
           log('boomerang flow finished');
           stopCamera();
           showScreen(thankScreen);
@@ -548,8 +597,14 @@
           log('erro ao enviar boomerang: ' + e);
           showScreen(welcomeScreen);
         }
+        
+        startBoomBtn.disabled = false;
       };
-      const onceRef = () => { boomRefazerBtn.removeEventListener('click', onRef); boomContinuarBtn.removeEventListener('click', onCont); };
+      
+      const onceRef = () => { 
+        boomRefazerBtn.removeEventListener('click', onRef); 
+        boomContinuarBtn.removeEventListener('click', onCont); 
+      };
       const onRef = () => { onceRef(); refazer(); };
       const onCont = () => { onceRef(); continuar(); };
       boomRefazerBtn.addEventListener('click', onRef);
@@ -592,6 +647,29 @@
       });
     }
 
+    // NOVO: Listener para mostrar QR code no celular quando o boomerang estiver pronto
+    socket.on('show_qr_on_viewer', ({ visualizadorUrl }) => {
+      log('QR code recebido: ' + visualizadorUrl);
+      qrCodeContainer.style.display = 'block';
+      
+      // Gerar QR code
+      QRCode.toCanvas(qrCanvas, visualizadorUrl, { 
+        width: 200,
+        margin: 1,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
+      }, function (err) {
+        if (err) {
+          log('Erro ao gerar QR code: ' + err);
+          qrCodeContainer.innerHTML = '<p>Link: <a href="' + visualizadorUrl + '" target="_blank">' + visualizadorUrl + '</a></p>';
+        } else {
+          log('QR code gerado com sucesso');
+        }
+      });
+    });
+
     // Socket handlers
     socket.on('connect', ()=>{ if(session) socket.emit('cell_connected', { session }); log('socket connected'); });
     socket.on('disconnect', ()=>{ log('socket disconnected'); });
@@ -631,7 +709,6 @@
       showScreen(null);
       try { await startCamera(); } catch(e){ startBoomBtn.disabled=false; return; }
       await startBoomerangFlow();
-      startBoomBtn.disabled = false;
     });
 
     // expose for debug
