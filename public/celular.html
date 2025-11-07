@@ -6,450 +6,518 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <style>
-    /* ---------- layout básico ---------- */
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#000;color:#fff;overflow:hidden}
-    .screen{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;padding:15px}
-    .screen.visible{display:flex}
-    /* Use z-index explícito para evitar empilhamento inesperado */
-    #enterFs{z-index:100}
-    #welcomeScreen{z-index:110}
-    #cameraScreen{z-index:115}
-    #previewScreen{z-index:220}
-    #thankScreen{z-index:210}
-    /* botão */
-    #enterFsBtn{padding:16px 22px;border-radius:12px;border:none;background:#ffd600;color:#000;font-weight:700;cursor:pointer;font-size:18px;width:90%;max-width:320px}
-    #startBtn{padding:14px 20px;border-radius:12px;border:none;background:#fff;color:#0b84ff;font-weight:700;cursor:pointer;font-size:18px;width:90%;max-width:320px}
-    .logo{max-width:180px;margin-bottom:18px;border-radius:8px}
-    /* camera & canvas */
-    #cameraContainer{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#000;}
-    #videoEl{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block}
-    #canvasEl{position:absolute;inset:0;display:none}
-    /* preview */
-    #previewContainer{position:relative;width:100%;height:100%}
-    #previewImage{width:100%;height:100%;object-fit:contain;display:block}
-    .preview-buttons{position:absolute;bottom:36px;left:16px;right:16px;display:flex;gap:12px;justify-content:center}
-    .preview-btn{padding:12px 16px;border-radius:8px;border:none;font-weight:700;cursor:pointer;font-size:16px;background:rgba(0,0,0,0.7);color:#fff}
-    #refazerBtn{background:#dc3545}
-    #continuarBtn{background:#28a745}
-    /* progress/status */
-    #statusBar{position:fixed;left:12px;top:12px;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,0.5);z-index:999;font-weight:700;display:flex;align-items:center;gap:8px}
-    #statusDot{width:12px;height:12px;border-radius:50%;background:#b22222;box-shadow:0 0 8px rgba(0,0,0,0.6)}
-    #countdown{position:fixed;top:28%;left:0;right:0;text-align:center;font-size:110px;font-weight:800;text-shadow:0 0 20px #000;color:#fff;z-index:500;pointer-events:none}
-    /* small screens */
-    @media (max-width:480px){ #countdown{font-size:64px} .preview-btn{font-size:14px} }
+    button{cursor:pointer}
+    .hidden{display:none!important}
+    .visible{display:flex!important}
+
+    /* ENTER FULLSCREEN */
+    #enterFs{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#001e3c,#0b84ff);padding:18px;z-index:1000}
+    #enterPanel{width:95%;max-width:420px;background:rgba(0,0,0,0.32);padding:20px;border-radius:12px;text-align:center;backdrop-filter:blur(8px)}
+    #enterPanel .logo{max-width:140px;margin:0 auto 12px;display:block}
+    #enterPanel h1{color:#fff;margin-bottom:8px}
+    #enterPanel p{color:#dfefff;margin-bottom:14px}
+    #enterFsBtn{padding:12px 16px;border-radius:10px;border:none;background:#ffd600;color:#000;font-weight:700;font-size:18px;width:100%}
+
+    /* WELCOME SCREEN (with a real IMG as background) */
+    #welcomeScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#111;padding:0;overflow:hidden}
+    #welcomeBg{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:1}
+    /* Start button absolute on top of image using your coords mapping (4000x2250) */
+    #startBtn {
+      position:absolute;
+      left:43.15%;
+      top:76.49%;
+      width:49.9875%;
+      height:18.4%;
+      border-radius:12px; border:2px solid rgba(255,255,255,0.06);
+      background: rgba(0,0,0,0.18);
+      display:flex;align-items:center;justify-content:center;
+      color:#fff;font-weight:800;font-size:22px;letter-spacing:0.6px;
+      text-transform:uppercase;
+      z-index:50;
+    }
+    #startBtn .label{ pointer-events:none }
+
+    /* Video & canvas */
+    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5;transform:scaleX(-1)}
+    #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:6}
+    #progress{position:fixed;left:50%;transform:translateX(-50%);top:18px;padding:8px 12px;border-radius:10px;background:rgba(0,0,0,0.55);font-weight:700;z-index:200}
+    #countdown{position:fixed;left:50%;transform:translateX(-50%);top:28%;font-size:120px;font-weight:900;text-shadow:0 0 20px #000;color:#fff;z-index:201}
+    #msg{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;padding:8px 12px;border-radius:10px;background:rgba(0,0,0,0.55);z-index:200}
+
+    /* Preview overlay */
+    #previewScreen{position:fixed;inset:0;z-index:300;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.9)}
+    #previewContainer{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+    #previewImage{max-width:100%;max-height:100%;object-fit:contain}
+    .preview-buttons{position:absolute;bottom:36px;left:0;right:0;display:flex;gap:12px;justify-content:center;padding:0 20px}
+    .preview-btn{padding:12px 18px;border-radius:10px;border:none;font-weight:700;cursor:pointer;font-size:16px;background:rgba(255,255,255,0.06);color:#fff}
+    .btn-danger{background:rgba(220,53,69,0.9)}
+    .btn-ok{background:rgba(40,167,69,0.9)}
+
+    /* VISUALIZER overlay (QR or iframe video) */
+    #visualizerOverlay{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.96);display:none;flex-direction:column;align-items:center;justify-content:center;padding:18px}
+    #vizContainer{width:100%;max-width:920px;height:70vh;background:#111;border-radius:12px;display:flex;align-items:center;justify-content:center;position:relative}
+    #vizIframe{width:100%;height:100%;border:0;border-radius:8px;background:#000}
+    #vizQR{position:absolute;right:14px;bottom:14px;width:180px;height:180px;background:#fff;padding:8px;border-radius:8px;display:flex;align-items:center;justify-content:center}
+    #vizNotice{margin-top:14px;color:#ddd;font-size:16px;text-align:center}
+    #vizLockNote{position:absolute;left:12px;top:12px;color:#f77;font-weight:700;font-size:13px}
+
+    /* thank screen */
+    #thankScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#001e3c,#0b84ff);z-index:100}
+    #thankBox{background:rgba(255,255,255,0.08);padding:18px;border-radius:12px;text-align:center;color:#fff}
+
+    /* debug */
+    #debugInfo{position:fixed;left:12px;bottom:12px;font-size:11px;color:#ccc;background:rgba(0,0,0,0.35);padding:6px 8px;border-radius:6px;z-index:999}
+    @media (max-width:480px){
+      #startBtn{font-size:18px}
+      #countdown{font-size:72px; top:24%}
+      #vizContainer{height:58vh}
+    }
   </style>
 </head>
 <body>
-
-  <!-- TELA INICIAL (fundo iniciar.png) -->
-  <div id="enterFs" class="screen visible" style="background:url('iniciar.png') center/cover no-repeat;">
-    <div style="text-align:center;background:rgba(0,0,0,0.45);padding:18px;border-radius:12px;width:95%;max-width:420px;">
-      <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <!-- botão clicável real -->
-      <button id="enterFsBtn" aria-label="Entrar em tela cheia">🎬 Entrar em Tela Cheia</button>
-      <p style="opacity:0.9;margin-top:12px;font-size:14px">Toque para abrir em tela cheia e iniciar</p>
+  <!-- ENTER FULLSCREEN -->
+  <div id="enterFs" role="dialog" aria-label="Entrar em tela cheia">
+    <div id="enterPanel">
+      <img src="logo.png" class="logo" alt="Logo" onerror="this.style.display='none'">
+      <h1>📸 Cabine Fotográfica</h1>
+      <p>Para melhor experiência, entre em tela cheia</p>
+      <button id="enterFsBtn" type="button">🎬 Entrar em Tela Cheia</button>
     </div>
   </div>
 
-  <!-- TELA DE BOAS-VINDAS / INICIAR -->
-  <div id="welcomeScreen" class="screen" style="background:linear-gradient(135deg,#001e3c,#0b84ff);">
-    <div style="text-align:center;padding:20px;border-radius:12px;background:rgba(255,255,255,0.04);width:95%;max-width:420px;">
-      <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1 style="margin-bottom:10px">📸 Cabine Fotográfica</h1>
-      <button id="startBtn">🎬 Iniciar Sessão</button>
-    </div>
+  <!-- WELCOME SCREEN - com IMG real como fundo -->
+  <div id="welcomeScreen" class="hidden" aria-hidden="true">
+    <img id="welcomeBg" src="iniciar.png" alt="Fundo iniciar" onerror="onWelcomeBgError()" />
+    <button id="startBtn" aria-label="Iniciar Sessão"><span class="label">INICIAR SESSÃO</span></button>
   </div>
 
-  <!-- TELA DA CÂMERA (mostra vídeo) -->
-  <div id="cameraScreen" class="screen" style="background:#000;">
-    <div id="cameraContainer">
-      <video id="videoEl" autoplay playsinline muted></video>
-      <canvas id="canvasEl"></canvas>
-    </div>
-  </div>
+  <!-- camera and canvas -->
+  <video id="videoEl" autoplay playsinline muted></video>
+  <canvas id="canvasEl"></canvas>
 
-  <!-- PREVIEW -->
-  <div id="previewScreen" class="screen" style="background:rgba(0,0,0,0.9);">
+  <div id="progress" class="hidden" aria-hidden="true"></div>
+  <div id="countdown" class="hidden" aria-hidden="true"></div>
+  <div id="msg" class="hidden" aria-hidden="true"></div>
+
+  <!-- preview -->
+  <div id="previewScreen" class="hidden" aria-hidden="true">
     <div id="previewContainer">
-      <img id="previewImage" src="" alt="Preview">
+      <img id="previewImage" src="" alt="Preview da foto">
       <div class="preview-buttons">
-        <button id="refazerBtn" class="preview-btn">🔄 Refazer</button>
-        <button id="continuarBtn" class="preview-btn">✅ Continuar</button>
+        <button id="refazerBtn" class="preview-btn btn-danger">🔄 Refazer</button>
+        <button id="continuarBtn" class="preview-btn btn-ok">✅ Continuar</button>
       </div>
     </div>
   </div>
 
-  <!-- THANK YOU -->
-  <div id="thankScreen" class="screen" style="background:linear-gradient(135deg,#001e3c,#0b84ff);">
-    <div style="text-align:center;padding:20px;border-radius:12px;background:rgba(255,255,255,0.04);width:95%;max-width:420px;">
-      <img src="logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1>✨ Obrigado por usar a cabine!</h1>
-      <p id="sendStatus">(enviando...)</p>
-      <p style="opacity:0.9;font-size:13px;margin-top:10px">Aguardando confirmação do operador (QR aparecerá automaticamente).</p>
+  <!-- visualizer overlay (shows iframe or QR) -->
+  <div id="visualizerOverlay" aria-hidden="true">
+    <div id="vizContainer">
+      <div id="vizLockNote">Aguardando finalização no Index — visualizador travado até o operador finalizar</div>
+      <iframe id="vizIframe" src="about:blank" title="Visualizador"></iframe>
+      <div id="vizQR"><canvas id="vizQrCanvas" width="160" height="160"></canvas></div>
+    </div>
+    <div id="vizNotice">Aguarde — a sessão só será liberada quando o operador finalizar.</div>
+  </div>
+
+  <!-- thank -->
+  <div id="thankScreen" class="hidden" aria-hidden="true">
+    <div id="thankBox">
+      <h2>✨ Obrigado por utilizar a cabine!</h2>
+      <p>Espere o operador encerrar a sessão.</p>
     </div>
   </div>
 
-  <!-- STATUS -->
-  <div id="statusBar" style="display:none">
-    <div id="statusDot"></div>
-    <div id="statusText">Aguardando</div>
-  </div>
+  <div id="debugInfo" aria-hidden="true"></div>
 
-  <div id="countdown" style="display:none"></div>
+  <!-- optional sounds -->
+  <audio id="clack" src="clack.mp3" preload="auto"></audio>
+  <audio id="inicio" src="inicio.mp3" preload="auto"></audio>
+  <audio id="fim" src="fim.mp3" preload="auto"></audio>
 
-<script>
-/* ----------
-  Celular — versão corrigida para evitar telas sobrepostas e tornar fluxo previsível
-  - Substitua apenas este arquivo no seu public/
-  - Backend padrão (mude se precisar): https://festadodavi.onrender.com
----------- */
+  <script>
+    /* ---------- Config ---------- */
+    const SERVER_URL = "festadodavi-production-0591.up.railway.app"; // ajuste se precisar
+    const MAX_PHOTOS = 3;
+    const COUNTDOWN_SECONDS = 5;
 
-(() => {
-  const BASE_SERVER = "festadodavi-production-0591.up.railway.app"; // seu backend
-  const socket = io(BASE_SERVER, { autoConnect:false, transports:['websocket','polling'] });
-
-  // DOM
-  const enterFs = document.getElementById('enterFs');
-  const enterFsBtn = document.getElementById('enterFsBtn');
-  const welcomeScreen = document.getElementById('welcomeScreen');
-  const startBtn = document.getElementById('startBtn');
-  const cameraScreen = document.getElementById('cameraScreen');
-  const cameraContainer = document.getElementById('cameraContainer');
-  const videoEl = document.getElementById('videoEl');
-  const canvasEl = document.getElementById('canvasEl');
-  const previewScreen = document.getElementById('previewScreen');
-  const previewImage = document.getElementById('previewImage');
-  const refazerBtn = document.getElementById('refazerBtn');
-  const continuarBtn = document.getElementById('continuarBtn');
-  const thankScreen = document.getElementById('thankScreen');
-  const sendStatus = document.getElementById('sendStatus');
-  const statusBar = document.getElementById('statusBar');
-  const statusDot = document.getElementById('statusDot');
-  const statusText = document.getElementById('statusText');
-  const countdownEl = document.getElementById('countdown');
-
-  // session from query
-  const params = new URLSearchParams(location.search);
-  const session = params.get('session') || 'cabine-fixa';
-
-  // state
-  let stream = null;
-  let photos = [];
-  let currentPhotoData = null;
-  let currentIndex = 0;
-  let sending = false;
-
-  // showScreen utility: garante que só UMA tela fica visível — elimina sobreposição
-  function showScreen(target) {
-    // todas as telas
-    const screens = [enterFs, welcomeScreen, cameraScreen, previewScreen, thankScreen];
-    screens.forEach(s => {
-      if (!s) return;
-      if (s === target) {
-        s.classList.add('visible');
-        // special handling for camera screen: show/hide cameraContainer
-        if (s === cameraScreen) {
-          cameraContainer.style.display = 'flex';
-          // video MUST be visible when camera screen shown
-          if (videoEl.srcObject) videoEl.style.display = 'block';
-          canvasEl.style.display = 'none';
-        }
-      } else {
-        s.classList.remove('visible');
-      }
+    /* ---------- Socket ---------- */
+    const socket = io(SERVER_URL, {
+      transports: ["websocket","polling"],
+      reconnection: true,
+      path: "/socket.io"
     });
 
-    // ensure preview overlay hidden unless target is preview
-    if (target !== previewScreen) {
-      previewScreen.style.display = previewScreen.classList.contains('visible') ? 'flex' : 'none';
-      previewImage.src = previewImage.src; // noop
-    } else {
-      previewScreen.style.display = 'flex';
+    /* ---------- DOM ---------- */
+    const enterFs = document.getElementById('enterFs');
+    const enterFsBtn = document.getElementById('enterFsBtn');
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    const startBtn = document.getElementById('startBtn');
+    const welcomeBg = document.getElementById('welcomeBg');
+
+    const videoEl = document.getElementById('videoEl');
+    const canvasEl = document.getElementById('canvasEl');
+    const progressEl = document.getElementById('progress');
+    const countdownEl = document.getElementById('countdown');
+    const msgEl = document.getElementById('msg');
+
+    const previewScreen = document.getElementById('previewScreen');
+    const previewImage = document.getElementById('previewImage');
+    const refazerBtn = document.getElementById('refazerBtn');
+    const continuarBtn = document.getElementById('continuarBtn');
+
+    const visualizerOverlay = document.getElementById('visualizerOverlay');
+    const vizIframe = document.getElementById('vizIframe');
+    const vizQrCanvas = document.getElementById('vizQrCanvas');
+
+    const thankScreen = document.getElementById('thankScreen');
+    const debugInfo = document.getElementById('debugInfo');
+
+    /* ---------- State ---------- */
+    const params = new URLSearchParams(location.search);
+    const session = params.get('session') || 'cabine-fixa';
+    let stream = null;
+    let photos = [];
+    let currentPhotoIndex = 0;
+    let currentPhotoData = null;
+    let isCapturing = false;
+    let visualizerLocked = false; // quando true, celular fica preso na tela do visualizador até finalização do index
+
+    /* debug */
+    setInterval(() => {
+      debugInfo.textContent = `Sessão: ${session} | Socket: ${socket.connected ? '🟢' : '🔴'} | Fotos: ${photos.length}/${MAX_PHOTOS} | Capturando: ${isCapturing ? 'SIM' : 'NÃO'} | VizLocked: ${visualizerLocked ? 'SIM' : 'NÃO'}`;
+    }, 700);
+
+    /* ---------- Helpers ---------- */
+    function onWelcomeBgError(){
+      console.warn('Falha ao carregar iniciar.png — verifique o caminho/nome (case-sensitive).');
+      debugInfo.textContent = 'Erro: iniciar.png não encontrado. Coloque iniciar.png na mesma pasta do celular.html (verifique maiúsculas/minúsculas).';
+      welcomeBg.style.display = 'none';
     }
 
-    // camera container toggling
-    if (target === cameraScreen) {
-      cameraContainer.style.display = 'flex';
-    } else {
-      cameraContainer.style.display = 'none';
+    function showScreen(screenEl){
+      [enterFs, welcomeScreen, previewScreen, thankScreen].forEach(s => s && s.classList.add('hidden'));
+      progressEl.classList.add('hidden'); countdownEl.classList.add('hidden'); msgEl.classList.add('hidden');
+      if(screenEl === welcomeScreen || screenEl === enterFs) stopCamera();
+      if(screenEl) screenEl.classList.remove('hidden');
+    }
+    function showProgress(text){ progressEl.textContent = text; progressEl.classList.remove('hidden'); }
+    function hideProgress(){ progressEl.classList.add('hidden'); }
+    function showCountdown(text){ countdownEl.textContent = text; countdownEl.classList.remove('hidden'); }
+    function hideCountdown(){ countdownEl.classList.add('hidden'); }
+
+    /* ---------- Camera ---------- */
+    async function startCamera(){
+      try{
+        const constraints = { video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        videoEl.srcObject = stream;
+        videoEl.style.display = 'block';
+        videoEl.style.transform = 'scaleX(-1)';
+        await videoEl.play().catch(()=>{});
+        await new Promise(r=>setTimeout(r,100));
+      }catch(err){
+        console.error('startCamera', err);
+        alert('Não foi possível acessar a câmera frontal. Verifique permissões.');
+        throw err;
+      }
     }
 
-    // status bar visibility
-    if (target === enterFs || target === welcomeScreen) {
-      hideStatus();
-    } else {
-      showStatus();
+    function stopCamera(){
+      try{
+        if(stream) { stream.getTracks().forEach(t=>t.stop()); stream = null; }
+      }catch(e){}
+      try{ videoEl.pause(); videoEl.srcObject = null; }catch(e){}
+      videoEl.style.display = 'none';
     }
-  }
 
-  // status helpers
-  function showStatus(){ statusBar.style.display = 'flex'; }
-  function hideStatus(){ statusBar.style.display = 'none'; }
-  function setStatus(text, color) {
-    statusText.textContent = text || '';
-    statusDot.style.background = color || '#b22222';
-    showStatus();
-  }
+    function grabFrameDataURL(quality=0.95){
+      const w = videoEl.videoWidth || 1280;
+      const h = videoEl.videoHeight || 720;
+      canvasEl.width = w; canvasEl.height = h;
+      const ctx = canvasEl.getContext('2d');
+      ctx.clearRect(0,0,w,h);
+      ctx.save();
+      ctx.translate(w,0); ctx.scale(-1,1);
+      ctx.drawImage(videoEl, 0, 0, w, h);
+      ctx.restore();
+      return canvasEl.toDataURL('image/jpeg', quality);
+    }
 
-  // camera helpers
-  async function startCamera() {
-    try {
-      const constraints = { video: { facingMode: "user" }, audio: false };
-      stream = await navigator.mediaDevices.getUserMedia(constraints);
-      videoEl.srcObject = stream;
+    /* ---------- Capture flow ---------- */
+    async function captureSinglePhotoFlow(){
+      isCapturing = true;
+      showProgress(`${currentPhotoIndex+1}/${MAX_PHOTOS}`);
+      if(!stream) await startCamera();
       videoEl.style.display = 'block';
-      await videoEl.play().catch(()=>{});
-      setStatus('Câmera ativa', '#28a745');
-    } catch(e) {
-      console.error('Erro câmera', e);
-      alert('Não foi possível acessar a câmera. Verifique permissões.');
-      showScreen(welcomeScreen);
-      throw e;
-    }
-  }
-  function stopCamera() {
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop());
-      stream = null;
-    }
-    videoEl.pause();
-    videoEl.srcObject = null;
-    videoEl.style.display = 'none';
-    canvasEl.style.display = 'none';
-    setStatus('Câmera parada', '#b22222');
-  }
 
-  // capture one photo with countdown
-  function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-  async function capturePhoto() {
-    // ensure video frame ready
-    if (!videoEl.videoWidth) {
-      // give it a moment
-      await sleep(200);
+      for(let t = COUNTDOWN_SECONDS; t > 0; t--){
+        if(t <= 2){ showCountdown('📸'); }
+        else { showCountdown(String(t)); }
+        if(t === 2){
+          try { document.getElementById('clack').currentTime = 0; document.getElementById('clack').play().catch(()=>{}); } catch(e){}
+        }
+        await new Promise(r=>setTimeout(r,1000));
+      }
+      hideCountdown();
+      const data = grabFrameDataURL(0.95);
+      isCapturing = false;
+      return data;
     }
 
-    // countdown visible
-    countdownEl.style.display = 'block';
-    for (let t=3; t>0; t--) {
-      countdownEl.textContent = t === 1 ? 'SORRIA!' : String(t);
-      await sleep(900);
+    async function runCaptureSequence(){
+      try{
+        await startCamera();
+        while(currentPhotoIndex < MAX_PHOTOS && !visualizerLocked){
+          currentPhotoData = await captureSinglePhotoFlow();
+          await showPreviewAndAwaitDecision(currentPhotoData);
+        }
+        // Se travou no visualizer enquanto capturava, a lógica de envio/finalização é feita via eventos socket
+        if(!visualizerLocked){
+          stopCamera();
+          showScreen(thankScreen);
+          await sendPhotosToServerWithRetry(1,5);
+        } else {
+          // se bloqueado, aguardamos finalizar pelo index; ainda enviamos as fotos imediatamente para o index para processar
+          await sendPhotosToServerWithRetry(1,5);
+        }
+      }catch(err){
+        console.error('runCaptureSequence error', err);
+        stopCamera();
+        alert('Erro durante captura. Reinicie a sessão.');
+        showScreen(welcomeScreen);
+      }
     }
-    countdownEl.style.display = 'none';
 
-    // draw to canvas and unmirror
-    canvasEl.width = videoEl.videoWidth || 1280;
-    canvasEl.height = videoEl.videoHeight || 720;
-    canvasEl.style.display = 'block';
-    const ctx = canvasEl.getContext('2d');
-    ctx.save();
-    ctx.translate(canvasEl.width,0);
-    ctx.scale(-1,1);
-    ctx.drawImage(videoEl, 0, 0, canvasEl.width, canvasEl.height);
-    ctx.restore();
-    const dataUrl = canvasEl.toDataURL('image/jpeg', 0.95);
-    return dataUrl;
-  }
+    function showPreviewAndAwaitDecision(photoData){
+      return new Promise((resolve) => {
+        previewImage.src = photoData;
+        previewScreen.classList.remove('hidden');
 
-  // flow: take 3 photos
-  async function run3PhotosFlow() {
-    photos = [];
-    currentIndex = 0;
-    try {
-      await startCamera();
-    } catch(e){ return; }
-    showScreen(cameraScreen);
-
-    while (currentIndex < 3) {
-      setStatus(`${currentIndex+1}/3`, '#ffc107');
-      const dataUrl = await capturePhoto();
-      currentPhotoData = dataUrl;
-
-      // show preview
-      previewImage.src = currentPhotoData;
-      // preview visible and block camera underneath
-      showScreen(previewScreen);
-
-      // wait for user choice
-      const decision = await new Promise((resolve) => {
-        const onRef = () => { refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); resolve('refazer'); };
-        const onCont = () => { refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); resolve('continuar'); };
+        const onRef = () => { cleanup(); resolve('refazer'); };
+        const onCont = () => { cleanup(); photos.push(photoData); currentPhotoIndex++; resolve('continuar'); };
+        function cleanup(){ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); previewScreen.classList.add('hidden'); }
         refazerBtn.addEventListener('click', onRef);
         continuarBtn.addEventListener('click', onCont);
       });
-
-      if (decision === 'refazer') {
-        // just continue the loop without increment
-        showScreen(cameraScreen);
-        await sleep(180);
-        continue;
-      } else {
-        photos.push(currentPhotoData);
-        currentIndex++;
-        showScreen(cameraScreen);
-        await sleep(180);
-        continue;
-      }
     }
 
-    // finished
-    stopCamera();
-    showScreen(thankScreen);
-    sendStatus.textContent = '(enviando...)';
-    await sendPhotosToServer();
-  }
+    /* ---------- Send photos to server (socket ack + retry + HTTP fallback) ---------- */
+    function sendPhotosToServerWithRetry(attempt=1, maxAttempts=5){
+      return new Promise((resolve, reject) => {
+        if(!photos || photos.length === 0) return resolve({ ok:false, reason:'no-photos' });
+        showProgress('Enviando fotos...');
+        const payload = { session, photos, ts:new Date().toISOString() };
 
-  /* ---------------------- SOCKET + SEND ---------------------- */
-  function ensureSocketConnected() {
-    return new Promise((resolve) => {
-      if (socket && socket.connected) {
-        resolve(true);
+        function tryHttpFallback(){
+          const url = new URL('/upload_photos', SERVER_URL.startsWith('http') ? SERVER_URL : 'https://' + SERVER_URL);
+          fetch(url.toString(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }).then(res => res.json()).then(json => {
+            hideProgress();
+            resolve({ ok:true, via:'http', resp:json });
+          }).catch(err => {
+            hideProgress();
+            console.warn('HTTP fallback failed', err);
+            reject(err);
+          });
+        }
+
+        if(socket && socket.connected){
+          try{
+            socket.timeout(10000).emit('photos_from_cell', payload, (err, ack) => {
+              if(err){
+                console.warn('socket emit timeout/err', err);
+                if(attempt < maxAttempts){
+                  setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1200 * attempt);
+                } else {
+                  tryHttpFallback();
+                }
+              } else {
+                // 🔧 CORREÇÃO: após envio bem-sucedido, avisamos o INDEX/SERVIDOR com 'photos_ready'
+                try {
+                  socket.emit('photos_ready', {
+                    session,
+                    uploaded: photos,
+                    visualizadorUrl: `${SERVER_URL}/visualizador/${encodeURIComponent(session)}`
+                  });
+                } catch(e){
+                  console.warn('emit local photos_ready falhou', e);
+                }
+
+                hideProgress();
+                resolve({ ok:true, via:'socket', ack });
+              }
+            });
+          }catch(e){
+            console.warn('socket emit exception', e);
+            if(attempt < maxAttempts){
+              setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1200 * attempt);
+            } else {
+              tryHttpFallback();
+            }
+          }
+        } else {
+          if(attempt < maxAttempts){
+            socket.connect();
+            setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1500);
+          } else {
+            tryHttpFallback();
+          }
+        }
+      });
+    }
+
+    /* ---------- Visualizer lock flow (novo) ----------
+      - Quando o servidor/index emitir 'visualizer_ready' com { session, visualizerUrl, qrUrl? },
+        o celular:
+        * trava a UI, mostra overlay visualizer (iframe com visualizerUrl e QR canvas com qrUrl se houver)
+        * pausa câmera
+        * não permite continuar fluxo até receber 'finalize_session' (ou 'reset_session')
+      - Quando o servidor emitir 'finalize_session' (ou 'reset_session'):
+        * oculta overlay, destrava a UI, volta para tela de iniciar (welcome)
+    -----------------------------------------------*/
+    function showVisualizerOverlay({ visualizerUrl, qrUrl }){
+      visualizerLocked = true;
+      // pause camera for CPU and privacy
+      stopCamera();
+      // block interactions
+      visualizerOverlay.style.display = 'flex';
+      visualizerOverlay.setAttribute('aria-hidden','false');
+      // set iframe src
+      try { vizIframe.src = visualizerUrl || 'about:blank'; } catch(e){ vizIframe.src = 'about:blank'; }
+      // draw QR if supplied
+      if(qrUrl){
+        try {
+          // use simple QR generator if QR lib not available: try to use canvas fallback to draw image if URL is an image
+          const ctx = vizQrCanvas.getContext('2d');
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            ctx.clearRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
+            // center-fit
+            const sx = img.width, sy = img.height;
+            const scale = Math.min(vizQrCanvas.width / sx, vizQrCanvas.height / sy);
+            const w = sx * scale, h = sy * scale;
+            ctx.drawImage(img, (vizQrCanvas.width - w)/2, (vizQrCanvas.height - h)/2, w, h);
+          };
+          img.onerror = () => {
+            // if it's not an image, try to render text
+            ctx.clearRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
+            ctx.fillStyle='#000'; ctx.fillRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
+            ctx.fillStyle='#fff'; ctx.font='12px Arial'; ctx.fillText('QR',20,20);
+          };
+          img.src = qrUrl;
+        } catch(e){
+          console.warn('erro desenhando qr', e);
+        }
+      } else {
+        // clear canvas
+        const ctx = vizQrCanvas.getContext('2d');
+        ctx.clearRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
+      }
+
+      // ensure UI elements disabled while locked
+      enterFsBtn.disabled = true;
+      startBtn.disabled = true;
+    }
+
+    function hideVisualizerOverlay(){
+      visualizerLocked = false;
+      visualizerOverlay.style.display = 'none';
+      visualizerOverlay.setAttribute('aria-hidden','true');
+      vizIframe.src = 'about:blank';
+      // re-enable UI
+      enterFsBtn.disabled = false;
+      startBtn.disabled = false;
+      // return to welcome screen (as you requested: only Index can finish)
+      showScreen(welcomeScreen);
+    }
+
+    /* ---------- Events wiring ---------- */
+    enterFsBtn.addEventListener('click', async () => {
+      try { await document.documentElement.requestFullscreen(); } catch(e){ console.warn('fullscreen failed', e); }
+      // show welcome screen; IMG element handles loading
+      if(!visualizerLocked) showScreen(welcomeScreen);
+      if(socket && socket.connected) socket.emit('cell_entered_fullscreen', { session });
+    });
+
+    startBtn.addEventListener('click', async () => {
+      if(visualizerLocked) return; // bloqueado
+      try { document.getElementById('inicio').currentTime = 0; document.getElementById('inicio').play().catch(()=>{}); } catch(e){}
+      showScreen(null); // hide overlays -> camera
+      currentPhotoIndex = 0; photos = []; currentPhotoData = null;
+      await runCaptureSequence();
+    });
+
+    // socket basic events
+    socket.on('connect', () => {
+      console.log('socket connected', socket.id);
+      if(session) socket.emit('cell_connected', { session, id: socket.id });
+    });
+    socket.on('disconnect', () => { console.log('socket disconnected'); });
+
+    // servidor diz "mostra o visualizador e trava o celular até eu finalizar"
+    socket.on('visualizer_ready', (data) => {
+      // data expected: { session, visualizerUrl, qrUrl }
+      if(!data) return;
+      if(data.session && data.session !== session) {
+        console.log('visualizer_ready for different session, ignoring', data.session);
         return;
       }
-      // connect and wait a little
-      socket.connect();
-      let waited = 0;
-      const iv = setInterval(() => {
-        if (socket.connected) {
-          clearInterval(iv);
-          resolve(true);
-        } else if (waited > 6000) {
-          clearInterval(iv);
-          resolve(false);
-        }
-        waited += 300;
-      }, 300);
+      console.log('visualizer_ready received', data);
+      showVisualizerOverlay({ visualizerUrl: data.visualizerUrl || data.visualizadorUrl || data.url, qrUrl: data.qrUrl || data.qrcode || data.qr });
     });
-  }
 
-  async function sendPhotosToServer() {
-    if (!photos || photos.length === 0) {
-      sendStatus.textContent = '(nenhuma foto)';
-      return false;
-    }
-    if (sending) return false;
-    sending = true;
+    // servidor finaliza sessão — libera celular (isso pode ser emitido pelo Index quando o operador clicar "finalizar sessão")
+    socket.on('finalize_session', (data) => {
+      if(data && data.session && data.session !== session) return;
+      console.log('finalize_session received, unlocking celular');
+      hideVisualizerOverlay();
+      // reset internal state
+      photos = []; currentPhotoIndex = 0; currentPhotoData = null;
+    });
+    // também aceita 'reset_session' para compatibilidade
+    socket.on('reset_session', (data) => {
+      if(data && data.session && data.session !== session) return;
+      console.log('reset_session received, unlocking celular');
+      hideVisualizerOverlay();
+      photos = []; currentPhotoIndex = 0; currentPhotoData = null;
+    });
 
-    setStatus('Conectando ao servidor...', '#ffc107');
-    const ok = await ensureSocketConnected();
-    if (!ok) {
-      setStatus('Falha conexão', '#b22222');
-      sendStatus.textContent = '(erro: sem conexão)';
-      sending = false;
-      return false;
-    }
+    // if server requests the cell to show a QR only
+    socket.on('show_qr', ({ visualizadorUrl }) => {
+      if(!visualizadorUrl) return;
+      showVisualizerOverlay({ visualizerUrl: visualizadorUrl, qrUrl: visualizadorUrl });
+    });
 
-    setStatus('Enviando fotos...', '#ffc107');
-    // emit with session
-    socket.emit('photos_from_cell', { session, photos });
-    // Wait for photos_ready event or timeout
-    const confirmed = await waitForServerConfirmation(12000);
-    if (confirmed) {
-      setStatus('Enviado e confirmado', '#28a745');
-      sendStatus.textContent = '(enviado)';
-    } else {
-      setStatus('Sem confirmação do servidor', '#b22222');
-      sendStatus.textContent = '(erro no envio)';
-    }
-    sending = false;
-    return confirmed;
-  }
-
-  function waitForServerConfirmation(timeout = 10000) {
-    return new Promise((resolve) => {
-      let done = false;
-      const onPhotosReady = (payload) => {
-        if (payload && payload.session && payload.session !== session) return;
-        if (!done) { done = true; cleanup(); resolve(true); }
-      };
-      const onVisualizer = (payload) => {
-        if (payload && payload.session && payload.session !== session) return;
-        if (!done) { done = true; cleanup(); resolve(true); }
-      };
-      function cleanup() {
-        socket.off('photos_ready', onPhotosReady);
-        socket.off('visualizer_ready', onVisualizer);
-        clearTimeout(timer);
+    // keyboard escape hides preview if shown (but not visualizer when locked)
+    document.addEventListener('keydown', ev => {
+      if(ev.key === 'Escape'){
+        if(!previewScreen.classList.contains('hidden')) previewScreen.classList.add('hidden');
       }
-      socket.on('photos_ready', onPhotosReady);
-      socket.on('visualizer_ready', onVisualizer);
-      const timer = setTimeout(() => {
-        if (!done) { done = true; cleanup(); resolve(false); }
-      }, timeout);
     });
-  }
 
-  // socket events
-  socket.on('connect', () => {
-    setStatus('Socket: conectado', '#28a745');
-    // join our session room
-    socket.emit('join_session', { session, role: 'viewer' });
-  });
-  socket.on('disconnect', (reason) => {
-    setStatus('Socket: desconectado', '#b22222');
-  });
-  socket.on('photos_ready', (payload) => {
-    // server confirms photos: if this client is in thankScreen, show confirmed
-    if (payload && payload.session === session) {
-      setStatus('Servidor: fotos prontas', '#28a745');
-    }
-  });
-  socket.on('visualizer_ready', (payload) => {
-    if (payload && payload.session === session) {
-      setStatus('Visualizador pronto', '#28a745');
-    }
-  });
-  socket.on('finalize_session', (payload) => {
-    if (payload && payload.session === session) {
-      // operator finalizou sessão: volta ao início
-      photos = [];
-      currentIndex = 0;
-      currentPhotoData = null;
-      sendStatus.textContent = '(pronto)';
-      showScreen(enterFs);
-      setStatus('Pronto', '#28a745');
-    }
-  });
-  socket.on('reset_session', (payload) => {
-    if (payload && payload.session === session) {
-      photos = [];
-      currentIndex = 0;
-      currentPhotoData = null;
-      sendStatus.textContent = '(resetado)';
-      showScreen(enterFs);
-      setStatus('Pronto', '#b22222');
-    }
-  });
+    // initial state
+    showScreen(enterFs);
 
-  /* ---------------------- UI binding ---------------------- */
-  enterFsBtn.addEventListener('click', async () => {
-    try { await document.documentElement.requestFullscreen(); } catch(e){ /* ignore */ }
-    // connect socket and show welcome screen
-    showScreen(welcomeScreen);
-    // start socket connection (safe to call multiple times)
-    if (!socket.connected) socket.connect();
-  });
+    // stop camera on page hide
+    document.addEventListener('visibilitychange', () => {
+      if(document.hidden) stopCamera();
+    });
 
-  startBtn.addEventListener('click', async () => {
-    // start flow: camera -> 3 photos -> send
-    showScreen(cameraScreen);
-    await run3PhotosFlow();
-  });
-
-  // ensure preview buttons have focusable behavior (handlers already used in capture flow)
-  refazerBtn.addEventListener('click', ()=>{ /* handled inside run3PhotosFlow */ });
-  continuarBtn.addEventListener('click', ()=>{ /* handled inside run3PhotosFlow */ });
-
-  // initial UI
-  showScreen(enterFs);
-  setStatus('Pronto', '#b22222');
-
-  // expose for debug
-  window._celular = {
-    showScreen, startCamera, stopCamera, photos, sendPhotosToServer, socket
-  };
-
-})();
-</script>
+    // expose helpers for debug
+    window._cabine = {
+      startCamera: async ()=> await startCamera(),
+      stopCamera: ()=> stopCamera(),
+      grabFrame: ()=> grabFrameDataURL(),
+      photos: ()=> photos.slice(),
+      unlockVisualizer: ()=> hideVisualizerOverlay()
+    };
+  </script>
 </body>
 </html>
