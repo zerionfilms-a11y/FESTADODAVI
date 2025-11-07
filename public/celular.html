@@ -11,27 +11,31 @@
     button{cursor:pointer}
     .hidden{display:none!important}
     .visible{display:flex!important}
-    /* Enter fullscreen panel */
-    #enterFs{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#001e3c,#0b84ff);padding:18px}
+
+    /* ENTER FULLSCREEN */
+    #enterFs{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#001e3c,#0b84ff);padding:18px;z-index:1000}
     #enterPanel{width:95%;max-width:420px;background:rgba(0,0,0,0.32);padding:20px;border-radius:12px;text-align:center;backdrop-filter:blur(8px)}
     #enterPanel .logo{max-width:140px;margin:0 auto 12px;display:block}
     #enterPanel h1{color:#fff;margin-bottom:8px}
     #enterPanel p{color:#dfefff;margin-bottom:14px}
     #enterFsBtn{padding:12px 16px;border-radius:10px;border:none;background:#ffd600;color:#000;font-weight:700;font-size:18px;width:100%}
 
-    /* Welcome screen with big background (fundo_iniciar.png 4000x2250) */
-    #welcomeScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#111;background-size:cover;background-position:center center}
-    /* Clickable start button positioned relative to 4000x2250 coordinates */
+    /* WELCOME SCREEN (with a real IMG as background) */
+    #welcomeScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#111;padding:0;overflow:hidden}
+    #welcomeBg{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:1}
+    /* Start button absolute on top of image using your coords mapping (4000x2250) */
     #startBtn {
       position:absolute;
-      left:43.15%; top:76.49%;
-      width:49.875%; height:18.4%;
+      left:43.15%;
+      top:76.49%;
+      width:49.9875%;
+      height:18.4%;
       border-radius:12px; border:2px solid rgba(255,255,255,0.06);
-      background: linear-gradient(180deg, rgba(0,0,0,0.25), rgba(255,255,255,0.03));
+      background: rgba(0,0,0,0.18);
       display:flex;align-items:center;justify-content:center;
       color:#fff;font-weight:800;font-size:22px;letter-spacing:0.6px;
       text-transform:uppercase;
-      -webkit-tap-highlight-color: transparent;
+      z-index:50;
     }
     #startBtn .label{ pointer-events:none }
 
@@ -57,10 +61,14 @@
 
     /* debug */
     #debugInfo{position:fixed;left:12px;bottom:12px;font-size:11px;color:#ccc;background:rgba(0,0,0,0.35);padding:6px 8px;border-radius:6px;z-index:999}
+    @media (max-width:480px){
+      #startBtn{font-size:18px}
+      #countdown{font-size:72px; top:24%}
+    }
   </style>
 </head>
 <body>
-  <!-- ENTER FULLSCREEN PANEL -->
+  <!-- ENTER FULLSCREEN -->
   <div id="enterFs" role="dialog" aria-label="Entrar em tela cheia">
     <div id="enterPanel">
       <img src="logo.png" class="logo" alt="Logo" onerror="this.style.display='none'">
@@ -70,10 +78,12 @@
     </div>
   </div>
 
-  <!-- WELCOME SCREEN (custom background) -->
+  <!-- WELCOME SCREEN - agora com IMG real como fundo -->
   <div id="welcomeScreen" class="hidden" aria-hidden="true">
-    <!-- Start button placed exactly at the coords you provided; we put text inside -->
-    <button id="startBtn" aria-label="Iniciar Sessão"><span class="label">Iniciar Sessão</span></button>
+    <!-- background image element (carrega diretamente) -->
+    <img id="welcomeBg" src="iniciar.png" alt="Fundo iniciar" onerror="onWelcomeBgError()" />
+    <!-- botão posicionado sobre a imagem -->
+    <button id="startBtn" aria-label="Iniciar Sessão"><span class="label">INICIAR SESSÃO</span></button>
   </div>
 
   <!-- camera and canvas -->
@@ -112,7 +122,7 @@
 
   <script>
     /* ---------- Config ---------- */
-    const SERVER_URL = "festadodavi-production-0591.up.railway.app"; // troque aqui se precisar
+    const SERVER_URL = "festadodavi-production-0591.up.railway.app"; // backend padrão
     const MAX_PHOTOS = 3;
     const COUNTDOWN_SECONDS = 5;
 
@@ -128,6 +138,7 @@
     const enterFsBtn = document.getElementById('enterFsBtn');
     const welcomeScreen = document.getElementById('welcomeScreen');
     const startBtn = document.getElementById('startBtn');
+    const welcomeBg = document.getElementById('welcomeBg');
 
     const videoEl = document.getElementById('videoEl');
     const canvasEl = document.getElementById('canvasEl');
@@ -157,9 +168,17 @@
       debugInfo.textContent = `Sessão: ${session} | Socket: ${socket.connected ? '🟢' : '🔴'} | Fotos: ${photos.length}/${MAX_PHOTOS} | Capturando: ${isCapturing ? 'SIM' : 'NÃO'}`;
     }, 700);
 
-    /* ---------- UI helpers ---------- */
+    /* ---------- Helpers ---------- */
+    function onWelcomeBgError(){
+      console.warn('Falha ao carregar iniciar.png — verifique o caminho/nome (case-sensitive).');
+      // mostra mensagem visível
+      debugInfo.textContent = 'Erro: iniciar.png não encontrado. Coloque iniciar.png na mesma pasta do celular.html (verifique maiúsculas/minúsculas).';
+      // Mantemos o botão clicável mesmo sem imagem
+      welcomeBg.style.display = 'none';
+    }
+
     function showScreen(screenEl){
-      [enterFs, welcomeScreen, previewScreen, thankScreen].forEach(s=>s && s.classList.add('hidden'));
+      [enterFs, welcomeScreen, previewScreen, thankScreen].forEach(s => s && s.classList.add('hidden'));
       progressEl.classList.add('hidden'); countdownEl.classList.add('hidden'); msgEl.classList.add('hidden');
       if(screenEl === welcomeScreen || screenEl === enterFs) stopCamera();
       if(screenEl) screenEl.classList.remove('hidden');
@@ -200,7 +219,6 @@
       canvasEl.width = w; canvasEl.height = h;
       const ctx = canvasEl.getContext('2d');
       ctx.clearRect(0,0,w,h);
-      // mirrored draw so preview matches what user saw
       ctx.save();
       ctx.translate(w,0); ctx.scale(-1,1);
       ctx.drawImage(videoEl, 0, 0, w, h);
@@ -235,11 +253,9 @@
         while(currentPhotoIndex < MAX_PHOTOS){
           currentPhotoData = await captureSinglePhotoFlow();
           await showPreviewAndAwaitDecision(currentPhotoData);
-          // continue loop (if refazer, index unchanged; if continuar, index incremented in handler)
         }
         stopCamera();
         showScreen(thankScreen);
-        // send photos to server (retries)
         await sendPhotosToServerWithRetry(1,5);
       }catch(err){
         console.error('runCaptureSequence error', err);
@@ -254,21 +270,9 @@
         previewImage.src = photoData;
         previewScreen.classList.remove('hidden');
 
-        const onRef = () => {
-          cleanup();
-          resolve('refazer');
-        };
-        const onCont = () => {
-          cleanup();
-          photos.push(photoData);
-          currentPhotoIndex++;
-          resolve('continuar');
-        };
-        function cleanup(){
-          refazerBtn.removeEventListener('click', onRef);
-          continuarBtn.removeEventListener('click', onCont);
-          previewScreen.classList.add('hidden');
-        }
+        const onRef = () => { cleanup(); resolve('refazer'); };
+        const onCont = () => { cleanup(); photos.push(photoData); currentPhotoIndex++; resolve('continuar'); };
+        function cleanup(){ refazerBtn.removeEventListener('click', onRef); continuarBtn.removeEventListener('click', onCont); previewScreen.classList.add('hidden'); }
         refazerBtn.addEventListener('click', onRef);
         continuarBtn.addEventListener('click', onCont);
       });
@@ -282,7 +286,6 @@
         const payload = { session, photos, ts:new Date().toISOString() };
 
         function tryHttpFallback(){
-          // fallback: try POST to SERVER_URL + /upload_photos (server must implement)
           const url = new URL('/upload_photos', SERVER_URL.startsWith('http') ? SERVER_URL : 'https://' + SERVER_URL);
           fetch(url.toString(), {
             method: 'POST',
@@ -299,7 +302,6 @@
         }
 
         if(socket && socket.connected){
-          // send with acknowledgement callback
           try{
             socket.timeout(10000).emit('photos_from_cell', payload, (err, ack) => {
               if(err){
@@ -307,11 +309,9 @@
                 if(attempt < maxAttempts){
                   setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1200 * attempt);
                 } else {
-                  // try HTTP fallback
                   tryHttpFallback();
                 }
               } else {
-                // ack received
                 hideProgress();
                 resolve({ ok:true, via:'socket', ack });
               }
@@ -325,12 +325,10 @@
             }
           }
         } else {
-          // socket disconnected: attempt reconnect then retry
           if(attempt < maxAttempts){
             socket.connect();
             setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1500);
           } else {
-            // fallback http
             tryHttpFallback();
           }
         }
@@ -340,19 +338,12 @@
     /* ---------- Events wiring ---------- */
     enterFsBtn.addEventListener('click', async () => {
       try { await document.documentElement.requestFullscreen(); } catch(e){ console.warn('fullscreen failed', e); }
-      // set background image (fallback handled if missing)
-      welcomeScreen.style.backgroundImage = "url('fundo_iniciar.png')";
-      welcomeScreen.style.backgroundSize = 'cover';
-      welcomeScreen.style.backgroundPosition = 'center center';
+      // show welcome screen; IMG element handles loading
       showScreen(welcomeScreen);
-      // small visual guide class
-      startBtn.classList.add('guide');
-      // notify server
       if(socket && socket.connected) socket.emit('cell_entered_fullscreen', { session });
     });
 
     startBtn.addEventListener('click', async () => {
-      startBtn.classList.remove('guide');
       try { document.getElementById('inicio').currentTime = 0; document.getElementById('inicio').play().catch(()=>{}); } catch(e){}
       showScreen(null); // hide overlays -> camera
       currentPhotoIndex = 0; photos = []; currentPhotoData = null;
@@ -364,9 +355,7 @@
       console.log('socket connected', socket.id);
       if(session) socket.emit('cell_connected', { session, id: socket.id });
     });
-    socket.on('disconnect', () => {
-      console.log('socket disconnected');
-    });
+    socket.on('disconnect', () => { console.log('socket disconnected'); });
     socket.on('reset_session', () => {
       stopCamera();
       photos = []; currentPhotoIndex = 0; currentPhotoData = null;
@@ -376,9 +365,7 @@
     // keyboard escape hides preview if shown
     document.addEventListener('keydown', ev => {
       if(ev.key === 'Escape'){
-        if(!previewScreen.classList.contains('hidden')){
-          previewScreen.classList.add('hidden');
-        }
+        if(!previewScreen.classList.contains('hidden')) previewScreen.classList.add('hidden');
       }
     });
 
