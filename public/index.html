@@ -40,8 +40,6 @@
     .info-block{background:#0b0c0d;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.02);margin-bottom:12px;max-width:100%}
     #webcamPreview{width:480px;height:360px;background:#000;border:1px solid #222;display:block;margin-top:10px;border-radius:6px;object-fit:cover}
     @media(max-width:900px){#webcamPreview{width:320px;height:240px}}
-
-    /* extra UI niceties */
     .muted{color:var(--muted)}
     .flex-col{display:flex;flex-direction:column}
   </style>
@@ -115,20 +113,14 @@
   <div id="log"></div>
 
   <script>
-  /*
-    index.html (Operador) — completo corrigido
-    - Escuta corretamente photos_from_cell (raw do celular) e photos_ready (servidor já processou/uploadou)
-    - Mantém o restante do fluxo: montagens, upload opcional local via IMGBB, geração de QR, preview boomerang
-  */
-
   (function(){
     // -----------------------
     // CONFIG
     // -----------------------
-    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app"; // usar sempre esse backend conforme preferência
+    const SERVER_URL = "https://festadodavi.onrender.com"; // versão definitiva
     const FIXED_SESSION = "cabine-fixa";
-    const IMGBB_KEY = ""; // se quiser que o index faça upload direto defina aqui
-    const STORIES_TEMPLATE = "storiesdavi.png"; // coloque em public/
+    const IMGBB_KEY = ""; // opcional
+    const STORIES_TEMPLATE = "storiesdavi.png";
     const PRINT_TEMPLATE = "imprimirdavi.png";
     const BOOMERANG_TEMPLATE = "bomerang.png";
 
@@ -217,9 +209,8 @@
         setStatus('⚠️ Erro de conexão', null);
       });
 
-      // === handlers corrigidos: fotos & boomerang ===
-
-      // 1) Quando o CELULAR emite 'photos_from_cell' (raw dataURLs)
+      // --- Recebe fotos diretamente do celular ou via servidor ---
+      // aceitar ambos: 'photos_from_cell' (payload raw) e 'photos_submit' (se seu fluxo anterior usava)
       socket.on('photos_from_cell', (payload) => {
         try {
           const sid = payload && payload.session ? payload.session : FIXED_SESSION;
@@ -239,7 +230,19 @@
         }
       });
 
-      // 2) Quando o SERVIDOR emite 'photos_ready' (upload feito server-side -> URLs)
+      // legacy / alternative event name used no seu arquivo antigo
+      socket.on('photos_submit', ({ viewerId, photos } = {}) => {
+        try {
+          log('📥 photos_submit recebido (viewer:' + (viewerId||'—') + ', fotos:' + (Array.isArray(photos) ? photos.length : 0) + ')');
+          lastPhotos = Array.isArray(photos) ? photos.slice(0,3) : [];
+          renderThumbs();
+          processPhotosAndUpload(lastPhotos, viewerId).catch(e => log('❌ processPhotosAndUpload error: ' + (e.message||e)));
+        } catch(e) {
+          log('❌ photos_submit handler error: ' + (e.message||e));
+        }
+      });
+
+      // server processed uploads -> returns URLs
       socket.on('photos_ready', ({ session: sid, uploaded, visualizadorUrl } = {}) => {
         try {
           if (sid && sid !== FIXED_SESSION) {
@@ -259,7 +262,6 @@
         }
       });
 
-      // 3) Boomerang
       socket.on('boomerang_ready', ({ session: sid, videoUrl, visualizadorUrl } = {}) => {
         try {
           if (sid && sid !== FIXED_SESSION) {
@@ -279,14 +281,13 @@
         }
       });
 
-      // 4) outros eventos convenientes
-      socket.on('viewer_session_created', ({ viewerId }) => {
+      socket.on('viewer_session_created', ({ viewerId } = {}) => {
         log('🎉 Sessão do visualizador criada no servidor: ' + viewerId);
         addToViewerHistory(viewerId, lastPhotos.length);
       });
 
-      socket.on('reset_session', ({ session }) => {
-        log('🔁 reset_session recebido para ' + session);
+      socket.on('reset_session', ({ session } = {}) => {
+        log('🔁 reset_session recebido para ' + (session||'—'));
         lastPhotos = [];
         renderThumbs();
         clearCanvases();
@@ -295,9 +296,9 @@
         printBtn.disabled = true;
       });
 
-      socket.on('stream_frame', ({ session, frame }) => {
-        // opcional: só log para debug
-        // log('🔁 stream_frame relay recebido (len=' + (frame ? frame.length : 0) + ')');
+      // optionally receive stream frames
+      socket.on('stream_frame', ({ session, frame } = {}) => {
+        // noop or debug log if needed
       });
 
     } // initSocket
@@ -307,14 +308,13 @@
     // -----------------------
     function generateQrCodeForCell(){
       qrcodeEl.innerHTML = '';
-      const url = `${SERVER_URL}/celular.html?session=${encodeURIComponent(FIXED_SESSION)}`;
+      const url = `${SERVER_URL.replace(/\/+$/,'')}/celular.html?session=${encodeURIComponent(FIXED_SESSION)}`;
       const canvas = document.createElement('canvas');
       QRCode.toCanvas(canvas, url, { width: 220 }, (err) => { if(err) log('❌ Erro ao gerar QR Code: ' + err); });
       qrcodeEl.appendChild(canvas);
       log('📱 QR Code Celular gerado: ' + url);
     }
 
-    // Show visualizador QR on operator UI
     function showVisualizadorQr(visualizadorUrl){
       qrcodeVisualizadorEl.innerHTML = '';
       const qrCanvas = document.createElement('canvas');
@@ -361,7 +361,7 @@
       ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
     }
 
-    // coordinates preserved from previous working layout (keeps compatibilidade)
+    // coordenadas originais (mantidas)
     const STORIES_COORDS = [
       { x:289, y:242, w:2776 - 289, h:1809 - 242 },
       { x:292, y:2026, w:2776 - 292, h:3593 - 2026 },
@@ -703,9 +703,8 @@
       if (typeof streamingInterval === 'undefined') streamingInterval = null;
     });
 
-    // Attempt auto-start webcam (best-effort)
     async function attemptAutoStartWebcam(){
-      try { await startWebcam(); } catch(e){ log('Auto-start webcam falhou: ' + e.message); }
+      try { await startWebcam(); } catch(e){ log('Auto-start webcam falhou: ' + (e && e.message)); }
     }
 
     // expose some helpers for debugging in console
