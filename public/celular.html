@@ -234,8 +234,8 @@
     }
 
     function grabFrameDataURL(quality=0.95){
-      const w = videoEl.videoWidth || 1280;
-      const h = videoEl.videoHeight || 720;
+      const w = videoEl.videoWidth || 3264;
+      const h = videoEl.videoHeight || 1836;
       canvasEl.width = w; canvasEl.height = h;
       const ctx = canvasEl.getContext('2d');
       ctx.clearRect(0,0,w,h);
