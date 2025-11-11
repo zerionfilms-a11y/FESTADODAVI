@@ -4,525 +4,657 @@
   <meta charset="utf-8" />
   <title>Visualizador — Cabine Fotográfica</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <!-- Socket.IO -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+
   <style>
-    :root{--bg:#0b0f14;--card:#0f1720;--accent:#0b84ff;--muted:#9aa7b2}
-    *{box-sizing:border-box;margin:0;padding:0}
-    html,body{height:100%;font-family:Inter,system-ui,Arial,sans-serif;background:linear-gradient(180deg,#041022 0%, #071727 100%);color:#fff}
-    header{padding:18px 20px;display:flex;align-items:center;gap:16px;border-bottom:1px solid rgba(255,255,255,0.03)}
-    header h1{font-size:18px;margin:0}
-    .container{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:18px}
-    .panel{background:rgba(255,255,255,0.03);padding:14px;border-radius:12px;min-height:120px}
-    .left .section{margin-bottom:12px}
-    .small{font-size:13px;color:var(--muted)}
-    #debug{font-size:12px;color:#cbd5e1;padding:8px;background:rgba(255,255,255,0.02);border-radius:8px;max-height:120px;overflow:auto}
-    #itemsList{display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow:auto;margin-top:10px}
-    .itemCard{display:flex;gap:10px;align-items:center;padding:8px;border-radius:8px;background:rgba(0,0,0,0.25);cursor:pointer;border:1px solid rgba(255,255,255,0.03)}
-    .thumb{width:84px;height:84px;background:#000;display:flex;align-items:center;justify-content:center;border-radius:6px;overflow:hidden}
-    .thumb img, .thumb video{width:100%;height:100%;object-fit:cover;display:block}
-    .meta{flex:1;display:flex;flex-direction:column;gap:4px}
-    .meta .title{font-weight:700}
-    .meta .sub{font-size:12px;color:var(--muted)}
-    .actions{display:flex;gap:8px}
-    button{background:var(--accent);color:#fff;border:0;padding:8px 12px;border-radius:8px;font-weight:700;cursor:pointer}
-    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:#fff}
-    main{padding:14px}
-    #viewerArea{background:rgba(0,0,0,0.3);height:70vh;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;position:relative}
-    #viewerMedia{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,0.6)}
-    #qrModal{position:fixed;right:20px;bottom:20px;background:rgba(0,0,0,0.9);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.06);display:none;z-index:999}
-    #qrCanvas{width:220px;height:220px;display:block}
-    .badge{font-size:12px;padding:6px 8px;background:rgba(255,255,255,0.03);border-radius:999px}
-    footer{padding:12px;text-align:center;color:var(--muted);font-size:13px}
-    .controls{display:flex;gap:8px;align-items:center}
-    .u-small{font-size:12px}
-    .pill{padding:6px 10px;border-radius:999px;background:rgba(255,255,255,0.02);font-weight:700;border:1px solid rgba(255,255,255,0.02)}
-    /* responsive */
-    @media (max-width:900px){
-      .container{grid-template-columns:1fr;padding:12px}
-      #viewerArea{height:55vh}
+    :root{
+      --bg-overlay: rgba(0,0,0,0.45);
+      --card: rgba(255,255,255,0.04);
+      --accent: #0b84ff;
+      --muted: #cbd5e1;
+      --glass: rgba(255,255,255,0.06);
     }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;font-family:Inter,system-ui,Arial,sans-serif;background:#000;color:#fff}
+    /* background image (iniciar.png) */
+    body{
+      background-image: url('iniciar.png');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+    /* overlay so text is readable */
+    .page-overlay{
+      position:fixed; inset:0; background: linear-gradient(180deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.45) 40%, rgba(0,0,0,0.7) 100%);
+      display:flex; flex-direction:column;
+    }
+
+    header{
+      display:flex;align-items:center;gap:12px;padding:18px;
+      border-bottom:1px solid rgba(255,255,255,0.03);
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+      backdrop-filter: blur(6px);
+    }
+    header .brand{display:flex;align-items:center;gap:12px}
+    header h1{font-size:18px;margin:0}
+    header .small{color:var(--muted);font-size:13px}
+    .container{padding:18px;display:flex;flex-direction:column;gap:18px;flex:1;overflow:auto}
+
+    /* Main hero: stories */
+    .hero{
+      display:flex;gap:18px;align-items:flex-start;
+      width:100%;
+      justify-content:center;
+    }
+    .stories-card{
+      background: var(--card);
+      border-radius:14px;
+      padding:14px;
+      width:100%;
+      max-width:1200px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      align-items:center;
+    }
+
+    .stories-preview{
+      width:100%;
+      height:auto;
+      background:#000;
+      border-radius:10px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+      position:relative;
+    }
+
+    .stories-preview img, .stories-preview canvas{
+      width:100%;
+      height:auto;
+      display:block;
+      object-fit:contain;
+    }
+
+    .stories-actions{
+      display:flex;gap:10px;align-items:center;
+    }
+    .btn{
+      padding:10px 14px;border-radius:10px;border:0;font-weight:800;cursor:pointer;
+      background:var(--accent); color:#001; color: #fff;
+      box-shadow:0 6px 18px rgba(11,132,255,0.18);
+    }
+    .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:#fff}
+    .download-ig{
+      background: linear-gradient(90deg,#ff6a00,#ff0066);
+      color:#fff;
+      border-radius:12px;
+      padding:12px 16px;
+      font-weight:900;
+      letter-spacing:0.6px;
+    }
+
+    /* photos grid */
+    .photos-grid{
+      display:flex;gap:12px;flex-wrap:wrap;justify-content:center;
+      margin-top:8px;
+    }
+    .photo-card{
+      background:var(--glass);padding:8px;border-radius:10px;display:flex;flex-direction:column;gap:8px;align-items:center;width:240px;
+    }
+    .photo-card img{width:100%;height:auto;border-radius:8px;object-fit:cover}
+    .photo-actions{display:flex;gap:8px;width:100%;justify-content:center}
+
+    /* mobile adjustments */
+    @media(max-width:900px){
+      .stories-card{max-width:940px}
+      .photo-card{width:45%}
+    }
+    @media(max-width:480px){
+      header{padding:12px}
+      .container{padding:12px}
+      .photo-card{width:100%}
+      .stories-card{padding:10px}
+    }
+
+    /* small info / debug */
+    .info-row{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:13px}
+    .hidden{display:none!important}
   </style>
 </head>
 <body>
-  <header>
-    <h1>Visualizador — Cabine Fotográfica</h1>
-    <div class="small">Backend: <span class="pill">https://festadodavi.onrender.com</span></div>
-    <div style="flex:1"></div>
-    <div id="status" class="badge">Socket: desconectado</div>
-  </header>
-
-  <div class="container">
-    <aside class="left">
-      <div class="panel section">
-        <div class="small">Controles rápidos</div>
-        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-          <button id="btnRefreshList" class="btn-ghost">Atualizar lista</button>
-          <button id="btnClearLocal" class="btn-ghost">Limpar locais</button>
-          <button id="btnGenQR" class="btn-ghost">Gerar QR do selecionado</button>
-          <button id="btnUploadImgbb" class="btn-ghost">Enviar selecionado ao IMGBB</button>
+  <div class="page-overlay" role="application" aria-label="Visualizador da cabine">
+    <header>
+      <div class="brand">
+        <img src="logo.png" alt="Logo" style="height:44px;width:auto;border-radius:8px" onerror="this.style.display='none'">
+        <div>
+          <h1>Visualizador — Cabine Fotográfica</h1>
+          <div class="small">Baixe sua foto — Stories em destaque</div>
         </div>
-        <div style="margin-top:12px" class="small">Recebidos</div>
-        <div id="itemsList"></div>
       </div>
-
-      <div class="panel section">
-        <div class="small">Logs / debug</div>
-        <div id="debug"></div>
+      <div style="flex:1"></div>
+      <div class="info-row">
+        <div id="statusText">Conectando...</div>
       </div>
-    </aside>
+    </header>
 
-    <main>
-      <div class="panel" style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <div><strong id="selectedTitle">Nenhum selecionado</strong><div class="small" id="selectedSub"></div></div>
-          <div class="controls">
-            <div class="small">Sessão:</div><div class="pill" id="sessionId"></div>
+    <main class="container" id="mainContainer">
+      <!-- Stories hero -->
+      <section class="hero">
+        <div class="stories-card" aria-live="polite">
+          <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
+            <div style="display:flex;flex-direction:column">
+              <strong style="font-size:16px">Stories — Faça o download para postar</strong>
+              <span class="small" id="storiesSub">Montagem adaptada para Instagram Stories</span>
+            </div>
+            <div>
+              <button id="refreshBtn" class="btn ghost" title="Atualizar">Atualizar</button>
+            </div>
+          </div>
+
+          <div class="stories-preview" id="storiesPreview" style="min-height:420px;">
+            <!-- either canvas or image preview -->
+            <div id="storiesPlaceholder" style="color:#999;padding:20px;text-align:center">
+              Aguardando montagem...
+            </div>
+            <!-- canvas inserted dynamically -->
+          </div>
+
+          <div style="display:flex;gap:12px;align-items:center;justify-content:center" class="stories-actions">
+            <button id="downloadStoriesBtn" class="download-ig" title="Baixar montagem para Instagram">⬇️ Baixar para Instagram</button>
+            <button id="downloadStoriesFullBtn" class="btn ghost">⬇️ Baixar (Alta)</button>
+            <button id="openAllBtn" class="btn ghost">Abrir todas as fotos</button>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div id="viewerArea" class="panel">
-        <div id="viewerPlaceholder" class="small">Aguardando conteúdo (fotos / boomerang)...</div>
-        <!-- media will be appended here -->
-      </div>
+      <!-- Fotos soltas -->
+      <section id="photosSection">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div>
+            <strong style="font-size:16px">Fotos individuais</strong>
+            <div class="small">Baixe cada foto separadamente</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button id="downloadAllBtn" class="btn ghost">Baixar todas</button>
+          </div>
+        </div>
+
+        <div class="photos-grid" id="photosGrid" style="margin-top:12px">
+          <!-- photo cards inserted here -->
+        </div>
+      </section>
+
+      <!-- optional boomerang area -->
+      <section id="boomerangSection" style="margin-top:18px;display:none">
+        <strong>Boomerang / Vídeo</strong>
+        <div id="boomerangPreview" style="margin-top:8px"></div>
+      </section>
+
     </main>
   </div>
 
-  <div id="qrModal">
-    <div style="text-align:center;margin-bottom:8px;color:#ddd">QR do visualizador</div>
-    <canvas id="qrCanvas"></canvas>
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <button id="btnCloseQR" class="btn-ghost">Fechar</button>
-      <button id="btnDownloadQR" class="btn-ghost">Baixar QR</button>
-    </div>
-  </div>
-
-  <footer>Visualizador — receba fotos e boomerangs do celular e gere QR para visualização</footer>
-
 <script>
-/* visualizador.html
-   Recebe eventos do servidor e mostra galerias / previews.
-   - Lida com:
-     * 'photo_ready'  -> { session, index, photo (dataURL) }
-     * 'photos_from_cell' -> { session, photos: [dataURL,...] }
-     * 'boomerang_ready' -> could be:
-         - { session, filename, url }  (server already stored and gives url)
-         - { session, filename, data } where data is binary (ArrayBuffer) (we will convert)
-     * 'boomerang_stored' -> { session, url, filename } optional server ack
-     * 'show_qr' -> { visualizadorUrl } optional server-initiated show
-   It also offers UI to generate a QR for the currently selected item (client-side).
+/*
+  Visualizador (estático)
+  - conecta via socket ao backend (BACKEND)
+  - espera eventos: photos_from_cell (array of dataURLs), photos_ready (uploaded urls), photo_ready, boomerang_ready
+  - monta/mostra stories (canvas 3375x6000 com moldura.png por cima quando disponível)
+  - exibe primeiro a montagem stories com botão "Baixar para Instagram"
+  - exibe as fotos individuais abaixo
+  - NÃO mostra QR code
 */
 
-const BACKEND = "https://festadodavi.onrender.com"; // conforme memória do usuário
-const socket = io(BACKEND, { transports: ['websocket','polling'], path:'/socket.io' });
+const BACKEND = (location.protocol === 'https:' ? 'https://' : 'http://') + (location.hostname || 'festadodavi-production-0591.up.railway.app');
+/* Se seu servidor estiver em domínio fixo, você pode sobrescrever:
+   const BACKEND = 'https://festadodavi.onrender.com';
+*/
 
-const debugEl = document.getElementById('debug');
-const statusEl = document.getElementById('status');
-const itemsList = document.getElementById('itemsList');
-const viewerArea = document.getElementById('viewerArea');
-const viewerPlaceholder = document.getElementById('viewerPlaceholder');
-const sessionIdEl = document.getElementById('sessionId');
-const selectedTitle = document.getElementById('selectedTitle');
-const selectedSub = document.getElementById('selectedSub');
+const socket = io(BACKEND, { transports: ['websocket','polling'], path: '/socket.io' });
 
-const qrModal = document.getElementById('qrModal');
-const qrCanvas = document.getElementById('qrCanvas');
-const btnCloseQR = document.getElementById('btnCloseQR');
-const btnDownloadQR = document.getElementById('btnDownloadQR');
-const btnGenQR = document.getElementById('btnGenQR');
-const btnUploadImgbb = document.getElementById('btnUploadImgbb');
-
-let state = {
-  session: (new URLSearchParams(location.search)).get('session') || 'cabine-fixa',
-  items: [], // { id, type: 'photo'|'boomerang'|'photoset', title, sub, thumbUrl, mediaUrl, rawBlob }
-  selectedId: null
+const state = {
+  session: (new URLSearchParams(location.search)).get('session') || (location.pathname.includes('/visualizador/') ? location.pathname.split('/').pop() : 'cabine-fixa'),
+  photos: [],          // array of urls or dataURLs
+  storiesMontageUrl: null, // if server provides ready montage url
+  storiesCanvasDataUrl: null,
+  boomerangUrl: null
 };
 
-// set session display
-sessionIdEl.textContent = state.session;
+// DOM refs
+const statusText = document.getElementById('statusText');
+const storiesPreview = document.getElementById('storiesPreview');
+const storiesPlaceholder = document.getElementById('storiesPlaceholder');
+const downloadStoriesBtn = document.getElementById('downloadStoriesBtn');
+const downloadStoriesFullBtn = document.getElementById('downloadStoriesFullBtn');
+const openAllBtn = document.getElementById('openAllBtn');
+const photosGrid = document.getElementById('photosGrid');
+const downloadAllBtn = document.getElementById('downloadAllBtn');
+const refreshBtn = document.getElementById('refreshBtn');
+const boomerangSection = document.getElementById('boomerangSection');
+const boomerangPreview = document.getElementById('boomerangPreview');
 
-// debug helper
-function log(msg){
-  const t = new Date().toLocaleTimeString();
-  debugEl.textContent = `[${t}] ${msg}\n` + debugEl.textContent;
-  console.log(msg);
+const STORIES_CANVAS_W = 3375;
+const STORIES_CANVAS_H = 6000;
+
+// coordinates for photos on stories (from your spec)
+const STORIES_COORDS = [
+  { x: 366, y: 203, w: 2997 - 366, h: 1657 - 203 },
+  { x: 363, y: 1773, w: 2997 - 363, h: 3227 - 1773 },
+  { x: 363, y: 3346, w: 2997 - 363, h: 4794 - 3346 }
+];
+
+// load helper
+function loadImage(urlOrData) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => res(img);
+    img.onerror = (e) => rej(e);
+    img.src = urlOrData;
+  });
 }
 
-// utility to create unique id
-function uid(prefix='id'){ return prefix + '_' + Math.random().toString(36).slice(2,9); }
+// render stories: if server supplied an URL (state.storiesMontageUrl) use it; else build with template + moldura
+async function renderStories() {
+  // clear preview
+  storiesPreview.innerHTML = '';
+  storiesPlaceholder.style.display = 'none';
 
-// add item to list & UI
-function addItem(item){
-  state.items.unshift(item);
-  renderItemsList();
-  selectItem(item.id);
-}
+  if(state.storiesMontageUrl) {
+    // show image provided by server
+    const img = document.createElement('img');
+    img.src = state.storiesMontageUrl;
+    img.alt = 'Stories';
+    img.onload = () => {
+      storiesPreview.appendChild(img);
+      // update canvas dataurl also (fetch image then convert)
+      // convert to dataURL by drawing on a canvas scaled down for preview storage
+      try {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth || STORIES_CANVAS_W;
+        c.height = img.naturalHeight || STORIES_CANVAS_H;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        state.storiesCanvasDataUrl = c.toDataURL('image/jpeg', 0.95);
+      } catch(e) { console.warn('Não foi possível gerar dataURL da montagem remota', e); }
+    };
+    img.onerror = () => {
+      storiesPlaceholder.style.display = 'block';
+      storiesPlaceholder.textContent = 'Erro ao carregar montagem enviada pelo servidor.';
+    };
+    return;
+  }
 
-// render left list
-function renderItemsList(){
-  itemsList.innerHTML = '';
-  for(const item of state.items){
-    const el = document.createElement('div');
-    el.className = 'itemCard';
-    el.dataset.id = item.id;
-    el.innerHTML = `
-      <div class="thumb">${item.thumbHtml || ''}</div>
-      <div class="meta">
-        <div class="title">${item.title}</div>
-        <div class="sub">${item.sub || ''}</div>
-      </div>
-      <div class="actions">
-        <button class="btn-ghost btn-show">Abrir</button>
-      </div>
-    `;
-    // set thumb content (image or video)
-    const thumbWrap = el.querySelector('.thumb');
-    if(item.thumbUrl){
-      if(item.type === 'boomerang') {
-        const v = document.createElement('video'); v.src = item.thumbUrl; v.muted = true; v.playsInline = true; v.autoplay = true; v.loop = true;
-        thumbWrap.innerHTML = ''; thumbWrap.appendChild(v);
-      } else {
-        const img = document.createElement('img'); img.src = item.thumbUrl; thumbWrap.innerHTML = ''; thumbWrap.appendChild(img);
-      }
+  // if no photos, show placeholder
+  if(!state.photos || state.photos.length === 0) {
+    storiesPlaceholder.style.display = 'block';
+    storiesPlaceholder.textContent = 'Aguardando fotos...';
+    return;
+  }
+
+  // build canvas 3375x6000
+  const canvas = document.createElement('canvas');
+  canvas.width = STORIES_CANVAS_W;
+  canvas.height = STORIES_CANVAS_H;
+  const ctx = canvas.getContext('2d');
+
+  try {
+    // optional base template storiesdavi.png if exists on public
+    let baseImg = null;
+    try {
+      baseImg = await loadImage('storiesdavi.png');
+    } catch(e) {
+      baseImg = null;
+    }
+
+    if(baseImg) {
+      ctx.drawImage(baseImg, 0, 0, canvas.width, canvas.height);
     } else {
-      thumbWrap.innerHTML = '<div style="padding:8px;color:#999">sem preview</div>';
+      // draw neutral background
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
     }
 
-    // click handlers
-    el.querySelector('.btn-show').addEventListener('click', ()=> selectItem(item.id));
-    el.addEventListener('click', (ev)=>{
-      if(ev.target.closest('button')) return;
-      selectItem(item.id);
+    // draw each photo into coords
+    for(let i=0;i<3;i++){
+      const src = state.photos[i] || state.photos[state.photos.length-1];
+      try {
+        const img = await loadImage(src);
+        // cover mode: compute sx, sy, sw, sh
+        const c = STORIES_COORDS[i] || STORIES_COORDS[0];
+        // implement cover cropping
+        const imgRatio = img.width / img.height;
+        const boxRatio = c.w / c.h;
+        let sx = 0, sy = 0, sw = img.width, sh = img.height;
+        if(imgRatio > boxRatio) {
+          sw = img.height * boxRatio;
+          sx = (img.width - sw) / 2;
+        } else {
+          sh = img.width / boxRatio;
+          sy = (img.height - sh) / 2;
+        }
+        ctx.drawImage(img, sx, sy, sw, sh, c.x, c.y, c.w, c.h);
+      } catch(e) {
+        console.warn('Erro ao carregar foto para montagem', e);
+      }
+    }
+
+    // optional overlay moldura.png on top
+    try {
+      const mold = await loadImage('moldura.png');
+      if(mold) {
+        ctx.drawImage(mold, 0, 0, canvas.width, canvas.height);
+      }
+    } catch(e) {
+      // ignore if not present
+    }
+
+    // convert to dataURL and show a scaled image for preview
+    state.storiesCanvasDataUrl = canvas.toDataURL('image/jpeg', 0.95);
+
+    // create preview image (fit to container)
+    const previewImg = document.createElement('img');
+    previewImg.src = state.storiesCanvasDataUrl;
+    previewImg.alt = 'Stories montagem';
+    storiesPreview.appendChild(previewImg);
+
+  } catch(err) {
+    console.error('Erro montar stories:', err);
+    storiesPlaceholder.style.display = 'block';
+    storiesPlaceholder.textContent = 'Erro ao montar stories.';
+  }
+}
+
+// show photo cards
+function renderPhotoCards() {
+  photosGrid.innerHTML = '';
+  const photos = state.photos || [];
+  photos.forEach((p, idx) => {
+    const card = document.createElement('div');
+    card.className = 'photo-card';
+    const img = document.createElement('img');
+    img.src = p;
+    img.alt = 'Foto ' + (idx+1);
+    card.appendChild(img);
+
+    const actions = document.createElement('div');
+    actions.className = 'photo-actions';
+
+    const dl = document.createElement('button');
+    dl.className = 'btn';
+    dl.textContent = '⬇️ Baixar';
+    dl.addEventListener('click', ()=> downloadResource(p, `foto_${idx+1}.jpg`));
+    actions.appendChild(dl);
+
+    // open in new tab
+    const openBtn = document.createElement('button');
+    openBtn.className = 'btn ghost';
+    openBtn.textContent = 'Abrir';
+    openBtn.addEventListener('click', ()=> window.open(p, '_blank'));
+    actions.appendChild(openBtn);
+
+    card.appendChild(actions);
+    photosGrid.appendChild(card);
+  });
+}
+
+// download helper for dataURL or http url
+function downloadResource(url, filename = 'arquivo.jpg') {
+  if(!url) return;
+  // data URL
+  if(url.startsWith('data:')) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    return;
+  }
+  // blob from fetch
+  fetch(url, { mode: 'cors' })
+    .then(r => r.blob())
+    .then(blob => {
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=> URL.revokeObjectURL(blobUrl), 2000);
+    })
+    .catch(err => {
+      console.warn('Erro ao baixar recurso remoto:', err);
+      // fallback: open in new tab
+      window.open(url, '_blank');
     });
-
-    itemsList.appendChild(el);
-  }
 }
 
-// select item to preview
-function selectItem(id){
-  const item = state.items.find(i=>i.id === id);
-  if(!item) return;
-  state.selectedId = id;
-  selectedTitle.textContent = item.title;
-  selectedSub.textContent = item.sub || '';
-  // clear viewer
-  viewerArea.innerHTML = '';
-  // show media according to type
-  if(item.type === 'photo'){
-    const img = document.createElement('img'); img.id='viewerMedia'; img.src = item.mediaUrl || item.thumbUrl; img.alt = item.title;
-    viewerArea.appendChild(img);
-  } else if(item.type === 'boomerang'){
-    const v = document.createElement('video'); v.id='viewerMedia'; v.src = item.mediaUrl; v.controls = true; v.loop = true; v.autoplay = true; v.playsInline = true;
-    viewerArea.appendChild(v);
-  } else if(item.type === 'photoset'){
-    // show grid of 3
-    const box = document.createElement('div'); box.style.display='flex'; box.style.gap='8px';
-    for(const m of item.mediaUrls || []){
-      const img = document.createElement('img'); img.src = m; img.style.width='33%'; img.style.height='auto'; img.style.objectFit='cover'; box.appendChild(img);
-    }
-    viewerArea.appendChild(box);
-  } else {
-    viewerArea.textContent = 'Tipo desconhecido';
+// download stories (preferred size)
+function downloadStories(filename = `stories_${state.session || 'session'}.jpg`) {
+  if(state.storiesMontageUrl) {
+    // if server provided a ready image, download it
+    downloadResource(state.storiesMontageUrl, filename);
+    return;
   }
+  if(state.storiesCanvasDataUrl) {
+    downloadResource(state.storiesCanvasDataUrl, filename);
+    return;
+  }
+  alert('Montagem ainda não disponível.');
 }
 
-// handle socket events
-socket.on('connect', ()=> {
-  statusEl.textContent = 'Socket: conectado';
-  statusEl.style.background = 'transparent';
-  log('Conectado ao backend (socket id: ' + socket.id + ')');
-  // inform server which session this visualizador cares about
+// download high-res (attempt to request full-res from server if available)
+function downloadStoriesHighRes() {
+  // attempt: if server provided storiesMontageUrl and it points to remote resource, download it
+  if(state.storiesMontageUrl) {
+    downloadResource(state.storiesMontageUrl, `stories_full_${state.session}.jpg`);
+    return;
+  }
+  // else fallback to canvas dataURL - already high resolution in our canvas
+  if(state.storiesCanvasDataUrl) {
+    downloadResource(state.storiesCanvasDataUrl, `stories_full_${state.session}.jpg`);
+    return;
+  }
+  alert('Montagem ainda não disponível.');
+}
+
+// show boomerang preview if any
+function renderBoomerang() {
+  boomerangPreview.innerHTML = '';
+  if(!state.boomerangUrl) {
+    boomerangSection.style.display = 'none';
+    return;
+  }
+  boomerangSection.style.display = 'block';
+  const v = document.createElement('video');
+  v.src = state.boomerangUrl;
+  v.controls = true;
+  v.loop = true;
+  v.autoplay = true;
+  v.style.maxWidth = '880px';
+  v.style.width = '100%';
+  boomerangPreview.appendChild(v);
+
+  const dl = document.createElement('button');
+  dl.className = 'btn';
+  dl.textContent = '⬇️ Baixar Vídeo';
+  dl.style.marginLeft = '12px';
+  dl.addEventListener('click', ()=> downloadResource(state.boomerangUrl, `boomerang_${state.session}.webm`));
+  boomerangPreview.appendChild(dl);
+}
+
+// socket events wiring
+socket.on('connect', () => {
+  statusText.textContent = 'Conectado';
+  console.log('Visualizador conectado ao backend', socket.id);
+  // let server know which session we are showing (if server needs to push)
   socket.emit('viewer_join', { session: state.session });
 });
 
-// binary boomerang could be sent as binary blob via socket.
-// We'll listen for both object and binary events.
-socket.on('disconnect', ()=> {
-  statusEl.textContent = 'Socket: desconectado';
-  log('Socket desconectado');
-});
-
-// photo ready: photo is a dataURL (jpeg)
+// handle server-sent photo events
 socket.on('photo_ready', (payload) => {
+  // single photo
   try {
-    const { session, index, photo } = payload;
-    if(session && session !== state.session) return;
-    const id = uid('photo');
-    const item = { id, type:'photo', title: `Foto ${index!=null?index+1:'?'}`, sub:`Recebido`, thumbUrl: photo, mediaUrl: photo };
-    addItem(item);
-    log('photo_ready recebido (index ' + index + ')');
-  } catch(e){ log('Erro handler photo_ready: ' + e); }
+    if(payload && payload.session && payload.session !== state.session) return;
+    const { index, photo } = payload;
+    // add at correct position (index may be 0-based)
+    if(typeof index === 'number') {
+      state.photos[index] = photo;
+    } else {
+      state.photos.push(photo);
+    }
+    // update UI
+    renderPhotoCards();
+    renderStories();
+  } catch(e) { console.warn('photo_ready handler error', e); }
 });
 
-// photos_from_cell: array of dataURLs (3 photos) — create a photoset item
 socket.on('photos_from_cell', (payload) => {
   try {
-    const { session, photos } = payload;
-    if(session && session !== state.session) return;
-    const id = uid('photoset');
-    const item = { id, type:'photoset', title: 'Conjunto: 3 Fotos', sub: 'Recebido do celular', mediaUrls: photos, thumbUrl: photos[0] };
-    addItem(item);
-    log('photos_from_cell recebido (len=' + (photos && photos.length) + ')');
-  } catch(e){ log('Erro handler photos_from_cell: ' + e); }
+    if(!payload) return;
+    if(payload.session && payload.session !== state.session) return;
+    const photos = Array.isArray(payload.photos) ? payload.photos : payload;
+    state.photos = photos.slice(0,3);
+    // clear any preexisting montage url (we'll rebuild)
+    state.storiesMontageUrl = null;
+    renderPhotoCards();
+    renderStories();
+  } catch(e) { console.warn('photos_from_cell handler error', e); }
 });
 
-// boomerang_ready: server might send object with url OR binary chunk
-// We support two situations:
-// 1) server emits { session, filename, url } -> file is already stored by server and accessible
-// 2) server emits event with binary (ArrayBuffer) under same event -> socket.io will provide binary as second arg
-socket.on('boomerang_ready', async (payload, bin) => {
+// server may emit photos_ready (with uploaded URLs) — prefer these
+socket.on('photos_ready', (payload) => {
   try {
-    // payload may be object or ArrayBuffer depending on server implementation
-    if(payload && payload.session && payload.session !== state.session) return;
-
-    // case A: payload has url
-    if(payload && payload.url){
-      const id = uid('boom');
-      const item = { id, type:'boomerang', title: payload.filename || 'Boomerang', sub:'Disponível no servidor', thumbUrl: payload.thumb || payload.url, mediaUrl: payload.url };
-      addItem(item);
-      log('boomerang_ready recebido (url): ' + payload.url);
-      return;
+    if(!payload) return;
+    if(payload.session && payload.session !== state.session) return;
+    if(payload.uploaded && Array.isArray(payload.uploaded) && payload.uploaded.length) {
+      state.photos = payload.uploaded.slice(0,3);
+      renderPhotoCards();
     }
-
-    // case B: binary arg provided (socket.io sends binary as second parameter)
-    if(bin && bin instanceof ArrayBuffer){
-      const filename = (payload && payload.filename) ? payload.filename : `boomerang_${Date.now()}.webm`;
-      const blob = new Blob([bin], { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const id = uid('boom');
-      const item = { id, type:'boomerang', title: filename, sub:'Recebido (socket binary)', thumbUrl: url, mediaUrl: url, rawBlob: blob };
-      addItem(item);
-      log('boomerang_ready recebido (ArrayBuffer) size=' + bin.byteLength);
-      // ask server to store the blob permanently (server must implement 'store_blob' handler)
-      try {
-        socket.emit('store_blob_request', { session: state.session, filename }, (ack) => {
-          // ack can be { ok:true, url } if server stored successfully
-          if(ack && ack.ok && ack.url){
-            // update item mediaUrl to server url
-            item.mediaUrl = ack.url;
-            item.thumbUrl = ack.url;
-            // re-render
-            renderItemsList();
-            if(state.selectedId === id) selectItem(id);
-            log('Servidor armazenou boomerang e retornou url: ' + ack.url);
-          } else {
-            log('Servidor não retornou url ao armazenar blob (ack): ' + JSON.stringify(ack));
-          }
-        });
-        // emit binary to server (socket.io binary) so server can write it to disk
-        socket.emit('upload_blob', { session: state.session, filename }, bin);
-      } catch(e){ log('Tentativa de salvar blob no servidor falhou: ' + e); }
-      return;
+    // server may provide a ready visualizador or montage url:
+    if(payload.visualizadorUrl && payload.visualizadorUrl.includes('/visualizador/')) {
+      // server link for the viewer (not needed here)
     }
-
-    // case C: sometimes payload may contain base64 or arraybuffer inside property
-    if(payload && payload.data){
-      // try to handle base64 string
-      try {
-        let b64 = payload.data;
-        if(b64.startsWith('data:')) {
-          const id = uid('boom');
-          const item = { id, type:'boomerang', title: payload.filename || 'Boomerang', sub:'Recebido base64', thumbUrl: b64, mediaUrl: b64 };
-          addItem(item);
-          log('boomerang_ready recebido (data URL)');
-          return;
-        } else {
-          // treat as base64 raw
-          const byteChars = atob(b64);
-          const len = byteChars.length;
-          const arr = new Uint8Array(len);
-          for (let i=0;i<len;i++) arr[i] = byteChars.charCodeAt(i);
-          const blob = new Blob([arr], { type:'video/webm' });
-          const url = URL.createObjectURL(blob);
-          const id = uid('boom');
-          const item = { id, type:'boomerang', title: payload.filename || 'Boomerang', sub:'Recebido base64', thumbUrl: url, mediaUrl: url, rawBlob: blob };
-          addItem(item);
-          log('boomerang_ready recebido (base64 convertido)');
-          return;
-        }
-      } catch(e){}
+    // server might also include 'storiesMontage' or similar; accept any recognized field
+    if(payload.storiesMontageUrl) {
+      state.storiesMontageUrl = payload.storiesMontageUrl;
     }
-
-    log('boomerang_ready payload inesperado: ' + JSON.stringify(payload).slice(0,200));
-  } catch(e){ log('Erro handler boomerang_ready: ' + e); }
+    if(payload.storiesUrl) state.storiesMontageUrl = payload.storiesUrl;
+    if(payload.stories) state.storiesMontageUrl = payload.stories;
+    renderStories();
+  } catch(e){ console.warn('photos_ready handler error', e); }
 });
 
-// server may explicitly send a 'boomerang_stored' event with public URL
-socket.on('boomerang_stored', (payload) => {
+// boomerang
+socket.on('boomerang_ready', (payload) => {
   try {
     if(payload.session && payload.session !== state.session) return;
-    if(payload.url){
-      const id = uid('boomstored');
-      const item = { id, type:'boomerang', title: payload.filename || 'Boomerang', sub:'Armazenado no servidor', thumbUrl: payload.url, mediaUrl: payload.url };
-      addItem(item);
-      log('boomerang_stored: ' + payload.url);
-    }
-  } catch(e){ log('Erro boomerang_stored: ' + e); }
-});
-
-// server may ask to show QR directly
-socket.on('show_qr', ({ visualizadorUrl }) => {
-  if(!visualizadorUrl) return;
-  generateAndShowQRCode(visualizadorUrl);
-  log('show_qr recebido: ' + visualizadorUrl);
-});
-
-// UI controls
-document.getElementById('btnRefreshList').addEventListener('click', ()=> renderItemsList());
-document.getElementById('btnClearLocal').addEventListener('click', ()=> {
-  state.items = []; state.selectedId = null; renderItemsList(); viewerArea.innerHTML = '<div id="viewerPlaceholder" class="small">Aguardando conteúdo (fotos / boomerang)...</div>';
-  log('Lista limpa localmente');
-});
-
-// Gen QR for selected
-btnGenQR.addEventListener('click', async ()=>{
-  const item = state.items.find(i=>i.id === state.selectedId);
-  if(!item){ alert('Selecione um item para gerar QR'); return; }
-  // if item.mediaUrl looks like a server url use it; if only blob url, ask server to store and return public url first
-  let urlToEncode = item.mediaUrl || item.thumbUrl;
-  if(!urlToEncode){
-    alert('Item não possui URL pública. Tente salvar no servidor primeiro.');
-    return;
-  }
-  // If it's an object URL (blob:), we should request server to store and return a public URL.
-  if(urlToEncode.startsWith('blob:') || urlToEncode.startsWith('data:')){
-    // ask server to store raw blob if we have rawBlob
-    if(item.rawBlob){
-      const filename = (item.title||'media') + '.webm';
-      log('Solicitando servidor para armazenar blob (' + filename + ')');
-      // send store request and rely on server to respond with url via callback event
-      socket.emit('store_blob_request', { session: state.session, filename }, (ack) => {
-        if(ack && ack.ok && ack.url){
-          log('Servidor armazenou e retornou url: ' + ack.url);
-          generateAndShowQRCode(ack.url);
-        } else {
-          alert('Servidor não conseguiu armazenar blob. Verifique logs.');
-        }
-      });
-      // send the blob binary via upload_blob event
-      const reader = new FileReader();
-      reader.onload = function(){ 
-        const ab = reader.result;
-        socket.emit('upload_blob', { session: state.session, filename }, ab);
-      };
-      reader.readAsArrayBuffer(item.rawBlob);
-      return;
-    } else {
-      alert('Item tem URL local (blob) mas não temos o rawBlob para enviar ao servidor.');
+    // server may send video url
+    if(payload.videoUrl) {
+      state.boomerangUrl = payload.videoUrl;
+      renderBoomerang();
       return;
     }
-  } else {
-    generateAndShowQRCode(urlToEncode);
-  }
+    if(payload.url) {
+      state.boomerangUrl = payload.url;
+      renderBoomerang();
+      return;
+    }
+    // some servers might send base64 or data property
+    if(payload.data && typeof payload.data === 'string' && payload.data.startsWith('data:')) {
+      state.boomerangUrl = payload.data;
+      renderBoomerang();
+      return;
+    }
+  } catch(e){ console.warn('boomerang_ready handler error', e); }
 });
 
-// Upload to IMGBB (client-side) for selected item (optional)
-btnUploadImgbb.addEventListener('click', async ()=>{
-  const it = state.items.find(i=>i.id === state.selectedId);
-  if(!it){ alert('Selecione um item para enviar'); return; }
-  // we will try to produce a base64 from mediaUrl if it's dataURL already, or fetch blob then convert.
+// server may send complete pre-built items list on request
+socket.on('request_items_response', (rsp) => {
+  console.log('request_items_response', rsp);
+});
+
+// allow user to request server list manually
+refreshBtn.addEventListener('click', () => {
+  // ask server for current items for this session (server must implement 'request_items' to respond)
   try {
-    let dataUrl = null;
-    if(it.mediaUrl && it.mediaUrl.startsWith('data:')){
-      dataUrl = it.mediaUrl;
-    } else if(it.rawBlob) {
-      dataUrl = await blobToDataURL(it.rawBlob);
-    } else if(it.mediaUrl && it.mediaUrl.startsWith('http')) {
-      // fetch it and convert
-      const r = await fetch(it.mediaUrl);
-      const b = await r.blob();
-      dataUrl = await blobToDataURL(b);
-    } else {
-      alert('Não foi possível obter imagem/vid para upload.');
-      return;
-    }
-    // Replace with your IMGBB key if serverless needed — better: have server do it.
-    const IMGBB_KEY = 'COLOQUE_SUA_CHAVE_IMGBB_AQUI';
-    if(!IMGBB_KEY || IMGBB_KEY.includes('COLOQUE')) {
-      alert('Para enviar ao IMGBB, configure a chave IMGBB no código (btnUploadImgbb).');
-      return;
-    }
-    // prepare base64 payload
-    const base64 = dataUrl.split(',')[1];
-    showPrompt('Enviando ao IMGBB...');
-    const form = new FormData();
-    form.append('key', IMGBB_KEY);
-    form.append('image', base64);
-    const resp = await fetch('https://api.imgbb.com/1/upload', { method:'POST', body: form });
-    const j = await resp.json();
-    hidePrompt();
-    if(j && j.data && j.data.url){
-      alert('Enviado ao IMGBB: ' + j.data.url);
-      log('IMGBB upload ok: ' + j.data.url);
-    } else {
-      alert('Erro ao enviar ao IMGBB: ' + JSON.stringify(j));
-    }
-  } catch(e){ hidePrompt(); alert('Erro upload IMGBB: ' + e); log('Erro upload IMGBB: ' + e); }
-});
-
-// helper convert blob->dataURL
-function blobToDataURL(blob){
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result);
-    r.onerror = rej;
-    r.readAsDataURL(blob);
-  });
-}
-
-// generate and show QR canvas modal
-function generateAndShowQRCode(url){
-  qrModal.style.display = 'block';
-  qrCanvas.getContext('2d').clearRect(0,0,qrCanvas.width, qrCanvas.height);
-  QRCode.toCanvas(qrCanvas, url, { width: 520 }, function (error) {
-    if (error) { log('Erro gerar QR: ' + error); alert('Erro ao gerar QR: ' + error); return; }
-    log('QR gerado para: ' + url);
-  });
-}
-btnCloseQR.addEventListener('click', ()=> qrModal.style.display = 'none');
-btnDownloadQR.addEventListener('click', ()=>{
-  const a = document.createElement('a');
-  a.href = qrCanvas.toDataURL('image/png');
-  a.download = 'qrcode.png';
-  a.click();
-});
-
-// small prompt overlay (simple)
-function showPrompt(txt){ const p = document.createElement('div'); p.id='__prompt'; p.style.position='fixed'; p.style.left='50%'; p.style.top='20px'; p.style.transform='translateX(-50%)'; p.style.background='rgba(0,0,0,0.8)'; p.style.padding='8px 12px'; p.style.borderRadius='8px'; p.style.zIndex=9999; p.style.color='#fff'; p.textContent = txt; document.body.appendChild(p); }
-function hidePrompt(){ const p = document.getElementById('__prompt'); if(p) p.remove(); }
-
-// initial demo: if desired, request server for current list
-document.querySelector('#btnRefreshList').addEventListener('click', ()=> {
-  socket.emit('request_items', { session: state.session }, (rsp) => {
-    if(rsp && Array.isArray(rsp.items)){
-      // rsp.items expected to be array of { type, url, thumb, filename, id }
-      for(const it of rsp.items){
-        const id = uid('srv');
-        const item = { id, type: it.type || 'photo', title: it.filename || 'item', sub: 'listado', thumbUrl: it.thumb || it.url, mediaUrl: it.url };
-        addItem(item);
+    socket.timeout(5000).emit('request_items', { session: state.session }, (resp) => {
+      if(resp && Array.isArray(resp.items)) {
+        // resp.items should contain objects { type:'photoset'|'photo'|'boomerang', url or photos[] }
+        // we'll pick the most relevant
+        const it = resp.items[0];
+        if(it) {
+          if(it.type === 'photoset' && Array.isArray(it.photos)) {
+            state.photos = it.photos.slice(0,3);
+            renderPhotoCards();
+            renderStories();
+          } else if(it.type === 'photo' && it.url) {
+            state.photos = [it.url];
+            renderPhotoCards();
+            renderStories();
+          } else if(it.type === 'boomerang' && it.url) {
+            state.boomerangUrl = it.url;
+            renderBoomerang();
+          }
+        }
+      } else {
+        console.log('request_items resposta vazia', resp);
       }
-      log('Lista recebida do servidor (request_items)');
-    } else {
-      log('request_items retornou nada');
-    }
-  });
-});
-
-// utility uid re-declare here
-function uid(prefix='id'){ return prefix + '_' + Math.random().toString(36).slice(2,9); }
-
-// initial state
-renderItemsList();
-log('Visualizador init — esperando conteúdo (session: ' + state.session + ')');
-
-// helpful: when page unloads revoke object URLs
-window.addEventListener('beforeunload', () => {
-  for(const it of state.items){
-    try { if(it.mediaUrl && it.mediaUrl.startsWith('blob:')) URL.revokeObjectURL(it.mediaUrl); } catch(e){}
+    });
+  } catch(e) {
+    console.warn('request_items falhou (socket):', e);
   }
 });
+
+// download handlers
+downloadStoriesBtn.addEventListener('click', ()=> downloadStories());
+downloadStoriesFullBtn.addEventListener('click', ()=> downloadStoriesHighRes());
+openAllBtn.addEventListener('click', ()=> {
+  // open all individual photos in new tabs sequentially
+  (state.photos || []).forEach((p) => window.open(p, '_blank'));
+});
+downloadAllBtn.addEventListener('click', ()=> {
+  // attempt to download all photos as separate files (will trigger multiple downloads)
+  (state.photos || []).forEach((p, i) => downloadResource(p, `foto_${i+1}.jpg`));
+});
+
+// initial render state
+renderPhotoCards();
+renderStories();
+renderBoomerang();
+
+// graceful fallback: if visualizador was opened via server route /visualizador/:session (server-rendered),
+// the server may have embedded direct links. Try fetching /visualizador/${session}.json (optional) — skip if not present.
+(async function tryFetchServerData(){
+  try {
+    const url = new URL(`/visualizador/${encodeURIComponent(state.session)}`, BACKEND);
+    // Some servers provide a JSON endpoint; attempt to fetch JSON by appending ?json=1
+    const probe = url.toString() + '?json=1';
+    const r = await fetch(probe, { method:'GET' });
+    if(r.ok) {
+      const j = await r.json().catch(()=>null);
+      if(j) {
+        if(j.photos && Array.isArray(j.photos)) {
+          state.photos = j.photos.slice(0,3);
+        }
+        if(j.boomerang) state.boomerangUrl = j.boomerang.url || j.boomerang;
+        if(j.stories) state.storiesMontageUrl = j.stories;
+        renderPhotoCards();
+        renderStories();
+        renderBoomerang();
+        return;
+      }
+    }
+  } catch(e) {
+    // ignore if endpoint doesn't exist
+  }
+})();
 
 </script>
 </body>
