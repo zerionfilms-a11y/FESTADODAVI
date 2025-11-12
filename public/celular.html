@@ -139,7 +139,8 @@
 
   <script>
     /* ---------- Config ---------- */
-    const SERVER_URL = "festadodavi-production-0591.up.railway.app"; // ajuste se precisar
+    // <<< ALTERAÇÃO: coloquei a URL com protocolo para evitar problemas de construção de URLs / socket.io
+    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
     const MAX_PHOTOS = 3;
     const COUNTDOWN_SECONDS = 5;
 
@@ -312,7 +313,7 @@
         const payload = { session, photos, ts:new Date().toISOString() };
 
         function tryHttpFallback(){
-          const url = new URL('/upload_photos', SERVER_URL.startsWith('http') ? SERVER_URL : 'https://' + SERVER_URL);
+          const url = new URL('/upload_photos', SERVER_URL);
           fetch(url.toString(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -372,15 +373,7 @@
       });
     }
 
-    /* ---------- Visualizer lock flow (novo) ----------
-      - Quando o servidor/index emitir 'visualizer_ready' com { session, visualizerUrl, qrUrl? },
-        o celular:
-        * trava a UI, mostra overlay visualizer (iframe com visualizerUrl e QR canvas com qrUrl se houver)
-        * pausa câmera
-        * não permite continuar fluxo até receber 'finalize_session' (ou 'reset_session')
-      - Quando o servidor emitir 'finalize_session' (ou 'reset_session'):
-        * oculta overlay, destrava a UI, volta para tela de iniciar (welcome)
-    -----------------------------------------------*/
+    /* ---------- Visualizer lock flow (novo) ---------- */
     function showVisualizerOverlay({ visualizerUrl, qrUrl }){
       visualizerLocked = true;
       // pause camera for CPU and privacy
@@ -393,20 +386,17 @@
       // draw QR if supplied
       if(qrUrl){
         try {
-          // use simple QR generator if QR lib not available: try to use canvas fallback to draw image if URL is an image
           const ctx = vizQrCanvas.getContext('2d');
           const img = new Image();
           img.crossOrigin = 'anonymous';
           img.onload = () => {
             ctx.clearRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
-            // center-fit
             const sx = img.width, sy = img.height;
             const scale = Math.min(vizQrCanvas.width / sx, vizQrCanvas.height / sy);
             const w = sx * scale, h = sy * scale;
             ctx.drawImage(img, (vizQrCanvas.width - w)/2, (vizQrCanvas.height - h)/2, w, h);
           };
           img.onerror = () => {
-            // if it's not an image, try to render text
             ctx.clearRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
             ctx.fillStyle='#000'; ctx.fillRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
             ctx.fillStyle='#fff'; ctx.font='12px Arial'; ctx.fillText('QR',20,20);
@@ -416,7 +406,6 @@
           console.warn('erro desenhando qr', e);
         }
       } else {
-        // clear canvas
         const ctx = vizQrCanvas.getContext('2d');
         ctx.clearRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
       }
@@ -434,14 +423,13 @@
       // re-enable UI
       enterFsBtn.disabled = false;
       startBtn.disabled = false;
-      // return to welcome screen (as you requested: only Index can finish)
+      // return to welcome screen
       showScreen(welcomeScreen);
     }
 
     /* ---------- Events wiring ---------- */
     enterFsBtn.addEventListener('click', async () => {
       try { await document.documentElement.requestFullscreen(); } catch(e){ console.warn('fullscreen failed', e); }
-      // show welcome screen; IMG element handles loading
       if(!visualizerLocked) showScreen(welcomeScreen);
       if(socket && socket.connected) socket.emit('cell_entered_fullscreen', { session });
     });
@@ -463,22 +451,35 @@
 
     // servidor diz "mostra o visualizador e trava o celular até eu finalizar"
     socket.on('visualizer_ready', (data) => {
-      // data expected: { session, visualizerUrl, qrUrl }
       if(!data) return;
-      if(data.session && data.session !== session) {
-        console.log('visualizer_ready for different session, ignoring', data.session);
-        return;
-      }
-      console.log('visualizer_ready received', data);
+      if(data.session && data.session !== session) return;
       showVisualizerOverlay({ visualizerUrl: data.visualizerUrl || data.visualizadorUrl || data.url, qrUrl: data.qrUrl || data.qrcode || data.qr });
     });
 
-    // servidor finaliza sessão — libera celular (isso pode ser emitido pelo Index quando o operador clicar "finalizar sessão")
+    // novo: server pode emitir show_qr_on_viewer (index uses this)
+    socket.on('show_qr_on_viewer', (data) => {
+      if(!data) return;
+      // server typically sends { viewerId, visualizadorUrl }
+      const url = data.visualizadorUrl || data.visualizerUrl || data.url || data.visualizador;
+      const qr = data.visualizadorUrl || data.qrUrl || data.qrcode || data.qr;
+      if(data.session && data.session !== session) {
+        // ignore if for other session
+        // but many server implementations won't include session here, so we accept
+      }
+      showVisualizerOverlay({ visualizerUrl: url, qrUrl: qr || url });
+    });
+
+    // server may send show_qr (compat)
+    socket.on('show_qr', ({ visualizadorUrl }) => {
+      if(!visualizadorUrl) return;
+      showVisualizerOverlay({ visualizerUrl: visualizadorUrl, qrUrl: visualizadorUrl });
+    });
+
+    // servidor finaliza sessão — libera celular
     socket.on('finalize_session', (data) => {
       if(data && data.session && data.session !== session) return;
       console.log('finalize_session received, unlocking celular');
       hideVisualizerOverlay();
-      // reset internal state
       photos = []; currentPhotoIndex = 0; currentPhotoData = null;
     });
     // também aceita 'reset_session' para compatibilidade
@@ -487,12 +488,6 @@
       console.log('reset_session received, unlocking celular');
       hideVisualizerOverlay();
       photos = []; currentPhotoIndex = 0; currentPhotoData = null;
-    });
-
-    // if server requests the cell to show a QR only
-    socket.on('show_qr', ({ visualizadorUrl }) => {
-      if(!visualizadorUrl) return;
-      showVisualizerOverlay({ visualizerUrl: visualizadorUrl, qrUrl: visualizadorUrl });
     });
 
     // keyboard escape hides preview if shown (but not visualizer when locked)
