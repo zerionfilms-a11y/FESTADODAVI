@@ -237,7 +237,6 @@
           const normalized = normalizeVisualizerUrl(visualizadorUrl);
           showVisualizadorQr(normalized);
         }
-        // show info about stories if provided
         if (storiesUrl) log('✅ Stories montage available: ' + storiesUrl);
       });
 
@@ -247,7 +246,6 @@
           lastPhotos = photos.slice(0,3);
           renderThumbs();
         }
-        // if visualizadorUrl present normalize and show
         if (visualizadorUrl) showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
       });
 
@@ -295,9 +293,7 @@
     function normalizeVisualizerUrl(url){
       if(!url) return url;
       try {
-        // if url already contains visualizador.html?session=..., return as-is
         if (url.indexOf('visualizador.html') !== -1) return url;
-        // if url is like /visualizador/:session or /visualizador/session/:id convert to visualizador.html?session=...
         const m = url.match(/\/visualizador(?:\/session)?\/([^\/\?]+)/i);
         if (m && m[1]) {
           const sid = decodeURIComponent(m[1]);
@@ -396,7 +392,6 @@
             try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); }
           };
           frame.onerror = () => {
-            // mesmo sem moldura, cria o dataURL
             try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); }
             log('⚠️ Moldura não encontrada (moldura.png). Continuando sem moldura.');
           };
@@ -471,6 +466,9 @@
 
         genVisualizadorQrBtn.disabled = true;
 
+        // generate or reuse a viewerId so each guest has own session (-> visualizador.html?session=viewerId)
+        const viewerIdLocal = viewerId || (FIXED_SESSION + ':' + Date.now()); // <-- ALTERAÇÃO: gera viewerId quando não informado
+
         const uploadedPhotos = [];
         let storiesUrl = null;
         let printUrl = null;
@@ -490,20 +488,35 @@
             try { printUrl = await uploadToImgbb(printMontage, `cabine_print_${Date.now()}`); log('✅ print uploaded: ' + printUrl); } catch(e){ log('⚠️ Falha upload print: ' + (e.message || e)); printUrl = printMontage; }
           }
 
-          socket.emit('photos_from_cell', { session: FIXED_SESSION, photos: uploadedPhotos, storiesMontage: storiesUrl || storiesMontage, print: printUrl || printMontage });
+          // notify server with uploaded urls
+          socket.emit('photos_from_cell', { session: FIXED_SESSION, viewerId: viewerIdLocal, photos: uploadedPhotos, storiesMontage: storiesUrl || storiesMontage, print: printUrl || printMontage });
           log('✅ Fotos e montagens enviadas ao servidor via photos_from_cell (uploaded).');
         } else {
-          socket.emit('photos_from_cell', { session: FIXED_SESSION, photos: photosArray, storiesMontage: storiesMontage || null, print: printMontage || null });
+          // send raw photos + montages to server and give it a viewerId to create a unique visualizador
+          socket.emit('photos_from_cell', { session: FIXED_SESSION, viewerId: viewerIdLocal, photos: photosArray, storiesMontage: storiesMontage || null, print: printMontage || null });
           log('🔁 Fotos brutas e montagens enviadas ao servidor para processamento (server fará upload).');
         }
 
-        socket.emit('create_viewer_session', { session: FIXED_SESSION, photos: uploadedPhotos.length ? uploadedPhotos : photosArray, storiesMontage: storiesMontage || null, print: printMontage || null });
+        // request server to create a viewer session and pass our viewerId
+        socket.emit('create_viewer_session', { session: FIXED_SESSION, viewerId: viewerIdLocal, photos: uploadedPhotos.length ? uploadedPhotos : photosArray, storiesMontage: storiesMontage || null, print: printMontage || null });
+
+        // craft visualizador URL (pointing to visualizador.html?session=viewerIdLocal)
+        const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`; // <-- ALTERAÇÃO: uso viewerIdLocal
+        const qrUrl = visualizadorUrl;
+
+        // Ask server (and consequently celular) to show the visualizer QR/iframe immediately
+        try {
+          socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl }); // <-- ALTERAÇÃO: solicita que o celular mostre o QR/iframe
+        } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
+
+        // also show on operator UI
+        showVisualizadorQr(visualizadorUrl);
 
         genVisualizadorQrBtn.disabled = false;
         printBtn.disabled = false;
 
-        addToViewerHistory(FIXED_SESSION + ':' + Date.now(), uploadedPhotos.length || photos.length);
-        log('🎉 Visualizador criado (fluxo enviado ao servidor).');
+        addToViewerHistory(viewerIdLocal, uploadedPhotos.length || photos.length);
+        log('🎉 Visualizador criado (fluxo enviado ao servidor). viewerId: ' + viewerIdLocal);
       } catch(e){
         log('❌ ERRO no processo IMGBB/local: ' + (e.message || e));
         genVisualizadorQrBtn.disabled = false;
