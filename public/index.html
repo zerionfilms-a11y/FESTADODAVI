@@ -120,20 +120,22 @@
   /*
     index.html (Operador) — completo (atualizado)
     - Ajustado para impressão 5x15 (1845x5536px)
-    - Updated PRINT_COORDS and STORIES_COORDS per suas novas coordenadas
-    - Escuta photos_from_cell e photos_submit para compatibilidade
+    - Re-adicionada moldura.png sobre stories
+    - Ao abrir PDF (Imprimir) a nova aba chama print() automaticamente (Ctrl-P) mantendo o PDF visível
+    - SERVER_URL definido para https://festadodavi.onrender.com
   */
 
   (function(){
     // -----------------------
     // CONFIG
     // -----------------------
-    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app"; // use esse backend
+    const SERVER_URL = "festadodavi-production-0591.up.railway.app"; // usar sempre esse backend conforme preferência
     const FIXED_SESSION = "cabine-fixa";
-    const IMGBB_KEY = ""; // se quiser upload direto do index coloque sua chave (opcional)
-    const STORIES_TEMPLATE = "storiesdavi.png";
+    const IMGBB_KEY = ""; // coloque sua chave IMGBB se quiser que o index faça upload direto. Se preferir que o server faça upload, deixe vazio.
+    const STORIES_TEMPLATE = "storiesdavi.png"; // caminho do template (coloque no public)
     const PRINT_TEMPLATE = "imprimirdavi.png";
     const BOOMERANG_TEMPLATE = "bomerang.png";
+    const MOLDURA_TEMPLATE = "moldura.png"; // overlay moldura para stories
 
     // -----------------------
     // DOM refs
@@ -360,25 +362,65 @@
       const ctx = storiesCanvas.getContext('2d');
       ctx.clearRect(0,0,storiesCanvas.width,storiesCanvas.height);
       const bg = new Image();
+      bg.crossOrigin = "anonymous";
       bg.src = STORIES_TEMPLATE;
+
       bg.onload = () => {
         ctx.drawImage(bg, 0, 0, storiesCanvas.width, storiesCanvas.height);
-        photos.forEach((p, i) => {
+
+        // load all photos and draw, then draw moldura on top
+        const toPlace = photos.slice(0,3);
+        let loaded = 0;
+        const total = toPlace.length;
+        if(total === 0){
+          // still attempt to draw moldura only
+          drawMolduraThenFinalize();
+          return;
+        }
+
+        toPlace.forEach((p, i) => {
           const img = new Image();
           img.crossOrigin = "anonymous";
           img.src = p;
           img.onload = () => {
             const c = STORIES_COORDS[i] || STORIES_COORDS[0];
             drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
+            loaded++;
             log(`✅ Foto ${i+1} posicionada no stories: ${c.x},${c.y} ${c.w}x${c.h}`);
+            if(loaded >= total){
+              // all photos drawn -> draw moldura overlay and finalize
+              drawMolduraThenFinalize();
+            }
           };
-          img.onerror = () => log('⚠️ Erro ao carregar foto para stories preview');
+          img.onerror = () => {
+            log('⚠️ Erro ao carregar foto para stories preview');
+            loaded++;
+            if(loaded >= total) drawMolduraThenFinalize();
+          };
         });
-        // after small timeout produce dataURL
-        setTimeout(() => {
-          try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); }
-        }, 500);
+
+        // helper to draw moldura and then set dataURL
+        function drawMolduraThenFinalize(){
+          const mold = new Image();
+          mold.crossOrigin = "anonymous";
+          mold.src = MOLDURA_TEMPLATE;
+          mold.onload = () => {
+            try {
+              ctx.drawImage(mold, 0, 0, storiesCanvas.width, storiesCanvas.height);
+            } catch(e){
+              console.warn('Erro ao desenhar moldura:', e);
+            }
+            try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); }
+            log('✅ Stories montage pronta (com moldura).');
+          };
+          mold.onerror = () => {
+            // still finalize without moldura
+            try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); }
+            log('⚠️ moldura.png não encontrada — stories finalizado sem moldura.');
+          };
+        }
       };
+
       bg.onerror = () => log('❌ Erro ao carregar background stories (verifique STORIES_TEMPLATE path)');
     }
 
@@ -386,6 +428,7 @@
       const ctx = printCanvas.getContext('2d');
       ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
       const bg = new Image();
+      bg.crossOrigin = "anonymous";
       bg.src = PRINT_TEMPLATE;
       bg.onload = () => {
         ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
@@ -680,7 +723,7 @@
       try { socket && socket.emit('reset_session', { session: FIXED_SESSION }); log('🔁 reset_session emitido'); } catch(e){ log('Erro ao emitir reset_session: ' + e); }
     });
 
-    // PRINT button: now generates a PDF (5cm x 15cm) and opens in a new tab
+    // PRINT button: now generates a PDF (5cm x 15cm) and opens in a new tab, auto-triggering print()
     printBtn.addEventListener('click', async () => {
       try {
         // get image from canvas (highest quality)
@@ -695,13 +738,55 @@
         const pdf = new jsPDF({ unit: 'cm', format: [5, 15] });
         // add image full-bleed to the page
         pdf.addImage(imgData, 'JPEG', 0, 0, 5, 15);
-        // output blob and open in new tab
+        // output blob and open in new tab with auto-print
         const blob = pdf.output('blob');
         const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
-        // revoke after a minute
+
+        // open a new window and write an HTML wrapper that embeds the PDF and calls print()
+        const win = window.open('', '_blank');
+        if (!win) {
+          alert('Bloqueador de pop-ups impediu a abertura da aba. Permita pop-ups e tente novamente.');
+          URL.revokeObjectURL(url);
+          return;
+        }
+
+        const html = `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Impressão 5x15</title>
+<style>html,body{margin:0;height:100%;background:#fff}embed,iframe{width:100%;height:100%;border:0}</style>
+</head>
+<body>
+  <embed id="pdfEmbed" src="${url}" type="application/pdf"></embed>
+  <script>
+    function tryPrint(){ 
+      try {
+        window.focus();
+        // small timeout to allow PDF embed to load in some browsers
+        setTimeout(function(){
+          window.print();
+        }, 400);
+      } catch(e) {
+        console.warn('print failed', e);
+      }
+    }
+    // try to call print on load
+    window.addEventListener('load', tryPrint);
+    // also try after a short delay as fallback
+    setTimeout(tryPrint, 900);
+  <\/script>
+</body>
+</html>`;
+
+        win.document.open();
+        win.document.write(html);
+        win.document.close();
+
+        // revoke object URL after some time to free memory
         setTimeout(() => { try { URL.revokeObjectURL(url); } catch(e){} }, 60 * 1000);
-        log('✅ PDF gerado e aberto em nova aba (5x15 cm).');
+
+        log('✅ PDF gerado e nova aba aberta com print() automático (5x15 cm).');
       } catch(e) {
         log('❌ Erro gerar PDF: ' + (e.message || e));
         alert('Erro ao gerar PDF: ' + (e.message || e));
