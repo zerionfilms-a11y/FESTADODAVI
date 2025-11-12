@@ -113,6 +113,9 @@
 
   <script>
   (function(){
+    // -----------------------
+    // CONFIG
+    // -----------------------
     const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
     const FIXED_SESSION = "cabine-fixa";
     const IMGBB_KEY = "";
@@ -120,6 +123,9 @@
     const PRINT_TEMPLATE = "imprimirdavi.png";
     const MOLDURA_FILENAME = "moldura.png";
 
+    // -----------------------
+    // DOM refs
+    // -----------------------
     const el = id => document.getElementById(id);
     const qrcodeEl = el('qrcode'), qrcodeVisualizadorEl = el('qrcodeVisualizador');
     const sessionIdEl = el('sessionId'), viewerSessionIdEl = el('viewerSessionId');
@@ -136,6 +142,9 @@
     const streamSelect = el('streamSelect'), webcamPreview = el('webcamPreview');
     const autoStartWebcamCheckbox = el('autoStartWebcam');
 
+    // -----------------------
+    // STATE
+    // -----------------------
     let socket = null;
     let lastPhotos = [];
     let viewerHistory = [];
@@ -145,6 +154,9 @@
     let currentPrintMontageDataUrl = null;
     let currentBoomerangUrl = null;
 
+    // -----------------------
+    // UTIL / LOG
+    // -----------------------
     function log(msg){
       const ts = new Date().toLocaleTimeString();
       logEl.textContent = `[${ts}] ${msg}\n` + logEl.textContent;
@@ -156,6 +168,9 @@
       if(cssClass) connectionStatusEl.classList.add(cssClass);
     }
 
+    // -----------------------
+    // SOCKET INIT
+    // -----------------------
     function initSocket(){
       if (socket && socket.connected) return;
       log('📡 Inicializando socket para ' + SERVER_URL);
@@ -231,7 +246,6 @@
       socket.on('viewer_session_created', ({ viewerId, visualizadorUrl }) => {
         log('🎉 Sessão do visualizador criada no servidor: ' + viewerId);
         addToViewerHistory(viewerId, lastPhotos.length);
-        // show QR for operator
         if (visualizadorUrl) showVisualizadorQr(visualizadorUrl);
       });
 
@@ -250,6 +264,9 @@
       });
     } // initSocket
 
+    // -----------------------
+    // QR (CELULAR) GENERATION
+    // -----------------------
     function generateQrCodeForCell(){
       qrcodeEl.innerHTML = '';
       const url = `${SERVER_URL.replace(/\/+$/,'')}/celular.html?session=${encodeURIComponent(FIXED_SESSION)}`;
@@ -259,6 +276,7 @@
       log('📱 QR Code Celular gerado: ' + url);
     }
 
+    // Show visualizador QR on operator UI
     function showVisualizadorQr(visualizadorUrl){
       if(!visualizadorUrl) return;
       qrcodeVisualizadorEl.innerHTML = '';
@@ -270,6 +288,9 @@
       log('🔗 Visualizador pronto: ' + visualizadorUrl);
     }
 
+    // -----------------------
+    // THUMBS AND MONTAGES
+    // -----------------------
     function renderThumbs(){
       thumbsEl.innerHTML = '';
       lastPhotos.forEach((p, idx) => {
@@ -338,7 +359,6 @@
         // after photos drawn, draw moldura.png on top (if exists)
         setTimeout(async () => {
           try {
-            // attempt to load moldura.png and draw on top
             const mold = new Image();
             mold.crossOrigin = "anonymous";
             mold.src = MOLDURA_FILENAME;
@@ -430,12 +450,10 @@
           let printUrl = null;
           try { printUrl = await uploadToImgbb(printMontage, `cabine_print_${Date.now()}`); } catch(e){ log('⚠️ Falha upload print: ' + (e.message || e)); }
 
-          // notify server with uploaded urls
           socket.emit('photos_from_cell', { session: FIXED_SESSION, photos: uploadedPhotos }, (ack) => {
             log('✅ Fotos enviadas ao servidor (uploaded). Server ack: ' + JSON.stringify(ack));
           });
 
-          // create viewer session on server and wait ack (this will produce unique viewer link)
           socket.emit('create_viewer_session', {
             session: FIXED_SESSION,
             photos: uploadedPhotos,
@@ -452,12 +470,10 @@
           });
 
         } else {
-          // send raw photos to server and let server handle upload/montage
           socket.emit('photos_from_cell', { session: FIXED_SESSION, photos: photos }, (ack) => {
             log('🔁 Fotos brutas enviadas ao servidor (server fará upload). Ack: ' + JSON.stringify(ack));
           });
 
-          // ask server to create viewer session and handle montage server-side
           socket.emit('create_viewer_session', {
             session: FIXED_SESSION,
             photos: photos,
@@ -655,7 +671,7 @@
       try { socket && socket.emit('reset_session', { session: FIXED_SESSION }); log('🔁 reset_session emitido'); } catch(e){ log('Erro ao emitir reset_session: ' + e); }
     });
 
-    // PRINT now opens a new tab with the image ready and calls print()
+    // PRINT now opens a new tab with the image ready and calls print() — note the escaped closing script tag
     printBtn.addEventListener('click', () => {
       try {
         const data = printCanvas.toDataURL('image/png');
@@ -674,7 +690,7 @@
             window.onload = function(){
               setTimeout(function(){ window.print(); }, 400);
             };
-          </script>
+          <\/script>
           </body></html>`;
         w.document.write(html);
         w.document.close();
