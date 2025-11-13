@@ -123,12 +123,12 @@
     // -----------------------
     // CONFIG
     // -----------------------
-    const SERVER_URL = "festadodavi-production-0591.up.railway.app";
+    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
     const FIXED_SESSION = "cabine-fixa";
-    const IMGBB_KEY = "";
+    const IMGBB_KEY = ""; // keep empty on client to avoid slow client uploads
     const STORIES_TEMPLATE = "storiesdavi.png";
     const PRINT_TEMPLATE = "imprimirdavi.png";
-    const FRAME_OVERLAY = "moldura.png"; // <-- re-adicionada
+    const FRAME_OVERLAY = "moldura.png";
     const BOOMERANG_TEMPLATE = "bomerang.png";
 
     // -----------------------
@@ -161,6 +161,7 @@
     let currentStoriesMontageDataUrl = null;
     let currentPrintMontageDataUrl = null;
     let currentBoomerangUrl = null;
+    let pendingCreateViewer = false; // avoid duplicate create_viewer_session calls
 
     // -----------------------
     // UTIL / LOG
@@ -216,15 +217,34 @@
         setStatus('⚠️ Erro de conexão', null);
       });
 
+      // When photos come from cell/server — render *immediately* then process
       function onPhotosReceived(payload){
-        const viewerId = payload && (payload.viewerId || payload.viewer || 'unknown');
-        const photos = Array.isArray(payload.photos) ? payload.photos : (payload.photosArray || payload.photos || []);
-        log('📥 Fotos recebidas (via socket) — viewer:' + (viewerId||'—') + ' count:' + (photos ? photos.length : 0));
-        if (Array.isArray(photos) && photos.length) {
-          lastPhotos = photos.slice(0,3);
-          renderThumbs();
-          processPhotosAndUpload(lastPhotos, viewerId).catch(e => log('❌ processPhotosAndUpload error: ' + (e.message||e)));
-        }
+        try {
+          const viewerId = payload && (payload.viewerId || payload.viewer || payload.viewer_id || 'unknown');
+          const photos = Array.isArray(payload.photos) ? payload.photos : (payload.uploaded || payload.photosArray || []);
+          log('📥 Fotos recebidas (via socket) — viewer:' + (viewerId||'—') + ' count:' + (photos ? photos.length : 0));
+
+          // immediate UX: render thumbnails locally without waiting for uploads
+          if (Array.isArray(photos) && photos.length) {
+            lastPhotos = photos.slice(0,3);
+            renderThumbs(); // draws and triggers montage generation
+            // automatically start the create_viewer_session flow (non-blocking)
+            if (!pendingCreateViewer) {
+              pendingCreateViewer = true;
+              // send create_viewer_session to server so it stores & emits viewer payload faster
+              try {
+                socket.emit('create_viewer_session', { session: FIXED_SESSION, photos: photos, storiesMontage: null, print: null }, (ack) => {
+                  // ack optional
+                });
+                log('🔁 create_viewer_session emitido automaticamente ao receber fotos.');
+              } catch(e) {
+                log('⚠️ Falha emit create_viewer_session: ' + (e.message || e));
+              }
+              // clear pending flag after small delay to avoid duplicates
+              setTimeout(()=> pendingCreateViewer = false, 1500);
+            }
+          }
+        } catch(err){ console.error('onPhotosReceived error', err); }
       }
 
       socket.on('photos_from_cell', onPhotosReceived);
@@ -241,7 +261,16 @@
           const normalized = normalizeVisualizerUrl(visualizadorUrl);
           showVisualizadorQr(normalized);
         }
-        if (storiesUrl) log('✅ Stories montage available: ' + storiesUrl);
+        if (storiesUrl) {
+          log('✅ Stories montage available: ' + storiesUrl);
+          // quickly show stories montage if provided
+          currentStoriesMontageDataUrl = storiesUrl;
+          // render montage container
+          renderGalleryStoriesPreview(storiesUrl);
+        }
+        if (printUrl) {
+          currentPrintMontageDataUrl = printUrl;
+        }
       });
 
       socket.on('viewer_photos_ready', ({ session, photos, storiesMontage, print, visualizadorUrl }) => {
@@ -250,6 +279,11 @@
           lastPhotos = photos.slice(0,3);
           renderThumbs();
         }
+        if (storiesMontage) {
+          currentStoriesMontageDataUrl = storiesMontage;
+          renderGalleryStoriesPreview(storiesMontage);
+        }
+        if (print) currentPrintMontageDataUrl = print;
         if (visualizadorUrl) showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
       });
 
@@ -328,6 +362,29 @@
       log('🔗 Visualizador pronto: ' + visualizadorUrl);
     }
 
+    // helper to render stories montage inside gallery for operator preview
+    function renderGalleryStoriesPreview(src){
+      try {
+        // if already present, update img; otherwise create small preview block
+        let existing = document.getElementById('storiesPreviewBlock');
+        if (!existing) {
+          const container = document.createElement('div');
+          container.id = 'storiesPreviewBlock';
+          container.className = 'photo-container stories-container';
+          const title = document.createElement('div'); title.className = 'stories-title'; title.textContent = '📱 Pronto para o Instagram';
+          const img = document.createElement('img'); img.id = 'storiesPreviewImg'; img.loading = 'lazy'; img.alt = 'Stories Preview';
+          const instagramBtn = document.createElement('button'); instagramBtn.className = 'instagram-btn'; instagramBtn.textContent = '📥 Baixar Pronto pro Instagram';
+          instagramBtn.onclick = () => downloadImage(src, `pronto-instagram-${Date.now()}.jpg`);
+          container.appendChild(title); container.appendChild(img); container.appendChild(instagramBtn);
+          // insert at top of thumbs area
+          thumbsEl.parentNode.insertBefore(container, thumbsEl);
+          existing = container;
+        }
+        const imgEl = document.getElementById('storiesPreviewImg');
+        imgEl.src = src;
+      } catch(e){ log('⚠️ renderGalleryStoriesPreview error: ' + e); }
+    }
+
     // -----------------------
     // THUMBS AND MONTAGES (with moldura overlay)
     // -----------------------
@@ -340,6 +397,17 @@
       if (lastPhotos.length) {
         drawStories(lastPhotos);
         drawPrint(lastPhotos);
+        // enable print once montages are generated (we set a short timeout, montages finalize via onload/timeouts)
+        setTimeout(()=> {
+          if (currentPrintMontageDataUrl || typeof printCanvas.toDataURL === 'function') {
+            printBtn.disabled = false;
+          } else {
+            // still enable to allow attempting to create pdf from canvas
+            printBtn.disabled = false;
+          }
+        }, 900);
+      } else {
+        printBtn.disabled = true;
       }
     }
 
@@ -374,105 +442,146 @@
     ];
 
     function drawStories(photos){
-      const ctx = storiesCanvas.getContext('2d');
-      ctx.clearRect(0,0,storiesCanvas.width,storiesCanvas.height);
-      const bg = new Image();
-      bg.crossOrigin = 'anonymous';
-      bg.src = STORIES_TEMPLATE;
-      bg.onload = () => {
-        ctx.drawImage(bg, 0, 0, storiesCanvas.width, storiesCanvas.height);
-        photos.forEach((p, i) => {
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.src = p;
-          img.onload = () => {
-            const c = STORIES_COORDS[i] || STORIES_COORDS[0];
-            drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
-            log(`✅ Foto ${i+1} posicionada no stories: ${c.x},${c.y} ${c.w}x${c.h}`);
-          };
-          img.onerror = () => log('⚠️ Erro ao carregar foto para stories preview');
-        });
-
-        // depois de posicionar as fotos, aplica a moldura por cima
-        setTimeout(() => {
-          const frame = new Image();
-          frame.crossOrigin = "anonymous";
-          frame.src = FRAME_OVERLAY;
-          frame.onload = () => {
-            try {
-              ctx.drawImage(frame, 0, 0, storiesCanvas.width, storiesCanvas.height);
-              log('✅ Moldura aplicada sobre stories (moldura.png)');
-            } catch(e) { log('⚠️ Erro ao desenhar moldura: ' + e); }
-            try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); }
-          };
-          frame.onerror = () => {
-            try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); }
-            log('⚠️ Moldura não encontrada (moldura.png). Continuando sem moldura.');
-          };
-        }, 600);
-      };
-      bg.onerror = () => log('❌ Erro ao carregar background stories (verifique STORIES_TEMPLATE path)');
+      try {
+        const ctx = storiesCanvas.getContext('2d');
+        ctx.clearRect(0,0,storiesCanvas.width,storiesCanvas.height);
+        const bg = new Image();
+        bg.crossOrigin = 'anonymous';
+        bg.src = STORIES_TEMPLATE;
+        bg.onload = () => {
+          ctx.drawImage(bg, 0, 0, storiesCanvas.width, storiesCanvas.height);
+          let loaded = 0;
+          photos.forEach((p, i) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.src = p;
+            img.onload = () => {
+              const c = STORIES_COORDS[i] || STORIES_COORDS[0];
+              drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
+              loaded++;
+              log(`✅ Foto ${i+1} posicionada no stories: ${c.x},${c.y} ${c.w}x${c.h}`);
+              if (loaded === photos.length) {
+                // apply moldura
+                const frame = new Image();
+                frame.crossOrigin = 'anonymous';
+                frame.src = FRAME_OVERLAY;
+                frame.onload = () => {
+                  try {
+                    ctx.drawImage(frame, 0, 0, storiesCanvas.width, storiesCanvas.height);
+                  } catch(e) { /* continue */ }
+                  try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); }
+                };
+                frame.onerror = () => {
+                  try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); }
+                  log('⚠️ Moldura não encontrada (moldura.png). Continuando sem moldura.');
+                };
+              }
+            };
+            img.onerror = () => {
+              log('⚠️ Erro ao carregar foto para stories preview');
+              loaded++;
+            };
+          });
+        };
+        bg.onerror = () => log('❌ Erro ao carregar background stories (verifique STORIES_TEMPLATE path)');
+      } catch(e){ log('⚠️ drawStories error: ' + e); }
     }
 
     function drawPrint(photos){
-      const ctx = printCanvas.getContext('2d');
-      ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
-      const bg = new Image();
-      bg.crossOrigin = "anonymous";
-      bg.src = PRINT_TEMPLATE;
-      bg.onload = () => {
-        ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
-        photos.forEach((p, i) => {
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.src = p;
-          img.onload = () => {
-            const c = PRINT_COORDS[i] || PRINT_COORDS[0];
-            drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
-            log(`✅ Foto ${i+1} posicionada no print: ${c.x},${c.y} ${c.w}x${c.h}`);
-          };
-          img.onerror = () => log('⚠️ Erro ao carregar foto para print preview');
-        });
-        setTimeout(() => {
-          try { currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL print failed: ' + e); }
-        }, 600);
-      };
-      bg.onerror = () => log('❌ Erro ao carregar background print (verifique PRINT_TEMPLATE path)');
+      try {
+        const ctx = printCanvas.getContext('2d');
+        ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
+        const bg = new Image();
+        bg.crossOrigin = "anonymous";
+        bg.src = PRINT_TEMPLATE;
+        bg.onload = () => {
+          ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
+          let loaded = 0;
+          photos.forEach((p, i) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.src = p;
+            img.onload = () => {
+              const c = PRINT_COORDS[i] || PRINT_COORDS[0];
+              drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
+              loaded++;
+              log(`✅ Foto ${i+1} posicionada no print: ${c.x},${c.y} ${c.w}x${c.h}`);
+              if (loaded === photos.length) {
+                try { currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95); } catch(e){ log('⚠️ toDataURL print failed: ' + e); }
+              }
+            };
+            img.onerror = () => { log('⚠️ Erro ao carregar foto para print preview'); loaded++; };
+          });
+        };
+        bg.onerror = () => log('❌ Erro ao carregar background print (verifique PRINT_TEMPLATE path)');
+      } catch(e){ log('⚠️ drawPrint error: ' + e); }
     }
 
     // -----------------------
-    // IMGBB upload util (client-side optional)
+    // DOWNLOAD helper robust (handles data:, same-origin & cross-origin http(s) via fetch->blob)
     // -----------------------
-    async function uploadToImgbb(dataUrl, name = 'cabine_photo') {
-      if (!IMGBB_KEY) {
-        log('ℹ️ IMGBB_KEY não configurada no index — pulando upload local (use server para upload).');
-        return null;
+    async function downloadImage(dataUrlOrUrl, filename){
+      try {
+        if (!dataUrlOrUrl) return;
+        // data URL: direct
+        if (/^data:/.test(dataUrlOrUrl)) {
+          const a = document.createElement('a');
+          a.href = dataUrlOrUrl;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          return;
+        }
+        // same-origin direct link: try direct anchor download
+        try {
+          const urlObj = new URL(dataUrlOrUrl, location.href);
+          const sameOrigin = urlObj.origin === location.origin;
+          if (sameOrigin) {
+            const a = document.createElement('a');
+            a.href = dataUrlOrUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            return;
+          }
+        } catch(e){ /* ignore URL parse errors */ }
+
+        // cross-origin or unknown: fetch as blob then download
+        const res = await fetch(dataUrlOrUrl, { mode: 'cors' });
+        if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+        const blob = await res.blob();
+        const objUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(()=> URL.revokeObjectURL(objUrl), 15000);
+      } catch (e) {
+        log('❌ downloadImage failed: ' + (e && e.message ? e.message : e));
+        // fallback: open in new tab
+        try { window.open(dataUrlOrUrl, '_blank', 'noopener'); } catch(e2){}
       }
-      const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
-      const form = new FormData();
-      form.append('key', IMGBB_KEY);
-      form.append('image', base64);
-      form.append('name', name);
-      const res = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form });
-      const json = await res.json();
-      if (json && json.success && json.data && (json.data.url || json.data.display_url)) {
-        return json.data.display_url || json.data.url;
-      }
-      throw new Error('IMGBB upload failed: ' + JSON.stringify(json));
     }
 
     // -----------------------
     // PROCESS PHOTOS / PUBLISH VISUALIZADOR
     // -----------------------
     async function processPhotosAndUpload(photosArray, viewerId){
+      // KEEP: this function still supports uploading via IMGBB if key present.
+      // But we now prefer server-side create_viewer_session flow for speed.
       try {
         if (!Array.isArray(photosArray) || photosArray.length === 0) { log('Nenhuma foto para processar'); return; }
         const photos = photosArray.slice(0,3);
         while (photos.length < 3) photos.push(photos[photos.length - 1] || photosArray[0]);
 
-        log('🔄 Gerando montagem stories e print...');
+        log('🔄 Gerando montagem stories e print localmente...');
         drawStories(photos);
         drawPrint(photos);
+        // wait a bit for canvases to finalize
         await sleep(900);
 
         const storiesMontage = currentStoriesMontageDataUrl || (storiesCanvas.toDataURL ? storiesCanvas.toDataURL('image/jpeg', 0.95) : null);
@@ -480,59 +589,32 @@
 
         genVisualizadorQrBtn.disabled = true;
 
-        // generate or reuse a viewerId so each guest has own session (-> visualizador.html?session=<FIXED_SESSION>&viewer=<viewerId>)
+        // Generate viewerIdLocal to create a unique visualizer if not provided.
         const viewerIdLocal = viewerId || (FIXED_SESSION + ':' + Date.now());
 
-        const uploadedPhotos = [];
-        let storiesUrl = null;
-        let printUrl = null;
-
-        if (IMGBB_KEY) {
-          for (let i = 0; i < 3; i++){
-            log('⏫ Upload foto ' + (i+1));
-            const url = await uploadToImgbb(photos[i], `cabine_photo_${Date.now()}_${i+1}`);
-            uploadedPhotos.push(url);
-            log('✅ foto ' + (i+1) + ' uploadada: ' + url);
-          }
-          if (storiesMontage) {
-            log('⏫ Upload montagem stories...');
-            try { storiesUrl = await uploadToImgbb(storiesMontage, `cabine_stories_${Date.now()}`); log('✅ stories uploaded: ' + storiesUrl); } catch(e){ log('⚠️ Falha upload stories: ' + (e.message || e)); storiesUrl = storiesMontage; }
-          }
-          if (printMontage) {
-            try { printUrl = await uploadToImgbb(printMontage, `cabine_print_${Date.now()}`); log('✅ print uploaded: ' + printUrl); } catch(e){ log('⚠️ Falha upload print: ' + (e.message || e)); printUrl = printMontage; }
-          }
-
-          // notify server with uploaded urls
-          socket.emit('photos_from_cell', { session: FIXED_SESSION, viewerId: viewerIdLocal, photos: uploadedPhotos, storiesMontage: storiesUrl || storiesMontage, print: printUrl || printMontage });
-          log('✅ Fotos e montagens enviadas ao servidor via photos_from_cell (uploaded).');
-        } else {
-          // send raw photos + montages to server and give it a viewerId to create a unique visualizador
-          socket.emit('photos_from_cell', { session: FIXED_SESSION, viewerId: viewerIdLocal, photos: photosArray, storiesMontage: storiesMontage || null, print: printMontage || null });
-          log('🔁 Fotos brutas e montagens enviadas ao servidor para processamento (server fará upload).');
-        }
-
-        // request server to create a viewer session and pass our viewerId
-        socket.emit('create_viewer_session', { session: FIXED_SESSION, viewerId: viewerIdLocal, photos: uploadedPhotos.length ? uploadedPhotos : photosArray, storiesMontage: storiesMontage || null, print: printMontage || null });
-
-        // craft visualizador URL (pointing to visualizador.html?session=<FIXED_SESSION>&viewer=<viewerIdLocal>)
-        const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(FIXED_SESSION)}&viewer=${encodeURIComponent(viewerIdLocal)}`;
-        const qrUrl = visualizadorUrl;
-
-        // Ask server (and consequently celular) to show the visualizer QR/iframe immediately
+        // Do NOT perform slow client uploads (IMGBB) by default. Prefer server-side.
         try {
-          socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl });
-        } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
+          socket.emit('photos_from_cell', { session: FIXED_SESSION, viewerId: viewerIdLocal, photos: photosArray, storiesMontage: storiesMontage || null, print: printMontage || null });
+          log('🔁 Fotos brutas enviadas ao servidor (photos_from_cell).');
+        } catch(e){ log('⚠️ emit photos_from_cell failed: ' + e); }
 
-        // also show on operator UI
+        // Also trigger create_viewer_session so server stores and emits viewer payload faster
+        try {
+          socket.emit('create_viewer_session', { session: FIXED_SESSION, viewerId: viewerIdLocal, photos: photosArray, storiesMontage: storiesMontage || null, print: printMontage || null });
+          log('🔁 create_viewer_session emitido automaticamente (processPhotosAndUpload).');
+        } catch(e){ log('⚠️ emit create_viewer_session failed: ' + e); }
+
+        // Show visualizer QR locally as soon as we have a URL (we craft a local URL to show)
+        const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
         showVisualizadorQr(visualizadorUrl);
 
         genVisualizadorQrBtn.disabled = false;
         printBtn.disabled = false;
 
-        addToViewerHistory(viewerIdLocal, uploadedPhotos.length || photos.length);
-        log('🎉 Visualizador criado (fluxo enviado ao servidor). viewerId: ' + viewerIdLocal);
+        addToViewerHistory(viewerIdLocal, photos.length);
+        log('🎉 Visualizador criado localmente: ' + viewerIdLocal);
       } catch(e){
-        log('❌ ERRO no processo IMGBB/local: ' + (e.message || e));
+        log('❌ ERRO no processo local: ' + (e.message || e));
         genVisualizadorQrBtn.disabled = false;
       }
     }
@@ -726,26 +808,26 @@
       try { socket && socket.emit('reset_session', { session: FIXED_SESSION }); log('🔁 reset_session emitido'); } catch(e){ log('Erro ao emitir reset_session: ' + e); }
     });
 
-    // PRINT button: cria PDF (5cm x 15cm) usando jsPDF, abre em nova aba embutido e chama print()
+    // PRINT button: cria PDF (5x15) usando jsPDF, abre em nova aba embutido e chama print()
     printBtn.addEventListener('click', async () => {
       try {
-        const data = currentPrintMontageDataUrl || printCanvas.toDataURL('image/png');
-        // create PDF 50mm x 150mm (5cm x 15cm)
+        const data = currentPrintMontageDataUrl || (printCanvas.toDataURL ? printCanvas.toDataURL('image/png') : null);
+        if (!data) {
+          alert('Montagem de impressão não disponível ainda.');
+          return;
+        }
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF({ unit: 'mm', format: [50,150], orientation: 'portrait' });
-        // add image filling page
         pdf.addImage(data, 'JPEG', 0, 0, 50, 150);
         const blob = pdf.output('blob');
         const url = URL.createObjectURL(blob);
+        // open new tab and embed PDF to trigger browser viewer (and allow ctrl+P)
         const html = `<!doctype html><html><head><meta charset="utf-8"><title>Impressão 5x15</title>
           <style>html,body{height:100%;margin:0;background:#fff} embed{width:100%;height:100%;display:block;border:0}</style>
           </head><body><embed id="pdfEmbed" src="${url}" type="application/pdf"></embed>
           <script>
             function tryPrint(){
-              try{
-                window.focus();
-                setTimeout(()=>{ window.print(); }, 300);
-              }catch(e){}
+              try{ window.focus(); setTimeout(()=>{ window.print(); }, 300); } catch(e){}
             }
             document.getElementById('pdfEmbed').addEventListener('load', tryPrint);
             setTimeout(tryPrint, 800);
