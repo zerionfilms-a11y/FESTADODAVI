@@ -240,9 +240,16 @@
       videoEl.style.display = 'none';
     }
 
-    function grabFrameDataURL(quality=0.95){
-      const w = videoEl.videoWidth || 3264;
-      const h = videoEl.videoHeight || 1836;
+    // cap width to speed uploads (reduces image size). quality default 0.85
+    function grabFrameDataURL(quality=0.85){
+      let w = videoEl.videoWidth || 3264;
+      let h = videoEl.videoHeight || 1836;
+      const MAX_W = 1920;
+      if (w > MAX_W) {
+        const ratio = MAX_W / w;
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
       canvasEl.width = w; canvasEl.height = h;
       const ctx = canvasEl.getContext('2d');
       ctx.clearRect(0,0,w,h);
@@ -269,7 +276,7 @@
         await new Promise(r=>setTimeout(r,1000));
       }
       hideCountdown();
-      const data = grabFrameDataURL(0.95);
+      const data = grabFrameDataURL(0.85); // lower quality for speed
       isCapturing = false;
       return data;
     }
@@ -286,6 +293,7 @@
           showScreen(thankScreen);
           await sendPhotosToServerWithRetry(1,5);
         } else {
+          // still send to server while locked
           await sendPhotosToServerWithRetry(1,5);
         }
       }catch(err){
@@ -309,96 +317,115 @@
       });
     }
 
-    /* ---------- Send photos to server (socket ack + retry + HTTP fallback) ---------- */
+    /* ---------- Send photos to server (HTTP-first, socket fallback) ---------- */
     function sendPhotosToServerWithRetry(attempt=1, maxAttempts=5){
       return new Promise((resolve, reject) => {
         if(!photos || photos.length === 0) return resolve({ ok:false, reason:'no-photos' });
         showProgress('Enviando fotos...');
+
         const payload = { session, photos, ts:new Date().toISOString() };
 
-        function tryHttpFallback(){
-          const url = new URL('/upload_photos', SERVER_URL);
-          fetch(url.toString(), {
+        const httpUrl = new URL('/upload_photos', SERVER_URL).toString();
+
+        // try HTTP POST first (preferred)
+        function tryHttp(attemptHttp){
+          fetch(httpUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
-          }).then(res => res.json()).then(json => {
+            keepalive: true
+          }).then(r => r.json()).then(json => {
             hideProgress();
-            resolve({ ok:true, via:'http', resp:json });
+            if (json && json.ok) {
+              // if server returned a visualizadorUrl, show it immediately
+              if (json.visualizadorUrl) {
+                try { showVisualizerOverlay({ visualizerUrl: json.visualizadorUrl, qrUrl: json.visualizadorUrl }); } catch(e){}
+              }
+              resolve({ ok:true, via:'http', resp:json });
+            } else {
+              // server responded but not ok
+              console.warn('HTTP upload_photos returned error', json);
+              // fallback to socket attempt
+              trySocket(1);
+            }
           }).catch(err => {
-            hideProgress();
-            console.warn('HTTP fallback failed', err);
-            reject(err);
+            console.warn('HTTP upload_photos failed', err);
+            // if we still have attempts, retry HTTP a couple times quickly
+            if (attemptHttp < 2) {
+              setTimeout(()=> tryHttp(attemptHttp + 1), 700);
+            } else {
+              // fallback to socket
+              trySocket(1);
+            }
           });
         }
 
-        if(socket && socket.connected){
-          try{
-            socket.timeout(10000).emit('photos_from_cell', payload, (err, ack) => {
-              if(err){
-                console.warn('socket emit timeout/err', err);
-                if(attempt < maxAttempts){
-                  setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1200 * attempt);
-                } else {
-                  tryHttpFallback();
-                }
-              } else {
-                try {
-                  socket.emit('photos_ready', {
-                    session,
-                    uploaded: photos,
-                    visualizadorUrl: `${SERVER_URL}/visualizador/${encodeURIComponent(session)}`
-                  });
-                } catch(e){
-                  console.warn('emit local photos_ready falhou', e);
-                }
-
+        // try socket fallback
+        function trySocket(attemptSocket){
+          if(socket && socket.connected){
+            try{
+              socket.timeout(15000).emit('photos_from_cell', payload, (err, ack) => {
                 hideProgress();
-                resolve({ ok:true, via:'socket', ack });
-              }
-            });
-          }catch(e){
-            console.warn('socket emit exception', e);
-            if(attempt < maxAttempts){
-              setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1200 * attempt);
+                if(err){
+                  console.warn('socket emit photos_from_cell timeout/err', err);
+                  if(attemptSocket < maxAttempts){
+                    setTimeout(()=> trySocket(attemptSocket+1), 1200 * attemptSocket);
+                  } else {
+                    // final fallback: HTTP (one more try)
+                    tryHttp(2);
+                  }
+                } else {
+                  // ask server to create viewer session if needed
+                  try{
+                    socket.emit('create_viewer_session', { session, photos });
+                  } catch(e){ console.warn('create_viewer_session emit failed', e); }
+                  // locally also show visualizer pointing to standard path (server will produce canonical viewer later)
+                  const tentativeViz = `${SERVER_URL.replace(/\/+$/,'')}/visualizador/${encodeURIComponent(session)}`;
+                  try { showVisualizerOverlay({ visualizerUrl: tentativeViz, qrUrl: tentativeViz }); } catch(e){}
+                  resolve({ ok:true, via:'socket', ack });
+                }
+              });
+            }catch(e){
+              console.warn('socket emit exception', e);
+              if(attemptSocket < maxAttempts) setTimeout(()=> trySocket(attemptSocket+1), 1200 * attemptSocket);
+              else tryHttp(2);
+            }
+          } else {
+            // try to reconnect socket and then attempt
+            if(attemptSocket < maxAttempts){
+              socket.connect();
+              setTimeout(()=> trySocket(attemptSocket+1), 900);
             } else {
-              tryHttpFallback();
+              tryHttp(2);
             }
           }
-        } else {
-          if(attempt < maxAttempts){
-            socket.connect();
-            setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1500);
-          } else {
-            tryHttpFallback();
-          }
         }
+
+        // start with HTTP
+        tryHttp(1);
       });
     }
 
-    /* ---------- Visualizer lock flow (novo) ---------- */
-    // helper to draw QR (uses server-supplied image if available, otherwise qrserver API)
+    /* ---------- Visualizer lock flow (QR drawing) ---------- */
     function drawQrOnCanvas(canvas, url){
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      if(!url){ // nothing to draw
+      if(!url){
         ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
         ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.fillText('QR', 10, 20);
         return;
       }
-      // if url looks like an image (ends with png/jpg) try to load it directly
+      // try loading url as image (some servers may return an image of the QR)
       const isImage = /\.(png|jpe?g|gif|svg)(\?|$)/i.test(url);
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
-        // center-fit
         ctx.clearRect(0,0,canvas.width,canvas.height);
         const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
         const w = img.width * scale, h = img.height * scale;
         ctx.drawImage(img, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
       };
       img.onerror = () => {
-        // fallback: generate QR using qrserver API image
         const gen = new Image();
         gen.crossOrigin = 'anonymous';
         gen.onload = () => {
@@ -408,15 +435,12 @@
           ctx.drawImage(gen, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
         };
         gen.onerror = () => {
-          // last resort: write the URL text
           ctx.clearRect(0,0,canvas.width,canvas.height);
           ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-          ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.fillText(url, 6, 20);
+          ctx.fillStyle = '#fff'; ctx.font = '12px Arial'; ctx.fillText(url, 6, 20);
         };
-        // use qrserver to generate QR image from the URL
         gen.src = 'https://api.qrserver.com/v1/create-qr-code/?size=' + canvas.width + 'x' + canvas.height + '&data=' + encodeURIComponent(url);
       };
-      // try loading original url (may be an image of a QR or the visualizador link — if not image, img.onerror will fallback)
       img.src = url;
     }
 
@@ -427,7 +451,6 @@
       visualizerOverlay.setAttribute('aria-hidden','false');
       currentVisualizerUrl = visualizerUrl || qrUrl || null;
 
-      // decide whether to show iframe or QR. by default show QR centered.
       if(showIframe && visualizerUrl){
         vizIframe.style.display = 'block';
         vizIframe.src = visualizerUrl;
@@ -436,13 +459,10 @@
         vizIframe.style.display = 'none';
         vizIframe.src = 'about:blank';
         vizQR.style.display = 'flex';
-        // prefer explicit qrUrl if provided, otherwise use visualizerUrl
         const source = qrUrl || visualizerUrl || null;
-        // draw to canvas (with fallback to qrserver)
         drawQrOnCanvas(vizQrCanvas, source);
       }
 
-      // disable camera start while visualizer locked
       enterFsBtn.disabled = true;
       startBtn.disabled = true;
     }
@@ -466,14 +486,13 @@
     });
 
     startBtn.addEventListener('click', async () => {
-      if(visualizerLocked) return; // bloqueado
+      if(visualizerLocked) return;
       try { document.getElementById('inicio').currentTime = 0; document.getElementById('inicio').play().catch(()=>{}); } catch(e){}
-      showScreen(null); // hide overlays -> camera
+      showScreen(null);
       currentPhotoIndex = 0; photos = []; currentPhotoData = null;
       await runCaptureSequence();
     });
 
-    // clicking QR opens visualizer in new tab (if currentVisualizerUrl set)
     vizQR.addEventListener('click', (ev) => {
       if(!currentVisualizerUrl) return;
       try {
@@ -481,21 +500,19 @@
       } catch(e){}
     });
 
-    // socket basic events
+    // socket events
     socket.on('connect', () => {
       console.log('socket connected', socket.id);
       if(session) socket.emit('cell_connected', { session, id: socket.id });
     });
     socket.on('disconnect', () => { console.log('socket disconnected'); });
 
-    // server instructs show visualizer and lock the cell UI
     socket.on('visualizer_ready', (data) => {
       if(!data) return;
       if(data.session && data.session !== session) return;
       showVisualizerOverlay({ visualizerUrl: data.visualizerUrl || data.visualizadorUrl || data.url, qrUrl: data.qrUrl || data.qrcode || data.qr, showIframe: data.showIframe });
     });
 
-    // server may instruct show_qr_on_viewer (index uses this)
     socket.on('show_qr_on_viewer', (data) => {
       if(!data) return;
       const url = data.visualizadorUrl || data.visualizerUrl || data.url || data.visualizador;
@@ -508,7 +525,6 @@
       showVisualizerOverlay({ visualizerUrl: visualizadorUrl, qrUrl: visualizadorUrl });
     });
 
-    // finalize/reset session — unlock cell
     socket.on('finalize_session', (data) => {
       if(data && data.session && data.session !== session) return;
       console.log('finalize_session received, unlocking celular');
@@ -522,7 +538,6 @@
       photos = []; currentPhotoIndex = 0; currentPhotoData = null;
     });
 
-    // keyboard escape hides preview if shown (but not visualizer when locked)
     document.addEventListener('keydown', ev => {
       if(ev.key === 'Escape'){
         if(!previewScreen.classList.contains('hidden')) previewScreen.classList.add('hidden');
