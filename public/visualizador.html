@@ -118,6 +118,8 @@
       text-align:center;
       color:#ddd;
     }
+    .hint-actions { margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center }
+    .small-btn { padding:8px 12px; border-radius:8px; background:#222; border:0; color:#fff; cursor:pointer }
     @media (max-width:480px){
       .session-info h1{font-size:22px}
       .download-all-btn,.instagram-btn{width:100%}
@@ -127,7 +129,7 @@
 <body>
   <div class="session-info">
     <h1>📸 Suas Fotos</h1>
-    <p><strong>Sessão:</strong> <span id="viewerIdDisplay">—</span></p>
+    <p><strong>Sessão / Viewer:</strong> <span id="viewerIdDisplay">—</span></p>
     <div class="expiry-info">⏰ Estas fotos ficarão disponíveis por 7 dias</div>
   </div>
 
@@ -139,20 +141,18 @@
 
 <script>
   const params = new URLSearchParams(window.location.search);
-  // support either ?viewer=ID or ?session=SESSION or ?session=<viewerId> legacy
+  // support either ?viewer=ID or ?viewerId=ID or ?session=SESSION
   const viewerParam = params.get('viewer') || params.get('viewerId') || null;
   const sessionParam = params.get('session') || null;
-  const dataParam = params.get('data') || null; // base64 payload
+  const dataParam = params.get('data') || null; // base64 payload fallback
   let session = null;
   let viewerId = null;
 
   if (viewerParam) {
     viewerId = viewerParam;
-    // viewer join by id
   } else if (sessionParam) {
-    // if sessionParam looks like a viewer id (has colon or uuid) we still treat as viewer
+    // if sessionParam looks like a UUID or colon-delimited id, treat as viewerId fallback
     if (sessionParam.indexOf(':') !== -1 || sessionParam.length >= 10) {
-      // ambiguous: treat as viewer fallback
       viewerId = sessionParam;
     } else {
       session = sessionParam;
@@ -165,6 +165,7 @@
 
   viewerIdDisplay.textContent = viewerId || session || '—';
 
+  // backend — ajustado para seu ambiente
   const BACKEND = (location.origin.indexOf('localhost') !== -1)
     ? location.origin
     : 'https://festadodavi-production-0591.up.railway.app';
@@ -175,28 +176,76 @@
   let currentStories = null;
   let currentPrint = null;
 
+  function log(...args){ console.log('[visualizador]', ...args); }
+
   socket.on('connect', () => {
-    console.log('✅ Conectado ao servidor:', socket.id);
-    if (viewerId) socket.emit('viewer_join', { viewerId });
-    else if (session) socket.emit('viewer_join', { session });
+    log('✅ Conectado ao servidor:', socket.id);
+    // attempt to join by viewerId (preferred) or by session (server will send latest viewer for session)
+    if (viewerId) {
+      socket.emit('viewer_join', { viewerId });
+      log('emit viewer_join by id', viewerId);
+    } else if (session) {
+      socket.emit('viewer_join', { session });
+      log('emit viewer_join by session', session);
+    }
   });
 
   socket.on('disconnect', () => {
-    console.log('socket disconnected');
+    log('socket disconnected');
   });
 
+  // primary event: server sends the payload for viewer
   socket.on('viewer_photos_ready', (data) => {
-    console.log('📥 Dados recebidos:', data);
+    log('📥 viewer_photos_ready received', data);
     try {
-      // server attaches session and viewer
       if (!data) return;
-      // if viewer param supplied, ensure it's for us (but server may not include viewer id here)
-      currentPhotos = Array.isArray(data.photos) ? data.photos.slice(0,3) : [];
+      // server may include session/viewer fields; accept payload that includes photos or stories
+      // Update viewer/session display if server provided them
+      if (data.session && !viewerId) {
+        viewerIdDisplay.textContent = data.session;
+      }
+      if (data.viewerId) {
+        viewerId = data.viewerId;
+        viewerIdDisplay.textContent = viewerId;
+      }
+      const photos = Array.isArray(data.photos) ? data.photos : [];
+      currentPhotos = photos.slice(0,3);
       currentStories = data.storiesMontage || data.storiesUrl || null;
       currentPrint = data.print || null;
       renderGallery(currentPhotos, currentStories, currentPrint);
       if (currentPhotos.length || currentStories) downloadAllBtn.style.display = 'block';
     } catch(e){ console.error(e); }
+  });
+
+  // operators may emit photos_ready (convenience) — render if it targets our session/viewer
+  socket.on('photos_ready', (data) => {
+    log('📡 photos_ready', data);
+    try {
+      if (!data) return;
+      // match by session or viewerId if provided; if neither, accept
+      const matches = (!viewerId && !session) ||
+                      (data.session && (data.session === session || data.session === viewerId)) ||
+                      (data.viewerId && data.viewerId === viewerId);
+      if (!matches) {
+        log('photos_ready ignored (not for this viewer/session)');
+        return;
+      }
+      const uploaded = Array.isArray(data.uploaded) ? data.uploaded : (Array.isArray(data.photos) ? data.photos : []);
+      if (uploaded && uploaded.length) {
+        currentPhotos = uploaded.slice(0,3);
+        renderGallery(currentPhotos, data.storiesUrl || null, data.printUrl || null);
+        downloadAllBtn.style.display = 'block';
+      }
+    } catch(e){ console.warn(e); }
+  });
+
+  // server might notify that a viewer session was created
+  socket.on('viewer_session_created', ({ viewerId: createdId }) => {
+    log('viewer_session_created', createdId);
+    if (createdId) {
+      viewerId = createdId;
+      viewerIdDisplay.textContent = viewerId;
+    }
   });
 
   function renderGallery(photos, storiesMontage, printUrl){
@@ -270,6 +319,7 @@
         a.remove();
         return;
       }
+      // try same-origin direct link download
       try {
         const urlObj = new URL(dataUrlOrUrl, location.href);
         const sameOrigin = urlObj.origin === location.origin;
@@ -301,14 +351,35 @@
     }
   }
 
-  // if nothing arrives in a few seconds, show hint
-  setTimeout(()=>{
-    if ((!currentPhotos || currentPhotos.length === 0) && !currentStories) {
-      gallery.innerHTML = `<div class="no-photos">❌ Não foi possível carregar as fotos. Verifique a sessão (session param na URL) e peça ao operador para criar o visualizador. <br><br>URL atual: <code style="word-break:break-all">${location.href}</code></div>`;
-    }
-  },6000);
+  // UI hint / retry if nothing received
+  let noDataTimer = setTimeout(showNoDataHint, 6000);
 
-  // support inline payload via ?data=base64(...)
+  function showNoDataHint(){
+    if ((currentPhotos && currentPhotos.length) || currentStories) return;
+    gallery.innerHTML = `<div class="no-photos">❌ Não foi possível carregar as fotos. Verifique a sessão (session param na URL) ou peça ao operador para criar o visualizador.<div class="hint-actions"><button id="retryBtn" class="small-btn">Tentar buscar visualizador mais recente</button><button id="openLinkBtn" class="small-btn">Abrir link atual</button></div><div style="margin-top:12px;word-break:break-all"><small>URL atual: ${location.href}</small></div></div>`;
+    document.getElementById('retryBtn').addEventListener('click', requestLatestViewer);
+    document.getElementById('openLinkBtn').addEventListener('click', ()=> { try { window.open(location.href, '_blank','noopener'); } catch(e){} });
+  }
+
+  function requestLatestViewer(){
+    // emit viewer_join by session to ask server for latest viewer for that session
+    if (!session && !viewerId) {
+      alert('Parâmetro session ou viewer não foi informado na URL. Ex.: ?session=SEUSESSION ou ?viewer=VIEWERID');
+      return;
+    }
+    if (viewerId) {
+      socket.emit('viewer_join', { viewerId });
+      log('retry: viewer_join by id', viewerId);
+    } else if (session) {
+      socket.emit('viewer_join', { session });
+      log('retry: viewer_join by session', session);
+    }
+    // reset hint timer
+    clearTimeout(noDataTimer);
+    noDataTimer = setTimeout(showNoDataHint, 6000);
+  }
+
+  // support inline payload via ?data=base64(...) (quick preview fallback)
   if (dataParam) {
     try {
       const decoded = atob(decodeURIComponent(dataParam));
