@@ -118,6 +118,7 @@
       text-align:center;
       color:#ddd;
     }
+    .meta { font-size:13px; opacity:0.9; margin-top:8px; color:#dfe; }
     @media (max-width:480px){
       .session-info h1{font-size:22px}
       .download-all-btn,.instagram-btn{width:100%}
@@ -138,112 +139,190 @@
   </div>
 
 <script>
-  const params = new URLSearchParams(window.location.search);
-  const session = params.get('session') || params.get('viewerId') || null;
-  const viewerIdDisplay = document.getElementById('viewerIdDisplay');
-  const gallery = document.getElementById('gallery');
-  const downloadAllBtn = document.getElementById('downloadAllBtn');
+  (function(){
+    const params = new URLSearchParams(window.location.search);
+    // accept viewer param (preferred) or session param (legacy / operator sometimes uses session=<viewerId>)
+    const viewerParam = params.get('viewer');
+    const sessionParam = params.get('session');
+    const session = viewerParam || sessionParam || null;
 
-  viewerIdDisplay.textContent = session || '—';
+    const viewerIdDisplay = document.getElementById('viewerIdDisplay');
+    const gallery = document.getElementById('gallery');
+    const downloadAllBtn = document.getElementById('downloadAllBtn');
 
-  const BACKEND = (location.origin.indexOf('localhost') !== -1)
-    ? location.origin
-    : 'https://festadodavi-production-0591.up.railway.app';
+    viewerIdDisplay.textContent = session || '—';
 
-  const socket = io(BACKEND, { transports:['websocket','polling'], path:'/socket.io' });
+    const BACKEND = (location.origin.indexOf('localhost') !== -1) ? location.origin : 'https://festadodavi-production-0591.up.railway.app';
+    const socket = io(BACKEND, { transports:['websocket','polling'], path:'/socket.io' });
 
-  let currentPhotos = [];
-  let currentStories = null;
+    let currentPhotos = [];
+    let currentStories = null;
+    let receivedAny = false;
 
-  socket.on('connect', () => {
-    console.log('✅ Conectado ao servidor:', socket.id);
-    if (session) socket.emit('viewer_join', { session });
-  });
-
-  socket.on('viewer_photos_ready', (data) => {
-    console.log('📥 Dados recebidos:', data);
-    try {
-      if (!data || !data.session || data.session !== session) return;
-      const photos = Array.isArray(data.photos) ? data.photos : [];
-      const stories = data.storiesMontage || data.storiesUrl || null;
-      const print = data.print || null;
-      currentPhotos = photos.slice(0,3);
-      currentStories = stories;
-      renderGallery(currentPhotos, currentStories, print);
-      if (currentPhotos.length) downloadAllBtn.style.display = 'block';
-    } catch(e){ console.error(e); }
-  });
-
-  function renderGallery(photos, storiesMontage, printUrl){
-    gallery.innerHTML = '';
-
-    // --- Montagem Stories (moldura já aplicada no index) ---
-    if (storiesMontage) {
-      const storiesContainer = document.createElement('div');
-      storiesContainer.className = 'photo-container stories-container';
-      const title = document.createElement('div');
-      title.className = 'stories-title';
-      title.textContent = '📱 Pronto para o Instagram';
-      const img = document.createElement('img');
-      img.src = storiesMontage;
-      img.alt = 'Stories Pronto';
-      img.loading = 'lazy';
-      const instagramBtn = document.createElement('button');
-      instagramBtn.className = 'instagram-btn';
-      instagramBtn.innerHTML = '📥 Baixar Pronto pro Instagram';
-      instagramBtn.onclick = () => downloadImage(storiesMontage, `pronto-instagram-${session || Date.now()}.jpg`);
-      storiesContainer.appendChild(title);
-      storiesContainer.appendChild(img);
-      storiesContainer.appendChild(instagramBtn);
-      gallery.appendChild(storiesContainer);
-    }
-
-    // --- Fotos individuais ---
-    if (!Array.isArray(photos) || photos.length === 0) {
-      if (!storiesMontage) gallery.innerHTML = `<div class="no-photos">📷 Nenhuma foto disponível no momento.</div>`;
-      return;
-    }
-
-    photos.forEach((p, idx) => {
-      const container = document.createElement('div');
-      container.className = 'photo-container';
-      const img = document.createElement('img');
-      img.src = p;
-      img.alt = `Foto ${idx+1}`;
-      img.loading = 'lazy';
-      const downloadBtn = document.createElement('button');
-      downloadBtn.className = 'download-btn';
-      downloadBtn.textContent = `📥 Baixar Foto ${idx+1}`;
-      downloadBtn.onclick = () => downloadImage(p, `foto-${idx+1}.jpg`);
-      container.appendChild(img);
-      container.appendChild(downloadBtn);
-      gallery.appendChild(container);
+    socket.on('connect', () => {
+      console.log('✅ Conectado ao servidor:', socket.id);
+      // Try to join viewer room both ways for compatibility with different server implementations
+      if (session) {
+        // older code used 'viewer_join' with session param; server implementation may expect 'join_viewer' with viewerId
+        try { socket.emit('viewer_join', { session }); } catch(e){}
+        try { socket.emit('join_viewer', { viewerId: session }); } catch(e){}
+        try { socket.emit('join_session', { session, role: 'viewer' }); } catch(e){}
+      }
     });
-  }
 
-  downloadAllBtn.addEventListener('click', () => {
-    if (!currentPhotos || currentPhotos.length === 0) return;
-    currentPhotos.forEach((p,i) => {
-      setTimeout(()=>downloadImage(p,`foto-${i+1}.jpg`),i*300);
+    // Accept multiple event names for compatibility
+    socket.on('viewer_photos_ready', (data) => handleViewerPayload(data, 'viewer_photos_ready'));
+    socket.on('photos_ready', (data) => handleViewerPayload(data, 'photos_ready'));
+    socket.on('photos_submit_saved', (data) => handleViewerPayload(data, 'photos_submit_saved'));
+    socket.on('photos_submit', (data) => handleViewerPayload(data, 'photos_submit'));
+    // fallback show_qr maybe useful
+    socket.on('show_qr', (data) => {
+      // sometimes server sends { visualizadorUrl } - we can show it as an image tile
+      if (!data) return;
+      console.log('show_qr', data);
+      if (data.visualizadorUrl) {
+        // Show a small link tile so visitor can open in new tab
+        gallery.innerHTML = '';
+        const tile = document.createElement('div');
+        tile.className = 'photo-container';
+        tile.innerHTML = `<div class="meta">Abrir visualizador:</div><a href="${data.visualizadorUrl}" target="_blank" rel="noopener" style="color:#fff;word-break:break-all">${data.visualizadorUrl}</a>`;
+        gallery.appendChild(tile);
+      }
     });
-    alert('📥 Download de todas as fotos iniciado!');
-  });
 
-  function downloadImage(dataUrl, filename){
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
+    function handleViewerPayload(payload, src){
+      console.log('📥 payload via', src, payload);
+      try {
+        // server sometimes doesn't include session/viewer fields; be permissive
+        // Accept payload that contains photos array or storiesMontage / storiesUrl
+        if(!payload) return;
+        let photos = Array.isArray(payload.photos) ? payload.photos : (Array.isArray(payload.uploaded) ? payload.uploaded : []);
+        // older flows might put photos in payload.data or payload.photosArray
+        if ((!photos || photos.length === 0) && Array.isArray(payload.photosArray)) photos = payload.photosArray;
 
-  // fallback se nada chegar
-  setTimeout(()=>{
-    if ((!currentPhotos || currentPhotos.length === 0) && !currentStories) {
-      gallery.innerHTML = `<div class="no-photos">❌ Não foi possível carregar as fotos. Verifique a sessão (session param na URL).</div>`;
+        const stories = payload.storiesMontage || payload.storiesUrl || payload.stories || null;
+        const printUrl = payload.print || null;
+        // If server included viewer id, update display
+        if (payload.viewerId) viewerIdDisplay.textContent = payload.viewerId;
+        if (payload.session && !session) viewerIdDisplay.textContent = payload.session;
+
+        currentPhotos = (photos || []).slice(0,3);
+        currentStories = stories || null;
+        receivedAny = true;
+        renderGallery(currentPhotos, currentStories, printUrl);
+        if (currentPhotos.length) downloadAllBtn.style.display = 'block';
+      } catch(e){
+        console.error('Erro handleViewerPayload', e);
+      }
     }
-  },6000);
+
+    function renderGallery(photos, storiesMontage, printUrl){
+      gallery.innerHTML = '';
+
+      // show story montage first if present
+      if (storiesMontage) {
+        const storiesContainer = document.createElement('div');
+        storiesContainer.className = 'photo-container stories-container';
+        const title = document.createElement('div');
+        title.className = 'stories-title';
+        title.textContent = '📱 Pronto para o Instagram';
+        const img = document.createElement('img');
+        img.src = storiesMontage;
+        img.alt = 'Stories Pronto';
+        img.loading = 'lazy';
+
+        const instagramBtn = document.createElement('button');
+        instagramBtn.className = 'instagram-btn';
+        instagramBtn.innerHTML = '📥 Baixar Pronto pro Instagram';
+        instagramBtn.onclick = () => downloadImageForced(storiesMontage, `pronto-instagram-${session || Date.now()}.jpg`);
+
+        storiesContainer.appendChild(title);
+        storiesContainer.appendChild(img);
+        storiesContainer.appendChild(instagramBtn);
+        gallery.appendChild(storiesContainer);
+      }
+
+      if (!Array.isArray(photos) || photos.length === 0) {
+        if (!storiesMontage) gallery.innerHTML = `<div class="no-photos">📷 Nenhuma foto disponível no momento.</div>`;
+        return;
+      }
+
+      photos.forEach((p, idx) => {
+        const container = document.createElement('div');
+        container.className = 'photo-container';
+        const img = document.createElement('img');
+        img.src = p;
+        img.alt = `Foto ${idx+1}`;
+        img.loading = 'lazy';
+
+        const downloadBtn = document.createElement('button');
+        downloadBtn.className = 'download-btn';
+        downloadBtn.textContent = `📥 Baixar Foto ${idx+1}`;
+        downloadBtn.onclick = () => downloadImageForced(p, `foto-${idx+1}.jpg`);
+
+        container.appendChild(img);
+        container.appendChild(downloadBtn);
+        gallery.appendChild(container);
+      });
+    }
+
+    // Force download: if data: URL → direct anchor; if remote URL → fetch blob then download (works better to avoid opening Imgbb link)
+    async function downloadImageForced(url, filename){
+      if (!url) return alert('URL inválida.');
+      try {
+        if (url.startsWith('data:')) {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          return;
+        }
+        // Attempt to fetch the file and download as blob
+        const res = await fetch(url, { mode:'cors' });
+        if (!res.ok) throw new Error('Falha ao baixar: ' + res.status);
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        // cleanup
+        setTimeout(() => { URL.revokeObjectURL(objectUrl); }, 30000);
+      } catch (err) {
+        console.warn('downloadImageForced fallback', err);
+        // fallback: open in new tab so user can save manually
+        window.open(url, '_blank', 'noopener');
+      }
+    }
+
+    downloadAllBtn.addEventListener('click', () => {
+      if (!currentPhotos || currentPhotos.length === 0) return;
+      currentPhotos.forEach((p,i) => {
+        setTimeout(()=>downloadImageForced(p,`foto-${i+1}.jpg`), i*300);
+      });
+      alert('📥 Download de todas as fotos iniciado!');
+    });
+
+    // fallback timeout: if nothing received after a few seconds, show helpful message (don't block if we already received)
+    setTimeout(()=> {
+      if (!receivedAny) {
+        gallery.innerHTML = `<div class="no-photos">❌ Não foi possível carregar as fotos. Verifique a sessão (session param na URL).</div>`;
+      }
+    }, 7000);
+
+    // safety: listen for explicit disconnect / reset from server
+    socket.on('reset_session', () => {
+      gallery.innerHTML = `<div class="no-photos">🔁 Sessão reiniciada pelo operador.</div>`;
+      downloadAllBtn.style.display = 'none';
+      currentPhotos = [];
+      currentStories = null;
+    });
+
+  })();
 </script>
 </body>
 </html>
