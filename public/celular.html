@@ -55,13 +55,16 @@
     .btn-danger{background:rgba(220,53,69,0.9)}
     .btn-ok{background:rgba(40,167,69,0.9)}
 
-    /* VISUALIZER overlay (QR or iframe video) */
+    /* VISUALIZER overlay (QR centered) */
     #visualizerOverlay{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.96);display:none;flex-direction:column;align-items:center;justify-content:center;padding:18px}
-    #vizContainer{width:100%;max-width:920px;height:70vh;background:#111;border-radius:12px;display:flex;align-items:center;justify-content:center;position:relative}
-    #vizIframe{width:100%;height:100%;border:0;border-radius:8px;background:#000}
-    #vizQR{position:absolute;right:14px;bottom:14px;width:180px;height:180px;background:#fff;padding:8px;border-radius:8px;display:flex;align-items:center;justify-content:center}
-    #vizNotice{margin-top:14px;color:#ddd;font-size:16px;text-align:center}
-    #vizLockNote{position:absolute;left:12px;top:12px;color:#f77;font-weight:700;font-size:13px}
+    /* center contents; optionally show iframe or QR */
+    #vizContainer{width:100%;max-width:920px;height:70vh;background:#111;border-radius:12px;display:flex;align-items:center;justify-content:center;position:relative;padding:18px;flex-direction:column}
+    #vizIframe{width:100%;height:100%;border:0;border-radius:8px;background:#000;display:none}
+    /* QR centered and larger */
+    #vizQR{width:320px;height:320px;background:#fff;padding:8px;border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+    #vizQrCanvas{width:100%;height:100%;display:block}
+    #vizNotice{margin-top:14px;color:#ddd;font-size:16px;text-align:center;display:none}
+    #vizLockNote{display:none}
 
     /* thank screen */
     #thankScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#001e3c,#0b84ff);z-index:100}
@@ -73,6 +76,7 @@
       #startBtn{font-size:18px}
       #countdown{font-size:72px; top:24%}
       #vizContainer{height:58vh}
+      #vizQR{width:220px;height:220px}
     }
   </style>
 </head>
@@ -115,11 +119,11 @@
   <!-- visualizer overlay (shows iframe or QR) -->
   <div id="visualizerOverlay" aria-hidden="true">
     <div id="vizContainer">
-      <div id="vizLockNote">Aguardando finalização no Index — visualizador travado até o operador finalizar</div>
       <iframe id="vizIframe" src="about:blank" title="Visualizador"></iframe>
-      <div id="vizQR"><canvas id="vizQrCanvas" width="160" height="160"></canvas></div>
+      <div id="vizQR" title="Abrir visualizador">
+        <canvas id="vizQrCanvas" width="300" height="300"></canvas>
+      </div>
     </div>
-    <div id="vizNotice">Aguarde — a sessão só será liberada quando o operador finalizar.</div>
   </div>
 
   <!-- thank -->
@@ -139,7 +143,6 @@
 
   <script>
     /* ---------- Config ---------- */
-    // <<< ALTERAÇÃO: coloquei a URL com protocolo para evitar problemas de construção de URLs / socket.io
     const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
     const MAX_PHOTOS = 3;
     const COUNTDOWN_SECONDS = 5;
@@ -170,8 +173,10 @@
     const continuarBtn = document.getElementById('continuarBtn');
 
     const visualizerOverlay = document.getElementById('visualizerOverlay');
+    const vizContainer = document.getElementById('vizContainer');
     const vizIframe = document.getElementById('vizIframe');
     const vizQrCanvas = document.getElementById('vizQrCanvas');
+    const vizQR = document.getElementById('vizQR');
 
     const thankScreen = document.getElementById('thankScreen');
     const debugInfo = document.getElementById('debugInfo');
@@ -184,7 +189,8 @@
     let currentPhotoIndex = 0;
     let currentPhotoData = null;
     let isCapturing = false;
-    let visualizerLocked = false; // quando true, celular fica preso na tela do visualizador até finalização do index
+    let visualizerLocked = false;
+    let currentVisualizerUrl = null; // stored so clicking canvas opens the link
 
     /* debug */
     setInterval(() => {
@@ -275,13 +281,11 @@
           currentPhotoData = await captureSinglePhotoFlow();
           await showPreviewAndAwaitDecision(currentPhotoData);
         }
-        // Se travou no visualizer enquanto capturava, a lógica de envio/finalização é feita via eventos socket
         if(!visualizerLocked){
           stopCamera();
           showScreen(thankScreen);
           await sendPhotosToServerWithRetry(1,5);
         } else {
-          // se bloqueado, aguardamos finalizar pelo index; ainda enviamos as fotos imediatamente para o index para processar
           await sendPhotosToServerWithRetry(1,5);
         }
       }catch(err){
@@ -339,7 +343,6 @@
                   tryHttpFallback();
                 }
               } else {
-                // 🔧 CORREÇÃO: após envio bem-sucedido, avisamos o INDEX/SERVIDOR com 'photos_ready'
                 try {
                   socket.emit('photos_ready', {
                     session,
@@ -374,43 +377,72 @@
     }
 
     /* ---------- Visualizer lock flow (novo) ---------- */
-    function showVisualizerOverlay({ visualizerUrl, qrUrl }){
+    // helper to draw QR (uses server-supplied image if available, otherwise qrserver API)
+    function drawQrOnCanvas(canvas, url){
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if(!url){ // nothing to draw
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.fillText('QR', 10, 20);
+        return;
+      }
+      // if url looks like an image (ends with png/jpg) try to load it directly
+      const isImage = /\.(png|jpe?g|gif|svg)(\?|$)/i.test(url);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        // center-fit
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+        const w = img.width * scale, h = img.height * scale;
+        ctx.drawImage(img, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
+      };
+      img.onerror = () => {
+        // fallback: generate QR using qrserver API image
+        const gen = new Image();
+        gen.crossOrigin = 'anonymous';
+        gen.onload = () => {
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+          const scale = Math.min(canvas.width / gen.width, canvas.height / gen.height);
+          const w = gen.width * scale, h = gen.height * scale;
+          ctx.drawImage(gen, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
+        };
+        gen.onerror = () => {
+          // last resort: write the URL text
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+          ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+          ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.fillText(url, 6, 20);
+        };
+        // use qrserver to generate QR image from the URL
+        gen.src = 'https://api.qrserver.com/v1/create-qr-code/?size=' + canvas.width + 'x' + canvas.height + '&data=' + encodeURIComponent(url);
+      };
+      // try loading original url (may be an image of a QR or the visualizador link — if not image, img.onerror will fallback)
+      img.src = url;
+    }
+
+    function showVisualizerOverlay({ visualizerUrl, qrUrl, showIframe }){
       visualizerLocked = true;
-      // pause camera for CPU and privacy
       stopCamera();
-      // block interactions
       visualizerOverlay.style.display = 'flex';
       visualizerOverlay.setAttribute('aria-hidden','false');
-      // set iframe src
-      try { vizIframe.src = visualizerUrl || 'about:blank'; } catch(e){ vizIframe.src = 'about:blank'; }
-      // draw QR if supplied
-      if(qrUrl){
-        try {
-          const ctx = vizQrCanvas.getContext('2d');
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => {
-            ctx.clearRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
-            const sx = img.width, sy = img.height;
-            const scale = Math.min(vizQrCanvas.width / sx, vizQrCanvas.height / sy);
-            const w = sx * scale, h = sy * scale;
-            ctx.drawImage(img, (vizQrCanvas.width - w)/2, (vizQrCanvas.height - h)/2, w, h);
-          };
-          img.onerror = () => {
-            ctx.clearRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
-            ctx.fillStyle='#000'; ctx.fillRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
-            ctx.fillStyle='#fff'; ctx.font='12px Arial'; ctx.fillText('QR',20,20);
-          };
-          img.src = qrUrl;
-        } catch(e){
-          console.warn('erro desenhando qr', e);
-        }
+      currentVisualizerUrl = visualizerUrl || qrUrl || null;
+
+      // decide whether to show iframe or QR. by default show QR centered.
+      if(showIframe && visualizerUrl){
+        vizIframe.style.display = 'block';
+        vizIframe.src = visualizerUrl;
+        vizQR.style.display = 'none';
       } else {
-        const ctx = vizQrCanvas.getContext('2d');
-        ctx.clearRect(0,0,vizQrCanvas.width,vizQrCanvas.height);
+        vizIframe.style.display = 'none';
+        vizIframe.src = 'about:blank';
+        vizQR.style.display = 'flex';
+        // prefer explicit qrUrl if provided, otherwise use visualizerUrl
+        const source = qrUrl || visualizerUrl || null;
+        // draw to canvas (with fallback to qrserver)
+        drawQrOnCanvas(vizQrCanvas, source);
       }
 
-      // ensure UI elements disabled while locked
+      // disable camera start while visualizer locked
       enterFsBtn.disabled = true;
       startBtn.disabled = true;
     }
@@ -420,10 +452,9 @@
       visualizerOverlay.style.display = 'none';
       visualizerOverlay.setAttribute('aria-hidden','true');
       vizIframe.src = 'about:blank';
-      // re-enable UI
       enterFsBtn.disabled = false;
       startBtn.disabled = false;
-      // return to welcome screen
+      currentVisualizerUrl = null;
       showScreen(welcomeScreen);
     }
 
@@ -442,6 +473,14 @@
       await runCaptureSequence();
     });
 
+    // clicking QR opens visualizer in new tab (if currentVisualizerUrl set)
+    vizQR.addEventListener('click', (ev) => {
+      if(!currentVisualizerUrl) return;
+      try {
+        window.open(currentVisualizerUrl, '_blank', 'noopener');
+      } catch(e){}
+    });
+
     // socket basic events
     socket.on('connect', () => {
       console.log('socket connected', socket.id);
@@ -449,40 +488,33 @@
     });
     socket.on('disconnect', () => { console.log('socket disconnected'); });
 
-    // servidor diz "mostra o visualizador e trava o celular até eu finalizar"
+    // server instructs show visualizer and lock the cell UI
     socket.on('visualizer_ready', (data) => {
       if(!data) return;
       if(data.session && data.session !== session) return;
-      showVisualizerOverlay({ visualizerUrl: data.visualizerUrl || data.visualizadorUrl || data.url, qrUrl: data.qrUrl || data.qrcode || data.qr });
+      showVisualizerOverlay({ visualizerUrl: data.visualizerUrl || data.visualizadorUrl || data.url, qrUrl: data.qrUrl || data.qrcode || data.qr, showIframe: data.showIframe });
     });
 
-    // novo: server pode emitir show_qr_on_viewer (index uses this)
+    // server may instruct show_qr_on_viewer (index uses this)
     socket.on('show_qr_on_viewer', (data) => {
       if(!data) return;
-      // server typically sends { viewerId, visualizadorUrl }
       const url = data.visualizadorUrl || data.visualizerUrl || data.url || data.visualizador;
       const qr = data.visualizadorUrl || data.qrUrl || data.qrcode || data.qr;
-      if(data.session && data.session !== session) {
-        // ignore if for other session
-        // but many server implementations won't include session here, so we accept
-      }
-      showVisualizerOverlay({ visualizerUrl: url, qrUrl: qr || url });
+      showVisualizerOverlay({ visualizerUrl: url, qrUrl: qr || url, showIframe: data.showIframe });
     });
 
-    // server may send show_qr (compat)
     socket.on('show_qr', ({ visualizadorUrl }) => {
       if(!visualizadorUrl) return;
       showVisualizerOverlay({ visualizerUrl: visualizadorUrl, qrUrl: visualizadorUrl });
     });
 
-    // servidor finaliza sessão — libera celular
+    // finalize/reset session — unlock cell
     socket.on('finalize_session', (data) => {
       if(data && data.session && data.session !== session) return;
       console.log('finalize_session received, unlocking celular');
       hideVisualizerOverlay();
       photos = []; currentPhotoIndex = 0; currentPhotoData = null;
     });
-    // também aceita 'reset_session' para compatibilidade
     socket.on('reset_session', (data) => {
       if(data && data.session && data.session !== session) return;
       console.log('reset_session received, unlocking celular');
