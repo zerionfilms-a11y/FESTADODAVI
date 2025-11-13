@@ -1,4 +1,4 @@
-// server.js (revisado e completo)
+// server.js (revisado e completo) 
 // node >= 16 recommended
 
 const express = require('express');
@@ -12,15 +12,22 @@ const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 3000;
 const IMGBB_KEY = process.env.IMGBB_KEY || 'fc52605669365cdf28ea379d10f2a341'; // coloque sua chave aqui ou via ENV
-const VISUALIZADOR_ORIGIN = process.env.VISUALIZADOR_ORIGIN || (`festadodavi-production-0591.up.railway.app`);
+// <<< ALTERAÇÃO: incluir protocolo na origem padrão
+const VISUALIZADOR_ORIGIN = process.env.VISUALIZADOR_ORIGIN || 'https://festadodavi-production-0591.up.railway.app';
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { /* defaults */ });
+
+// <<< ALTERAÇÃO: aumentar buffer para permitir mensagens socket grandes + permitir CORS
+const io = new Server(server, {
+  cors: { origin: true, methods: ["GET","POST"] },
+  maxHttpBufferSize: 50 * 1024 * 1024 // 50 MB
+});
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true }));
+// <<< ALTERAÇÃO: limitar urlencoded também para uploads grandes via POST
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(PUBLIC_DIR));
 
 // expõe uploads (multer dest)
