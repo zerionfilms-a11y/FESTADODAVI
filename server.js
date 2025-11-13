@@ -13,7 +13,7 @@ let fetchFn = global.fetch;
 try { if (!fetchFn) fetchFn = require('node-fetch'); } catch(e){ /* node-fetch not present */ }
 
 const PORT = process.env.PORT || 3000;
-const IMGBB_KEY = process.env.IMGBB_KEY || ''; // configure in env for uploads
+const IMGBB_KEY = process.env.IMGBB_KEY || 'fc52605669365cdf28ea379d10f2a341'; // configure in env for uploads
 const VISUALIZADOR_ORIGIN = (process.env.VISUALIZADOR_ORIGIN && process.env.VISUALIZADOR_ORIGIN.startsWith('http')) ?
   process.env.VISUALIZADOR_ORIGIN :
   (`https://festadodavi-production-0591.up.railway.app`);
