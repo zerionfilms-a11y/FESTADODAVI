@@ -6,9 +6,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="icon" href="/favicon.ico">
 
-  <!-- Socket.io + QRCode (CDN) -->
+  <!-- Socket.io + QRCode (CDN) + jsPDF -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-1M/7wQd9pRkM1B6r2o+YJ2z7H0J6m5E1mX6m0u1k3tqY0Y8h4F1Y+oZqXHq6W0+5F8/0um8iQ2YF3p5l5V4V0g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
   <style>
     /* --- Layout / aparência --- */
@@ -43,6 +44,9 @@
     /* extra UI niceties */
     .muted{color:var(--muted)}
     .flex-col{display:flex;flex-direction:column}
+
+    /* small helpers for link */
+    .viz-link{color:#9ad1ff;word-break:break-all;display:inline-block;margin-top:6px}
   </style>
 </head>
 <body>
@@ -309,7 +313,17 @@
       const qrCanvas = document.createElement('canvas');
       QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => { if (err) log('❌ Erro ao gerar QR: ' + err); });
       qrcodeVisualizadorEl.appendChild(qrCanvas);
-      viewerSessionIdEl.textContent = visualizadorUrl;
+
+      // show clickable link (anchor) so browsers treat it as a link (avoid Safari search behavior)
+      const a = document.createElement('a');
+      a.href = visualizadorUrl;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.className = 'viz-link';
+      a.textContent = visualizadorUrl;
+      viewerSessionIdEl.innerHTML = '';
+      viewerSessionIdEl.appendChild(a);
+
       viewerInfoEl.style.display = 'block';
       log('🔗 Visualizador pronto: ' + visualizadorUrl);
     }
@@ -506,7 +520,7 @@
 
         // Ask server (and consequently celular) to show the visualizer QR/iframe immediately
         try {
-          socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl }); // <-- ALTERAÇÃO: solicita que o celular mostre o QR/iframe
+          socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl }); // <-- solicita que o servidor notifique o celular (se implementado)
         } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
 
         // also show on operator UI
@@ -712,13 +726,34 @@
       try { socket && socket.emit('reset_session', { session: FIXED_SESSION }); log('🔁 reset_session emitido'); } catch(e){ log('Erro ao emitir reset_session: ' + e); }
     });
 
-    // PRINT button: abre nova aba com a imagem preparada e chama print()
-    printBtn.addEventListener('click', () => {
+    // PRINT button: cria PDF (5cm x 15cm) usando jsPDF, abre em nova aba embutido e chama print()
+    printBtn.addEventListener('click', async () => {
       try {
         const data = currentPrintMontageDataUrl || printCanvas.toDataURL('image/png');
+        // create PDF 50mm x 150mm (5cm x 15cm)
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ unit: 'mm', format: [50,150], orientation: 'portrait' });
+        // add image filling page
+        // jsPDF addImage expects image type; using JPEG/PNG auto-detect works
+        pdf.addImage(data, 'JPEG', 0, 0, 50, 150);
+        // output blob and open new window with embed to trigger browser PDF viewer
+        const blob = pdf.output('blob');
+        const url = URL.createObjectURL(blob);
         const html = `<!doctype html><html><head><meta charset="utf-8"><title>Impressão 5x15</title>
-          <style>html,body{margin:0;padding:0;height:100%;background:#fff} .page{width:5cm;height:15cm;margin:0 auto;display:flex;align-items:center;justify-content:center} img{width:100%;height:100%;object-fit:contain} @page{size:5cm 15cm;margin:0} @media print{body,html{margin:0;padding:0}}</style>
-          </head><body><div class="page"><img src="${data}"></div><script>window.onload=function(){setTimeout(()=>{window.print();},220)}<\/script></body></html>`;
+          <style>html,body{height:100%;margin:0;background:#fff} embed{width:100%;height:100%;display:block;border:0}</style>
+          </head><body><embed id="pdfEmbed" src="${url}" type="application/pdf"></embed>
+          <script>
+            // attempt to trigger print after load
+            function tryPrint(){
+              try{
+                window.focus();
+                setTimeout(()=>{ window.print(); }, 300);
+              }catch(e){}
+            }
+            // if embed loads, trigger print; fallback to timeout
+            document.getElementById('pdfEmbed').addEventListener('load', tryPrint);
+            setTimeout(tryPrint, 800);
+          <\/script></body></html>`;
         const w = window.open('', '_blank', 'noopener');
         if (!w) { alert('Permita popups para abrir a janela de impressão.'); return; }
         w.document.open();
