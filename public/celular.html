@@ -57,8 +57,10 @@
 
     /* VISUALIZER overlay (QR centered) */
     #visualizerOverlay{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.96);display:none;flex-direction:column;align-items:center;justify-content:center;padding:18px}
+    /* center contents; optionally show iframe or QR */
     #vizContainer{width:100%;max-width:920px;height:70vh;background:#111;border-radius:12px;display:flex;align-items:center;justify-content:center;position:relative;padding:18px;flex-direction:column}
     #vizIframe{width:100%;height:100%;border:0;border-radius:8px;background:#000;display:none}
+    /* QR centered and larger */
     #vizQR{width:320px;height:320px;background:#fff;padding:8px;border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer}
     #vizQrCanvas{width:100%;height:100%;display:block}
     #vizNotice{margin-top:14px;color:#ddd;font-size:16px;text-align:center;display:none}
@@ -141,11 +143,12 @@
 
   <script>
     /* ---------- Config ---------- */
-    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
+    const SERVER_URL = "https://festadodavi.onrender.com";
     const MAX_PHOTOS = 3;
     const COUNTDOWN_SECONDS = 5;
-    const MAX_SEND_WIDTH = 1280; // resize before sending to reduce upload time
-    const SEND_QUALITY = 0.78; // jpeg quality for faster transfers
+    const MAX_SEND_WIDTH = 1024; // smaller to speed up uploads
+    const SEND_QUALITY = 0.70; // more compression for speed
+    const SOCKET_TIMEOUT_MS = 12000;
 
     /* ---------- Socket ---------- */
     const socket = io(SERVER_URL, {
@@ -282,43 +285,81 @@
     async function runCaptureSequence(){
       try{
         await startCamera();
+        photos = []; currentPhotoIndex = 0; currentPhotoData = null;
+
         while(currentPhotoIndex < MAX_PHOTOS && !visualizerLocked){
           currentPhotoData = await captureSinglePhotoFlow();
           const decision = await showPreviewAndAwaitDecision(currentPhotoData);
           if (decision === 'continuar') {
-            // send photo immediately (so operator sees it faster)
-            try {
-              // send single photo array for speed; server treats photos_from_cell quickly and creates viewer/session
-              socket.emit('photos_from_cell', { session, photos: [currentPhotoData] }, (err, ack) => {
-                // ack optional — server will also emit viewer_photos_ready
-              });
-              // also send quick 'photos_ready' event to help operator (best-effort)
-              try {
-                socket.emit('photos_ready', { session, uploaded: [currentPhotoData], visualizadorUrl: `${SERVER_URL}/visualizador/${encodeURIComponent(session)}` });
-              } catch(e){}
-            } catch(e){ console.warn('send immediate photo failed', e); }
-            // push into local array
+            // push into local array only (do not flood server)
             photos.push(currentPhotoData);
             currentPhotoIndex++;
           } else {
-            // refazer -> just loop again
+            // refazer -> loop without increment
           }
         }
 
-        // after sequence ends: if not locked, show thank and finalize client-side
-        if(!visualizerLocked){
-          stopCamera();
-          showScreen(thankScreen);
-          // also try to notify server to create viewer session for full collection (if needed)
+        // after the 3 photos are confirmed, send them together to server (single call)
+        if (photos.length > 0) {
+          showProgress('Enviando 3 fotos ao servidor...');
+          // try socket create_viewer_session first (fast, single event)
+          let sentOk = false;
           try {
-            socket.emit('create_viewer_session', { session, photos }, (err, ack) => {});
-          } catch(e){}
+            await new Promise((resolve, reject) => {
+              let called = false;
+              try {
+                socket.timeout(SOCKET_TIMEOUT_MS).emit('create_viewer_session', { session, photos }, (err, ack) => {
+                  if (called) return;
+                  called = true;
+                  if (err) return reject(err);
+                  resolve(ack);
+                });
+              } catch(e) {
+                if (called) return;
+                called = true;
+                reject(e);
+              }
+              // guard timeout if socket.timeout doesn't callback (extra safety)
+              setTimeout(() => { if (!called) { called = true; reject(new Error('socket emit timeout')); } }, SOCKET_TIMEOUT_MS + 500);
+            });
+            sentOk = true;
+            showProgress('Fotos enviadas — aguardando montagem/visualizador...');
+            // brief visual feedback then show thank
+            setTimeout(()=>{ hideProgress(); stopCamera(); showScreen(thankScreen); }, 900);
+          } catch (err) {
+            console.warn('create_viewer_session failed, falling back to HTTP upload', err);
+          }
+
+          if (!sentOk) {
+            // fallback upload via HTTP endpoint
+            try {
+              const resp = await fetch(`${SERVER_URL.replace(/\/+$/,'')}/upload_photos`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session, photos })
+              });
+              const j = await resp.json();
+              if (j && j.ok) {
+                hideProgress();
+                stopCamera();
+                showScreen(thankScreen);
+              } else {
+                hideProgress();
+                alert('Falha ao enviar as fotos ao servidor. Tente novamente.');
+                showScreen(welcomeScreen);
+              }
+            } catch(e) {
+              hideProgress();
+              console.error('HTTP upload fallback failed', e);
+              alert('Falha de rede ao enviar fotos. Verifique conexão e tente novamente.');
+              showScreen(welcomeScreen);
+            }
+          }
         } else {
-          // when locked, still send final photos via create_viewer_session to ensure server stored them
-          try {
-            socket.emit('create_viewer_session', { session, photos }, (err, ack) => {});
-          } catch(e){}
+          stopCamera();
+          showScreen(welcomeScreen);
         }
+
       }catch(err){
         console.error('runCaptureSequence error', err);
         stopCamera();
@@ -340,70 +381,6 @@
       });
     }
 
-    /* ---------- Send photos to server (fallback) ---------- */
-    function sendPhotosToServerWithRetry(attempt=1, maxAttempts=5){
-      return new Promise((resolve, reject) => {
-        if(!photos || photos.length === 0) return resolve({ ok:false, reason:'no-photos' });
-        showProgress('Enviando fotos...');
-        const payload = { session, photos, ts:new Date().toISOString() };
-
-        function tryHttpFallback(){
-          const url = new URL('/upload_photos', SERVER_URL);
-          fetch(url.toString(), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          }).then(res => res.json()).then(json => {
-            hideProgress();
-            resolve({ ok:true, via:'http', resp:json });
-          }).catch(err => {
-            hideProgress();
-            console.warn('HTTP fallback failed', err);
-            reject(err);
-          });
-        }
-
-        if(socket && socket.connected){
-          try{
-            socket.timeout(10000).emit('photos_from_cell', payload, (err, ack) => {
-              if(err){
-                console.warn('socket emit timeout/err', err);
-                if(attempt < maxAttempts){
-                  setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1200 * attempt);
-                } else {
-                  tryHttpFallback();
-                }
-              } else {
-                try {
-                  socket.emit('photos_ready', {
-                    session,
-                    uploaded: photos,
-                    visualizadorUrl: `${SERVER_URL}/visualizador/${encodeURIComponent(session)}`
-                  });
-                } catch(e){}
-                hideProgress();
-                resolve({ ok:true, via:'socket', ack });
-              }
-            });
-          }catch(e){
-            console.warn('socket emit exception', e);
-            if(attempt < maxAttempts){
-              setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1200 * attempt);
-            } else {
-              tryHttpFallback();
-            }
-          }
-        } else {
-          if(attempt < maxAttempts){
-            socket.connect();
-            setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1500);
-          } else {
-            tryHttpFallback();
-          }
-        }
-      });
-    }
-
     /* ---------- Visualizer lock flow ---------- */
     function drawQrOnCanvas(canvas, url){
       const ctx = canvas.getContext('2d');
@@ -413,7 +390,6 @@
         ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.fillText('QR', 10, 20);
         return;
       }
-      const isImage = /\.(png|jpe?g|gif|svg)(\?|$)/i.test(url);
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
@@ -441,13 +417,14 @@
       img.src = url;
     }
 
-    function showVisualizerOverlay({ visualizerUrl, qrUrl, showIframe }) {
+    function showVisualizerOverlay({ visualizerUrl, qrUrl, showIframe }){
       visualizerLocked = true;
       stopCamera();
       visualizerOverlay.style.display = 'flex';
       visualizerOverlay.setAttribute('aria-hidden','false');
       currentVisualizerUrl = visualizerUrl || qrUrl || null;
-      if (showIframe && visualizerUrl) {
+
+      if(showIframe && visualizerUrl){
         vizIframe.style.display = 'block';
         vizIframe.src = visualizerUrl;
         vizQR.style.display = 'none';
@@ -458,6 +435,7 @@
         const source = qrUrl || visualizerUrl || null;
         drawQrOnCanvas(vizQrCanvas, source);
       }
+
       enterFsBtn.disabled = true;
       startBtn.disabled = true;
     }
@@ -471,6 +449,8 @@
       startBtn.disabled = false;
       currentVisualizerUrl = null;
       showScreen(welcomeScreen);
+      // reset local photos buffer so user can start fresh
+      photos = []; currentPhotoIndex = 0; currentPhotoData = null;
     }
 
     /* ---------- Events wiring ---------- */
@@ -488,12 +468,9 @@
       await runCaptureSequence();
     });
 
-    // clicking QR opens visualizer in new tab (if currentVisualizerUrl set)
     vizQR.addEventListener('click', (ev) => {
       if(!currentVisualizerUrl) return;
-      try {
-        window.open(currentVisualizerUrl, '_blank', 'noopener');
-      } catch(e){}
+      try { window.open(currentVisualizerUrl, '_blank', 'noopener'); } catch(e){}
     });
 
     // socket basic events
@@ -503,6 +480,7 @@
     });
     socket.on('disconnect', () => { console.log('socket disconnected'); });
 
+    // server instructs show visualizer and lock the cell UI
     socket.on('visualizer_ready', (data) => {
       if(!data) return;
       if(data.session && data.session !== session) return;
