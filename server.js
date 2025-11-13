@@ -1,4 +1,4 @@
-// server.js (revisado e completo) 
+// server.js (revisado e completo)
 // node >= 16 recommended
 
 const express = require('express');
@@ -6,36 +6,41 @@ const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
-const fetch = require('node-fetch'); // se usar node-fetch v3 em ESM, adapte; aqui assumimos compatibilidade
+const fetch = require('node-fetch');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 3000;
-const IMGBB_KEY = process.env.IMGBB_KEY || 'fc52605669365cdf28ea379d10f2a341'; // coloque sua chave aqui ou via ENV
-// <<< ALTERAÇÃO: incluir protocolo na origem padrão
+const IMGBB_KEY = process.env.IMGBB_KEY || 'fc52605669365cdf28ea379d10f2a341'; // configure if you want server-side uploads
 const VISUALIZADOR_ORIGIN = process.env.VISUALIZADOR_ORIGIN || 'https://festadodavi-production-0591.up.railway.app';
 
 const app = express();
 const server = http.createServer(app);
-
-// <<< ALTERAÇÃO: aumentar buffer para permitir mensagens socket grandes + permitir CORS
 const io = new Server(server, {
-  cors: { origin: true, methods: ["GET","POST"] },
-  maxHttpBufferSize: 50 * 1024 * 1024 // 50 MB
+  cors: { origin: true, methods: ['GET','POST'], credentials: true },
+  path: '/socket.io'
 });
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
-app.use(express.json({ limit: '50mb' }));
-// <<< ALTERAÇÃO: limitar urlencoded também para uploads grandes via POST
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: '80mb' }));
+app.use(express.urlencoded({ extended: true, limit: '80mb' }));
 app.use(express.static(PUBLIC_DIR));
+
+// simple CORS for non-socket endpoints
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  next();
+});
+
+// health
+app.get('/health', (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
 // expõe uploads (multer dest)
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 app.use('/uploads', express.static(UPLOADS_DIR));
 
-const sessions = {}; // in-memory store: { sessionId: { viewers: { vid: {...} }, operators: Set(socketId), lastStreamFrame, createdAt } }
+const sessions = {}; // in-memory store
 
 function ensureSession(sessionId) {
   if (!sessionId) return null;
@@ -103,27 +108,11 @@ app.post('/upload_photos', async (req, res) => {
     }
     ensureSession(session);
     const vid = uuidv4();
-    const uploaded = [];
-    if (IMGBB_KEY) {
-      for (let i = 0; i < photos.length; i++) {
-        try {
-          if (typeof photos[i] === 'string' && photos[i].startsWith('data:')) {
-            const u = await uploadToImgbbFromDataUrl(photos[i], `photo_${Date.now()}_${i}`);
-            uploaded.push(u);
-          } else {
-            uploaded.push(photos[i]);
-          }
-        } catch (e) {
-          console.warn('upload_photos partial upload error', e);
-          uploaded.push(null);
-        }
-      }
-    } else {
-      uploaded.push(...photos);
-    }
-    sessions[session].viewers[vid] = { photos: uploaded.filter(Boolean), storiesMontage: null, print: null, boomerang: null, createdAt: new Date().toISOString() };
 
-    // emit to session and viewer rooms
+    // store immediate (no blocking)
+    sessions[session].viewers[vid] = { photos: photos.slice(), storiesMontage: null, print: null, boomerang: null, createdAt: new Date().toISOString() };
+
+    // notify
     io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
     io.to(`viewer:${vid}`).emit('viewer_photos_ready', {
       photos: sessions[session].viewers[vid].photos,
@@ -136,10 +125,52 @@ app.post('/upload_photos', async (req, res) => {
     const visualizadorUrl = `${VISUALIZADOR_ORIGIN.replace(/\/+$/, '')}/visualizador.html?session=${encodeURIComponent(session)}&viewer=${encodeURIComponent(vid)}`;
     io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
     io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
-    // also emit photos_ready for operator UI convenience
+
+    // also emit photos_ready for operator convenience
     io.to(`session:${session}`).emit('photos_ready', { session, uploaded: sessions[session].viewers[vid].photos, visualizadorUrl, storiesUrl: null, printUrl: null });
 
-    return res.json({ ok: true, viewerId: vid, visualizadorUrl });
+    // respond quickly
+    res.json({ ok: true, viewerId: vid, visualizadorUrl });
+
+    // background: if IMGBB configured, upload data URLs asynchronously and update stored viewer
+    if (IMGBB_KEY) {
+      setTimeout(async () => {
+        console.log('[background] starting imgbb uploads for HTTP /upload_photos', session, vid);
+        try {
+          const stored = [];
+          for (let i = 0; i < photos.length; i++) {
+            const p = photos[i];
+            if (typeof p === 'string' && p.startsWith('data:')) {
+              try {
+                const u = await uploadToImgbbFromDataUrl(p, `photo_${Date.now()}_${i}`);
+                stored.push(u);
+              } catch (e) {
+                console.warn('background imgbb upload failed for photo', e);
+                stored.push(p);
+              }
+            } else {
+              stored.push(p);
+            }
+          }
+          sessions[session].viewers[vid].photos = stored.filter(Boolean);
+          // re-emit updated payload
+          io.to(`viewer:${vid}`).emit('viewer_photos_ready', {
+            session,
+            photos: sessions[session].viewers[vid].photos,
+            storiesMontage: null,
+            print: null,
+            boomerang: null,
+            createdAt: sessions[session].viewers[vid].createdAt
+          });
+          io.to(`session:${session}`).emit('photos_ready', { session, uploaded: sessions[session].viewers[vid].photos, visualizadorUrl, storiesUrl: null, printUrl: null });
+          console.log('[background] imgbb uploads done and re-emitted for', vid);
+        } catch (e) {
+          console.warn('[background] imgbb upload background failed', e);
+        }
+      }, 500);
+    }
+
+    return;
   } catch (err) {
     console.error('upload_photos error', err);
     return res.status(500).json({ ok: false, err: String(err) });
@@ -175,7 +206,6 @@ io.on('connection', (socket) => {
 
   // viewer joins by viewerId (preferred) OR by session only (we attempt to pick the latest viewer for that session)
   socket.on('viewer_join', ({ session, viewerId, viewer }) => {
-    // accept either viewerId or viewer param name
     const vid = viewerId || viewer;
     if (vid) {
       socket.join(`viewer:${vid}`);
@@ -196,7 +226,6 @@ io.on('connection', (socket) => {
           return;
         }
       }
-      // else nothing to send immediately
       console.log(`[socket] viewer_join (id) but no stored data for viewer:${vid}`);
       return;
     }
@@ -208,14 +237,12 @@ io.on('connection', (socket) => {
         console.log(`[socket] viewer_join for session:${session} but no session found`);
         return;
       }
-      // find latest viewer by createdAt
       const viewers = s.viewers || {};
       const keys = Object.keys(viewers);
       if (keys.length === 0) {
         console.log(`[socket] viewer_join for session:${session} but no viewers yet`);
         return;
       }
-      // pick the most recent createdAt
       let latestId = keys[0];
       let latestTs = viewers[latestId].createdAt || viewers[latestId].ts || 0;
       for (const k of keys) {
@@ -249,7 +276,7 @@ io.on('connection', (socket) => {
     io.to(`session:${session}`).emit('stream_frame', { session, frame });
   });
 
-  // forward a ready photo from operator to viewer (used for high-res capture)
+  // photo_ready forward
   socket.on('photo_ready', ({ session, index, viewerId, photo }) => {
     try {
       if (viewerId) io.to(`viewer:${viewerId}`).emit('photo_ready', { session, index, photo });
@@ -257,63 +284,121 @@ io.on('connection', (socket) => {
     } catch (e) { console.warn('photo_ready forward error', e); }
   });
 
-  // create viewer session: server stores and notifies viewer + operator
-  socket.on('create_viewer_session', async (payload) => {
+  // Accept photos_from_cell quickly: ack and create viewer session immediately
+  socket.on('photos_from_cell', async (payload, ack) => {
     try {
-      let { session, photos, storiesMontage, print, boomerang } = payload || {};
+      let { session, viewerId, photos, storiesMontage, print } = payload || {};
       if (!session) session = 'cabine-fixa';
       ensureSession(session);
-      const vid = uuidv4();
+      const vid = viewerId || uuidv4();
 
-      // Prepare storage: attempt IMGBB uploads for any data: URLs if IMGBB_KEY present
-      const storedPhotos = [];
-      let storiesUrl = storiesMontage || null;
-      let printUrl = print || null;
+      // immediately store the incoming (may be data URLs or already hosted URLs)
+      sessions[session].viewers[vid] = {
+        photos: Array.isArray(photos) ? photos.slice() : [],
+        storiesMontage: storiesMontage || null,
+        print: print || null,
+        boomerang: null,
+        createdAt: new Date().toISOString()
+      };
 
-      if (Array.isArray(photos)) {
-        for (let i = 0; i < photos.length; i++) {
-          const p = photos[i];
-          if (typeof p === 'string' && p.startsWith('data:') && IMGBB_KEY) {
-            try {
-              const u = await uploadToImgbbFromDataUrl(p, `photo_${Date.now()}_${i}`);
-              storedPhotos.push(u);
-            } catch (e) {
-              console.warn('IMGBB upload photo failed', e);
-              // fallback: push original dataURL so viewer can still view
-              storedPhotos.push(p);
+      // emit quick notifications
+      io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
+      const viewerPayload = {
+        session,
+        photos: sessions[session].viewers[vid].photos || [],
+        storiesMontage: sessions[session].viewers[vid].storiesMontage || null,
+        print: sessions[session].viewers[vid].print || null,
+        boomerang: sessions[session].viewers[vid].boomerang || null,
+        createdAt: sessions[session].viewers[vid].createdAt
+      };
+      io.to(`viewer:${vid}`).emit('viewer_photos_ready', viewerPayload);
+
+      const visualizadorUrl = `${VISUALIZADOR_ORIGIN.replace(/\/+$/, '')}/visualizador.html?session=${encodeURIComponent(session)}&viewer=${encodeURIComponent(vid)}`;
+      io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
+      io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
+
+      io.to(`session:${session}`).emit('photos_ready', {
+        session,
+        uploaded: sessions[session].viewers[vid].photos,
+        visualizadorUrl,
+        storiesUrl: sessions[session].viewers[vid].storiesMontage || null,
+        printUrl: sessions[session].viewers[vid].print || null
+      });
+
+      // ack back quickly
+      try { if (typeof ack === 'function') ack(null, { ok: true, viewerId: vid, visualizadorUrl }); } catch(e){}
+
+      // background: upload dataURLs to IMGBB if configured (does not block)
+      if (IMGBB_KEY) {
+        setTimeout(async () => {
+          console.log('[background] imgbb uploads for socket photos_from_cell', session, vid);
+          try {
+            const stored = [];
+            const arr = sessions[session].viewers[vid].photos || [];
+            for (let i = 0; i < arr.length; i++) {
+              const p = arr[i];
+              if (typeof p === 'string' && p.startsWith('data:')) {
+                try {
+                  const u = await uploadToImgbbFromDataUrl(p, `photo_${Date.now()}_${i}`);
+                  stored.push(u);
+                } catch (e) {
+                  console.warn('background imgbb upload failed for photo', e);
+                  stored.push(p);
+                }
+              } else {
+                stored.push(p);
+              }
             }
-          } else {
-            storedPhotos.push(p);
+            sessions[session].viewers[vid].photos = stored.filter(Boolean);
+            // re-emit updated payload
+            io.to(`viewer:${vid}`).emit('viewer_photos_ready', {
+              session,
+              photos: sessions[session].viewers[vid].photos,
+              storiesMontage: sessions[session].viewers[vid].storiesMontage || null,
+              print: sessions[session].viewers[vid].print || null,
+              boomerang: sessions[session].viewers[vid].boomerang || null,
+              createdAt: sessions[session].viewers[vid].createdAt
+            });
+            io.to(`session:${session}`).emit('photos_ready', {
+              session,
+              uploaded: sessions[session].viewers[vid].photos,
+              visualizadorUrl,
+              storiesUrl: sessions[session].viewers[vid].storiesMontage || null,
+              printUrl: sessions[session].viewers[vid].print || null
+            });
+            console.log('[background] finished imgbb background for', vid);
+          } catch (e) {
+            console.warn('[background] imgbb upload background failed', e);
           }
-        }
+        }, 700);
       }
 
-      if (storiesMontage && typeof storiesMontage === 'string' && storiesMontage.startsWith('data:') && IMGBB_KEY) {
-        try {
-          storiesUrl = await uploadToImgbbFromDataUrl(storiesMontage, `stories_${Date.now()}`);
-        } catch (e) { console.warn('IMGBB upload stories failed', e); storiesUrl = storiesMontage; }
-      } else {
-        storiesUrl = storiesMontage;
-      }
+    } catch (err) {
+      console.error('photos_from_cell handler error', err);
+      try { if (typeof ack === 'function') ack(String(err)); } catch(e){}
+    }
+  });
 
-      if (print && typeof print === 'string' && print.startsWith('data:') && IMGBB_KEY) {
-        try {
-          printUrl = await uploadToImgbbFromDataUrl(print, `print_${Date.now()}`);
-        } catch (e) { console.warn('IMGBB upload print failed', e); printUrl = print; }
-      } else {
-        printUrl = print;
-      }
+  // create viewer session: server stores and notifies viewer + operator
+  socket.on('create_viewer_session', async (payload, ack) => {
+    try {
+      let { session, photos, storiesMontage, print, boomerang, viewerId } = payload || {};
+      if (!session) session = 'cabine-fixa';
+      ensureSession(session);
+      const vid = viewerId || uuidv4();
 
-      // save to sessions structure
+      // store immediate (photos array may be data URLs)
+      const storedPhotos = Array.isArray(photos) ? photos.slice() : [];
+
       sessions[session].viewers[vid] = {
         photos: storedPhotos.filter(Boolean),
-        storiesMontage: storiesUrl || null,
-        print: printUrl || null,
+        storiesMontage: storiesMontage || null,
+        print: print || null,
         boomerang: boomerang || null,
         createdAt: new Date().toISOString()
       };
 
-      // emit ack and payloads
+      // convenience emits
       io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
 
       const viewerPayload = {
@@ -325,17 +410,13 @@ io.on('connection', (socket) => {
         createdAt: sessions[session].viewers[vid].createdAt
       };
 
-      // send to viewer room (if viewer connected)
       io.to(`viewer:${vid}`).emit('viewer_photos_ready', viewerPayload);
 
-      // craft canonical visualizador URL (with viewer id)
       const visualizadorUrl = `${VISUALIZADOR_ORIGIN.replace(/\/+$/, '')}/visualizador.html?session=${encodeURIComponent(session)}&viewer=${encodeURIComponent(vid)}`;
 
-      // notify the cell(s) and operator(s)
       io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
       io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
 
-      // convenience: also send photos_ready to operators (so index shows uploaded thumbs & visualizer QR)
       io.to(`session:${session}`).emit('photos_ready', {
         session,
         uploaded: sessions[session].viewers[vid].photos,
@@ -344,37 +425,20 @@ io.on('connection', (socket) => {
         printUrl: sessions[session].viewers[vid].print || null
       });
 
-      console.log(`[create_viewer_session] session=${session} viewer=${vid} photos=${(storedPhotos||[]).length}`);
+      if (typeof ack === 'function') ack(null, { ok: true, viewerId: vid, visualizadorUrl });
     } catch (err) {
       console.error('create_viewer_session error', err);
+      if (typeof ack === 'function') ack(String(err));
     }
   });
 
   // legacy flow: photos_submit (viewer sends raw dataURLs)
-  socket.on('photos_submit', async ({ session, viewerId, photos }) => {
+  socket.on('photos_submit', async ({ session, viewerId, photos }, ack) => {
     try {
       if (!session) session = 'cabine-fixa';
       ensureSession(session);
       const vid = viewerId || uuidv4();
-      const uploaded = [];
-
-      if (Array.isArray(photos)) {
-        for (let i = 0; i < photos.length; i++) {
-          const p = photos[i];
-          if (typeof p === 'string' && p.startsWith('data:') && IMGBB_KEY) {
-            try {
-              const u = await uploadToImgbbFromDataUrl(p, `photo_${Date.now()}_${i}`);
-              uploaded.push(u);
-            } catch (e) {
-              console.warn('photos_submit imgbb upload failed', e);
-              uploaded.push(p);
-            }
-          } else {
-            uploaded.push(p);
-          }
-        }
-      }
-
+      const uploaded = Array.isArray(photos) ? photos.slice() : [];
       sessions[session].viewers[vid] = { photos: uploaded.filter(Boolean), storiesMontage: null, print: null, boomerang: null, createdAt: new Date().toISOString() };
 
       io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
@@ -384,7 +448,6 @@ io.on('connection', (socket) => {
       io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
       io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
 
-      // also notify operators with photos_ready
       io.to(`session:${session}`).emit('photos_ready', {
         session,
         uploaded: sessions[session].viewers[vid].photos,
@@ -393,12 +456,14 @@ io.on('connection', (socket) => {
         printUrl: null
       });
 
+      if (typeof ack === 'function') ack && ack(null, { ok: true, viewerId: vid, visualizadorUrl });
     } catch (err) {
       console.error('photos_submit error', err);
+      if (typeof ack === 'function') ack(String(err));
     }
   });
 
-  // boomerang flow: accept dataUrl or videoUrl + optional previewFrame
+  // boomerang flow
   socket.on('boomerang_ready', async ({ session, viewerId, data, dataUrl, videoUrl, previewFrame }) => {
     try {
       if (!session) session = 'cabine-fixa';
@@ -434,7 +499,6 @@ io.on('connection', (socket) => {
       io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
       io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
 
-      // also operator convenience event
       io.to(`session:${session}`).emit('photos_ready', {
         session,
         uploaded: sessions[session].viewers[vid].photos || [],
@@ -450,7 +514,6 @@ io.on('connection', (socket) => {
   // finalize/reset session (operator triggers)
   socket.on('finalize_session', ({ session }) => {
     if (!session) return;
-    // notify cell(s) to return to welcome screen
     io.to(`session:${session}`).emit('finalize_session', { session });
     console.log('finalize_session for', session);
   });
@@ -458,13 +521,11 @@ io.on('connection', (socket) => {
   socket.on('reset_session', ({ session }) => {
     if (!session) return;
     io.to(`session:${session}`).emit('reset_session', { session });
-    // optional: clear session storage
     if (sessions[session]) delete sessions[session];
     console.log('reset_session for', session);
   });
 
   socket.on('disconnect', () => {
-    // cleanup operator socketId from sessions if present
     try {
       for (const sid of Object.keys(sessions)) {
         if (sessions[sid].operators && sessions[sid].operators.has(socket.id)) {
@@ -472,7 +533,6 @@ io.on('connection', (socket) => {
         }
       }
     } catch (e) { /* ignore */ }
-    // console.log('[socket] disconnected', socket.id);
   });
 });
 
