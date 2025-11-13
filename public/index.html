@@ -123,7 +123,7 @@
     // -----------------------
     // CONFIG
     // -----------------------
-    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
+    const SERVER_URL = "festadodavi-production-0591.up.railway.app";
     const FIXED_SESSION = "cabine-fixa";
     const IMGBB_KEY = "";
     const STORIES_TEMPLATE = "storiesdavi.png";
@@ -480,8 +480,8 @@
 
         genVisualizadorQrBtn.disabled = true;
 
-        // generate or reuse a viewerId so each guest has own session (-> visualizador.html?session=viewerId)
-        const viewerIdLocal = viewerId || (FIXED_SESSION + ':' + Date.now()); // <-- ALTERAÇÃO: gera viewerId quando não informado
+        // generate or reuse a viewerId so each guest has own session (-> visualizador.html?session=<FIXED_SESSION>&viewer=<viewerId>)
+        const viewerIdLocal = viewerId || (FIXED_SESSION + ':' + Date.now());
 
         const uploadedPhotos = [];
         let storiesUrl = null;
@@ -514,13 +514,13 @@
         // request server to create a viewer session and pass our viewerId
         socket.emit('create_viewer_session', { session: FIXED_SESSION, viewerId: viewerIdLocal, photos: uploadedPhotos.length ? uploadedPhotos : photosArray, storiesMontage: storiesMontage || null, print: printMontage || null });
 
-        // craft visualizador URL (pointing to visualizador.html?session=viewerIdLocal)
-        const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`; // <-- ALTERAÇÃO: uso viewerIdLocal
+        // craft visualizador URL (pointing to visualizador.html?session=<FIXED_SESSION>&viewer=<viewerIdLocal>)
+        const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(FIXED_SESSION)}&viewer=${encodeURIComponent(viewerIdLocal)}`;
         const qrUrl = visualizadorUrl;
 
         // Ask server (and consequently celular) to show the visualizer QR/iframe immediately
         try {
-          socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl }); // <-- solicita que o servidor notifique o celular (se implementado)
+          socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl });
         } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
 
         // also show on operator UI
@@ -734,23 +734,19 @@
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF({ unit: 'mm', format: [50,150], orientation: 'portrait' });
         // add image filling page
-        // jsPDF addImage expects image type; using JPEG/PNG auto-detect works
         pdf.addImage(data, 'JPEG', 0, 0, 50, 150);
-        // output blob and open new window with embed to trigger browser PDF viewer
         const blob = pdf.output('blob');
         const url = URL.createObjectURL(blob);
         const html = `<!doctype html><html><head><meta charset="utf-8"><title>Impressão 5x15</title>
           <style>html,body{height:100%;margin:0;background:#fff} embed{width:100%;height:100%;display:block;border:0}</style>
           </head><body><embed id="pdfEmbed" src="${url}" type="application/pdf"></embed>
           <script>
-            // attempt to trigger print after load
             function tryPrint(){
               try{
                 window.focus();
                 setTimeout(()=>{ window.print(); }, 300);
               }catch(e){}
             }
-            // if embed loads, trigger print; fallback to timeout
             document.getElementById('pdfEmbed').addEventListener('load', tryPrint);
             setTimeout(tryPrint, 800);
           <\/script></body></html>`;
