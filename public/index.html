@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="icon" href="/favicon.ico">
 
-  <!-- Socket.io + QRCode (CDN) + jsPDF -->
+  <!-- Socket.io + QRCode + jsPDF -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
@@ -159,6 +159,9 @@
 
   var pendingBySession = {};
 
+  // store last viewerId the server created (viewer_session_created)
+  var lastCreatedViewerId = null;
+
   // -----------------------
   // UTIL / LOG
   // -----------------------
@@ -219,11 +222,14 @@
     // central async handler that ensures montages are ready before showing visualizador
     async function handleIncomingServerPhotos(obj){
       try {
-        var session = obj.session;
+        var session = obj.session || FIXED_SESSION;
+        // get any uploaded URLs array (server may use 'uploaded' or 'photos')
         var uploaded = obj.uploaded || obj.photos || obj.photosArray || null;
         var visualizadorUrl = obj.visualizadorUrl || obj.visualizador || null;
         var storiesUrl = obj.storiesUrl || obj.storiesMontage || obj.stories || null;
         var printUrl = obj.print || obj.printUrl || null;
+        // prefer viewerId from payload; fallback to lastCreatedViewerId
+        var vid = obj.viewerId || obj.viewer || lastCreatedViewerId || null;
 
         log('📥 handleIncomingServerPhotos (session:' + (session||'—') + ')');
 
@@ -260,12 +266,79 @@
           await drawPrint(lastPhotos).catch(function(e){ log('⚠️ drawPrint local falhou: ' + e); });
         }
 
-        // Only now show visualizador (if provided), otherwise wait for server to send it
-        if (visualizadorUrl && typeof visualizadorUrl === 'string') {
-          log('✅ Mostrando visualizador somente após montagens estarem prontas: ' + visualizadorUrl);
-          showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+        // If server did NOT provide remote stories URL, upload from operator to server now
+        var needToUploadToServer = !(storiesUrl && /^https?:\/\//i.test(storiesUrl));
+        if (needToUploadToServer) {
+          // if we generated local dataURL for stories, use it; otherwise, nothing to upload
+          var montageToUpload = currentStoriesMontageDataUrl && currentStoriesMontageDataUrl.indexOf('data:') === 0 ? currentStoriesMontageDataUrl : null;
+          if (montageToUpload) {
+            log('⏫ Enviando montagem (operador) para o servidor para obter URL remota...');
+            try {
+              // try upload: this endpoint must exist no server (see note)
+              var urls = await uploadPhotosAndMontageToServer(lastPhotos, montageToUpload);
+              if (urls) {
+                log('✅ Upload via /upload-to-imgbb retornou: ' + JSON.stringify(urls));
+                // build remote photos/montage
+                var remotePhotos = [];
+                remotePhotos.push(urls.photo1 || lastPhotos[0] || null);
+                remotePhotos.push(urls.photo2 || lastPhotos[1] || lastPhotos[0] || null);
+                remotePhotos.push(urls.photo3 || lastPhotos[2] || lastPhotos[0] || null);
+                var remoteMontage = urls.montage || null;
+                var remotePrint = urls.montage || null;
+                // ensure we have a viewer id to register with
+                if (!vid) vid = 'v-' + Date.now() + '-' + Math.floor(Math.random()*1e6);
+                // tell server to create viewer session with the final URLs (so server/visualizador use remote URLs)
+                try {
+                  socket.emit('create_viewer_session', {
+                    session: session,
+                    viewerId: vid,
+                    photos: remotePhotos,
+                    storiesMontage: remoteMontage,
+                    print: remotePrint
+                  });
+                  log('📨 create_viewer_session emitido com URLs ao servidor para viewer: ' + vid);
+                  // set local pointers so showVisualizador uses remoteMontage if available
+                  if (remoteMontage) currentStoriesMontageDataUrl = remoteMontage;
+                  if (remotePrint) currentPrintMontageDataUrl = remotePrint;
+                  printBtn.disabled = !!currentPrintMontageDataUrl;
+                  // show visualizador using the viewer id (server will also emit photos_ready eventually)
+                  var visualizadorLink = SERVER_URL.replace(/\/+$/,'') + '/visualizador.html?session=' + encodeURIComponent(vid);
+                  showVisualizadorQr(visualizadorLink);
+                } catch(e){
+                  log('⚠️ Falha ao emitir create_viewer_session após upload: ' + e);
+                }
+              } else {
+                log('⚠️ /upload-to-imgbb não retornou URLs; enviando dataURLs via socket como fallback');
+                // fallback: send dataURLs via socket so server attempts upload itself
+                if (!vid) vid = 'v-' + Date.now() + '-' + Math.floor(Math.random()*1e6);
+                try {
+                  socket.emit('create_viewer_session', {
+                    session: session,
+                    viewerId: vid,
+                    photos: lastPhotos,
+                    storiesMontage: montageToUpload,
+                    print: currentPrintMontageDataUrl || null
+                  });
+                  log('🔁 Fallback create_viewer_session (dataURLs) enviado ao servidor para viewer: ' + vid);
+                  var visualizadorLink = SERVER_URL.replace(/\/+$/,'') + '/visualizador.html?session=' + encodeURIComponent(vid);
+                  showVisualizadorQr(visualizadorLink);
+                } catch(e){ log('⚠️ Fallback emit falhou: ' + e); }
+              }
+            } catch(e){
+              log('❌ Erro upload montage to server: ' + e);
+            }
+          } else {
+            log('ℹ️ Não há montage dataURL local para upload (não foi gerada). Aguardando servidor.');
+          }
         } else {
-          log('ℹ️ Nenhum visualizadorUrl fornecido ainda — aguardando servidor (ou crie manualmente).');
+          // server provided remote montage: show visualizador now
+          if (visualizadorUrl || vid) {
+            var vlink = visualizadorUrl ? normalizeVisualizerUrl(visualizadorUrl) : (SERVER_URL.replace(/\/+$/,'') + '/visualizador.html?session=' + encodeURIComponent(vid));
+            log('✅ Mostrando visualizador somente após montagens estarem prontas: ' + vlink);
+            showVisualizadorQr(vlink);
+          } else {
+            log('ℹ️ Nenhum visualizadorUrl/vid fornecido ainda — aguardando servidor (ou crie manualmente).');
+          }
         }
 
       } catch(e){
@@ -289,7 +362,6 @@
       currentBoomerangUrl = videoUrl || null;
       renderBoomerangPreview(currentBoomerangUrl);
       if (visualizadorUrl) {
-        // ensure montages drawn before show (try to draw local if needed)
         (async function(){
           await drawStories(lastPhotos).catch(function(){});
           showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
@@ -297,10 +369,11 @@
       }
     });
 
-    // viewer_session_created: don't show visualizador here (server will send photos_ready later)
+    // store last created viewer id (server-created)
     socket.on('viewer_session_created', function(obj){
       var viewerId = obj.viewerId;
       log('🎉 Sessão do visualizador criada no servidor: ' + viewerId);
+      lastCreatedViewerId = viewerId;
       addToViewerHistory(viewerId, lastPhotos.length);
     });
 
@@ -643,7 +716,9 @@
       if (!urls) {
         log('⚠️ Upload ao servidor falhou — tentando enviar via socket (dataURLs) para que o servidor processe');
         try {
-          socket.emit('create_viewer_session', { session: FIXED_SESSION, viewerId: viewerIdLocal, photos: photos, storiesMontage: storiesMontageDataUrl || null, print: printMontageDataUrl || null });
+          socket.emit('create_viewer_session', {
+            session: FIXED_SESSION, viewerId: viewerIdLocal, photos: photos, storiesMontage: storiesMontageDataUrl || null, print: printMontageDataUrl || null
+          });
         } catch(e){ log('⚠️ emit create_viewer_session falhou: ' + e); }
         var visualizadorUrlFallback = SERVER_URL.replace(/\/+$/,'') + '/visualizador.html?session=' + encodeURIComponent(viewerIdLocal);
         showVisualizadorQr(visualizadorUrlFallback);
