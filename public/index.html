@@ -158,8 +158,6 @@
   var currentBoomerangUrl = null;
 
   var pendingBySession = {};
-
-  // store last viewerId the server created (viewer_session_created)
   var lastCreatedViewerId = null;
 
   // -----------------------
@@ -219,27 +217,22 @@
       setStatus('⚠️ Erro de conexão', null);
     });
 
-    // central async handler that ensures montages are ready before showing visualizador
     async function handleIncomingServerPhotos(obj){
       try {
         var session = obj.session || FIXED_SESSION;
-        // get any uploaded URLs array (server may use 'uploaded' or 'photos')
         var uploaded = obj.uploaded || obj.photos || obj.photosArray || null;
         var visualizadorUrl = obj.visualizadorUrl || obj.visualizador || null;
         var storiesUrl = obj.storiesUrl || obj.storiesMontage || obj.stories || null;
         var printUrl = obj.print || obj.printUrl || null;
-        // prefer viewerId from payload; fallback to lastCreatedViewerId
         var vid = obj.viewerId || obj.viewer || lastCreatedViewerId || null;
 
         log('📥 handleIncomingServerPhotos (session:' + (session||'—') + ')');
 
-        // update lastPhotos if provided
         if (Array.isArray(uploaded) && uploaded.length) {
           lastPhotos = uploaded.slice(0,3);
           renderThumbs();
         }
 
-        // 1) if server provided a remote storiesUrl, try to fetch & render it first
         if (storiesUrl && typeof storiesUrl === 'string' && /^https?:\/\//i.test(storiesUrl)) {
           log('⏬ storiesUrl fornecido pelo servidor, baixando e desenhando antes de mostrar visualizador...');
           try {
@@ -248,16 +241,13 @@
             log('✅ stories remoto desenhado com sucesso');
           } catch(e){
             log('⚠️ Falha ao desenhar stories remoto: ' + e);
-            // fallback: try to generate locally from photos
             await drawStories(lastPhotos).catch(function(e){ log('⚠️ drawStories fallback falhou: ' + e); });
           }
         } else {
-          // 2) no stories remoto — generate locally (ensure canvases are ready)
           log('⏳ Garantindo geração local da montagem stories antes de mostrar visualizador...');
           await drawStories(lastPhotos).catch(function(e){ log('⚠️ drawStories local falhou: ' + e); });
         }
 
-        // Ensure print montage too
         if (printUrl && typeof printUrl === 'string' && /^https?:\/\//i.test(printUrl)) {
           currentPrintMontageDataUrl = printUrl;
           printBtn.disabled = false;
@@ -266,28 +256,22 @@
           await drawPrint(lastPhotos).catch(function(e){ log('⚠️ drawPrint local falhou: ' + e); });
         }
 
-        // If server did NOT provide remote stories URL, upload from operator to server now
         var needToUploadToServer = !(storiesUrl && /^https?:\/\//i.test(storiesUrl));
         if (needToUploadToServer) {
-          // if we generated local dataURL for stories, use it; otherwise, nothing to upload
           var montageToUpload = currentStoriesMontageDataUrl && currentStoriesMontageDataUrl.indexOf('data:') === 0 ? currentStoriesMontageDataUrl : null;
           if (montageToUpload) {
             log('⏫ Enviando montagem (operador) para o servidor para obter URL remota...');
             try {
-              // try upload: this endpoint must exist no server (see note)
               var urls = await uploadPhotosAndMontageToServer(lastPhotos, montageToUpload);
               if (urls) {
-                log('✅ Upload via /upload-to-imgbb retornou: ' + JSON.stringify(urls));
-                // build remote photos/montage
+                log('✅ /upload-to-imgbb retornou: ' + JSON.stringify(urls));
                 var remotePhotos = [];
                 remotePhotos.push(urls.photo1 || lastPhotos[0] || null);
                 remotePhotos.push(urls.photo2 || lastPhotos[1] || lastPhotos[0] || null);
                 remotePhotos.push(urls.photo3 || lastPhotos[2] || lastPhotos[0] || null);
                 var remoteMontage = urls.montage || null;
                 var remotePrint = urls.montage || null;
-                // ensure we have a viewer id to register with
                 if (!vid) vid = 'v-' + Date.now() + '-' + Math.floor(Math.random()*1e6);
-                // tell server to create viewer session with the final URLs (so server/visualizador use remote URLs)
                 try {
                   socket.emit('create_viewer_session', {
                     session: session,
@@ -297,11 +281,9 @@
                     print: remotePrint
                   });
                   log('📨 create_viewer_session emitido com URLs ao servidor para viewer: ' + vid);
-                  // set local pointers so showVisualizador uses remoteMontage if available
                   if (remoteMontage) currentStoriesMontageDataUrl = remoteMontage;
                   if (remotePrint) currentPrintMontageDataUrl = remotePrint;
                   printBtn.disabled = !!currentPrintMontageDataUrl;
-                  // show visualizador using the viewer id (server will also emit photos_ready eventually)
                   var visualizadorLink = SERVER_URL.replace(/\/+$/,'') + '/visualizador.html?session=' + encodeURIComponent(vid);
                   showVisualizadorQr(visualizadorLink);
                 } catch(e){
@@ -309,7 +291,6 @@
                 }
               } else {
                 log('⚠️ /upload-to-imgbb não retornou URLs; enviando dataURLs via socket como fallback');
-                // fallback: send dataURLs via socket so server attempts upload itself
                 if (!vid) vid = 'v-' + Date.now() + '-' + Math.floor(Math.random()*1e6);
                 try {
                   socket.emit('create_viewer_session', {
@@ -329,13 +310,16 @@
             }
           } else {
             log('ℹ️ Não há montage dataURL local para upload (não foi gerada). Aguardando servidor.');
+            if (visualizadorUrl || vid) {
+              var vlink = visualizadorUrl ? normalizeVisualizerUrl(visualizadorUrl) : (SERVER_URL.replace(/\/+$/,'') + '/visualizador.html?session=' + encodeURIComponent(vid));
+              showVisualizadorQr(vlink);
+            }
           }
         } else {
-          // server provided remote montage: show visualizador now
           if (visualizadorUrl || vid) {
-            var vlink = visualizadorUrl ? normalizeVisualizerUrl(visualizadorUrl) : (SERVER_URL.replace(/\/+$/,'') + '/visualizador.html?session=' + encodeURIComponent(vid));
-            log('✅ Mostrando visualizador somente após montagens estarem prontas: ' + vlink);
-            showVisualizadorQr(vlink);
+            var vlink2 = visualizadorUrl ? normalizeVisualizerUrl(visualizadorUrl) : (SERVER_URL.replace(/\/+$/,'') + '/visualizador.html?session=' + encodeURIComponent(vid));
+            log('✅ Mostrando visualizador somente após montagens estarem prontas: ' + vlink2);
+            showVisualizadorQr(vlink2);
           } else {
             log('ℹ️ Nenhum visualizadorUrl/vid fornecido ainda — aguardando servidor (ou crie manualmente).');
           }
@@ -346,30 +330,23 @@
       }
     }
 
-    // wire socket events to the centralized handler
     socket.on('photos_from_cell', function(payload){ handleIncomingServerPhotos(payload).catch(function(e){ log('❌ photos_from_cell handler error: ' + e); }); });
     socket.on('photos_submit', function(payload){ handleIncomingServerPhotos(payload).catch(function(e){ log('❌ photos_submit handler error: ' + e); }); });
     socket.on('photos_submit_saved', function(payload){ handleIncomingServerPhotos(payload).catch(function(e){ log('❌ photos_submit_saved handler error: ' + e); }); });
 
     socket.on('photos_ready', function(payload){ handleIncomingServerPhotos(payload).catch(function(e){ log('❌ photos_ready handler error: ' + e); }); });
-
     socket.on('viewer_photos_ready', function(payload){ handleIncomingServerPhotos(payload).catch(function(e){ log('❌ viewer_photos_ready handler error: ' + e); }); });
 
-    // boomerang: keep existing behavior (preview + show visualizador if present)
     socket.on('boomerang_ready', function(obj){
       var session = obj.session, videoUrl = obj.videoUrl, visualizadorUrl = obj.visualizadorUrl;
       log('🎞 boomerang_ready recebido (viewer:' + (session||'—') + ')');
       currentBoomerangUrl = videoUrl || null;
       renderBoomerangPreview(currentBoomerangUrl);
       if (visualizadorUrl) {
-        (async function(){
-          await drawStories(lastPhotos).catch(function(){});
-          showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
-        })();
+        (async function(){ await drawStories(lastPhotos).catch(function(){}); showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl)); })();
       }
     });
 
-    // store last created viewer id (server-created)
     socket.on('viewer_session_created', function(obj){
       var viewerId = obj.viewerId;
       log('🎉 Sessão do visualizador criada no servidor: ' + viewerId);
@@ -473,7 +450,6 @@
       var img = document.createElement('img'); img.src = p; img.alt = 'foto-' + (idx+1);
       thumbsEl.appendChild(img);
     });
-    // draws will be awaited by upload flow or handlers when needed
     drawStories(lastPhotos).catch(function(){});
     drawPrint(lastPhotos).catch(function(){});
   }
@@ -642,55 +618,132 @@
   }
 
   // -----------------------
-  // HELPERS: dataURL <-> Blob
+  // HELPERS: dataURL <-> Blob / fetch remote
   // -----------------------
+  function isDataUrl(str){ return typeof str === 'string' && str.indexOf('data:') === 0; }
+  function isHttpUrl(str){ return typeof str === 'string' && /^https?:\/\//i.test(str); }
+
+  async function fetchUrlAsBlob(url, timeoutMs){
+    timeoutMs = timeoutMs || 15000;
+    const controller = new AbortController();
+    const id = setTimeout(()=>controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { mode: 'cors', signal: controller.signal });
+      clearTimeout(id);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.blob();
+    } catch (e) {
+      clearTimeout(id);
+      throw e;
+    }
+  }
+
   function dataURLtoBlob(dataurl) {
-    var arr = dataurl.split(',');
-    var mime = arr[0].match(/:(.*?);/)[1];
-    var bstr = atob(arr[1]);
-    var n = bstr.length;
-    var u8arr = new Uint8Array(n);
-    while(n--) u8arr[n] = bstr.charCodeAt(n);
-    return new Blob([u8arr], {type:mime});
+    // accept data:... OR throw if not data url
+    if (!dataurl || typeof dataurl !== 'string') return null;
+    if (isDataUrl(dataurl)) {
+      var arr = dataurl.split(',');
+      var match = arr[0].match(/:(.*?);/);
+      if (!match) return null;
+      var mime = match[1];
+      var bstr = atob(arr[1]);
+      var n = bstr.length;
+      var u8arr = new Uint8Array(n);
+      while(n--) u8arr[n] = bstr.charCodeAt(n);
+      return new Blob([u8arr], {type:mime});
+    }
+    // not data URL
+    return null;
   }
 
   // -----------------------
   // Upload aggregator -> SERVER /upload-to-imgbb
+  // - handles data: urls and http(s) urls
+  // - if can't fetch a remote resource it will add photoUrlN to form so server can fallback
   // -----------------------
   async function uploadPhotosAndMontageToServer(photosDataUrls, montageDataUrl) {
     var form = new FormData();
+    var usedAny = false;
     for (var i=0;i<3;i++){
       var d = photosDataUrls[i];
       if (!d) continue;
-      var blob = dataURLtoBlob(d);
-      var name = 'photo' + (i+1) + '.png';
-      form.append('photo' + (i+1), blob, name);
+      try {
+        if (isDataUrl(d)) {
+          var blob = dataURLtoBlob(d);
+          if (blob) { form.append('photo' + (i+1), blob, 'photo' + (i+1) + '.jpg'); usedAny = true; log('⏫ photo' + (i+1) + ' appended as blob (dataURL).'); }
+          else { form.append('photoUrl' + (i+1), d); log('⚠️ photo' + (i+1) + ' dataURL parse failed, appended photoUrl field.'); }
+        } else if (isHttpUrl(d)) {
+          try {
+            var fetchedBlob = await fetchUrlAsBlob(d, UPLOAD_TIMEOUT_MS);
+            form.append('photo' + (i+1), fetchedBlob, 'photo' + (i+1) + '.jpg');
+            usedAny = true;
+            log('⏫ photo' + (i+1) + ' fetched and appended as blob (remote URL).');
+          } catch(e){
+            // fallback: pass URL to server so it can download/upload
+            form.append('photoUrl' + (i+1), d);
+            log('⚠️ Falha ao baixar remote photo' + (i+1) + ': ' + e + ' — enviando photoUrl' + (i+1) + ' para o servidor.');
+          }
+        } else {
+          log('⚠️ photo' + (i+1) + ' não é data: nem http: — ignorando');
+        }
+      } catch(e){
+        log('❌ erro preparando photo' + (i+1) + ': ' + e);
+      }
     }
-    if (montageDataUrl){
-      var blobM = dataURLtoBlob(montageDataUrl);
-      form.append('montage', blobM, 'stories_montage.png');
+    if (montageDataUrl) {
+      try {
+        if (isDataUrl(montageDataUrl)) {
+          var blobM = dataURLtoBlob(montageDataUrl);
+          if (blobM) { form.append('montage', blobM, 'stories_montage.jpg'); usedAny = true; log('⏫ montage appended as blob (dataURL)'); }
+          else { form.append('montageUrl', montageDataUrl); log('⚠️ montage dataURL parse failed, attached montageUrl'); }
+        } else if (isHttpUrl(montageDataUrl)) {
+          try {
+            var fetchedM = await fetchUrlAsBlob(montageDataUrl, UPLOAD_TIMEOUT_MS);
+            form.append('montage', fetchedM, 'stories_montage.jpg'); usedAny = true; log('⏫ montage fetched and appended as blob (remote URL).');
+          } catch(e){
+            form.append('montageUrl', montageDataUrl);
+            log('⚠️ Falha ao baixar montage remote: ' + e + ' — enviando montageUrl para o servidor.');
+          }
+        } else {
+          log('⚠️ montage value não é data nem http — ignorando');
+        }
+      } catch(e){
+        log('❌ Erro preparando montage: ' + e);
+      }
     }
+
+    if (!usedAny && !form.has('photoUrl1') && !form.has('montageUrl')) {
+      log('⚠️ Nenhum blob/URL disponível para upload ao servidor; abortando uploadPhotosAndMontageToServer.');
+      return null;
+    }
+
     var controller = new AbortController();
     var id = setTimeout(function(){ controller.abort(); }, UPLOAD_TIMEOUT_MS);
     try {
       var res = await fetch(SERVER_URL.replace(/\/+$/,'' ) + '/upload-to-imgbb', { method: 'POST', body: form, signal: controller.signal });
       clearTimeout(id);
-      var json = await res.json();
+      if (!res.ok) {
+        var txt = await res.text().catch(()=>null);
+        log('❌ /upload-to-imgbb HTTP ' + res.status + ' ' + txt);
+        return null;
+      }
+      var json = await res.json().catch(()=>null);
       if (!json || !json.ok) {
-        log('❌ /upload-to-imgbb retornou erro: ' + JSON.stringify(json));
+        log('❌ /upload-to-imgbb retornou erro ou json inválido: ' + JSON.stringify(json));
         return null;
       }
       log('✅ /upload-to-imgbb retornou URLs: ' + JSON.stringify(json.urls));
       return json.urls || null;
     } catch(e) {
       clearTimeout(id);
-      log('❌ Falha fetch /upload-to-imgbb: ' + (e.message || e));
+      log('❌ Falha fetch /upload-to-imgbb: ' + (e && e.message ? e.message : e));
       return null;
     }
   }
 
   // -----------------------
-  // PROCESS PHOTOS / PUBLISH VISUALIZADOR (corrigido)
+  // PROCESS PHOTOS / PUBLISH VISUALIZADOR
+  // (mantive a lógica já enviada — usa uploadPhotosAndMontageToServer)
   // -----------------------
   async function processPhotosAndUpload(photosArray, providedViewerId){
     try {
@@ -714,7 +767,7 @@
       log('⏫ Enviando 3 fotos + montagem ao servidor (/upload-to-imgbb)...');
       var urls = await uploadPhotosAndMontageToServer(photos, storiesMontageDataUrl);
       if (!urls) {
-        log('⚠️ Upload ao servidor falhou — tentando enviar via socket (dataURLs) para que o servidor processe');
+        log('⚠️ Upload ao servidor falhou ou retornou nulo — tentando enviar via socket (dataURLs) para que o servidor processe');
         try {
           socket.emit('create_viewer_session', {
             session: FIXED_SESSION, viewerId: viewerIdLocal, photos: photos, storiesMontage: storiesMontageDataUrl || null, print: printMontageDataUrl || null
@@ -743,7 +796,6 @@
 
       var visualizadorUrl = SERVER_URL.replace(/\/+$/,'') + '/visualizador.html?session=' + encodeURIComponent(viewerIdLocal);
 
-      // ensure remote montage shown before we present visualizador
       if (remoteMontage && /^https?:\/\//i.test(remoteMontage)) {
         try { await displayStoriesFromUrl(remoteMontage); } catch(e) { log('⚠️ displayStoriesFromUrl fail: ' + e); }
       } else if (remoteMontage && remoteMontage.indexOf('data:') === 0) {
@@ -764,7 +816,7 @@
   }
 
   // -----------------------
-  // BOOMERANG / HISTORY / WEBCAM / STREAM / PRINT
+  // BOOMERANG / HISTORY / WEBCAM / STREAM / PRINT (mantive)
   // -----------------------
   async function processBoomerangAndPublish(videoUrlOrData, viewerId){
     try {
@@ -815,7 +867,7 @@
     });
   }
 
-  // WEBCAM, STREAM, captureHighRes (mantidos)
+  // WEBCAM / STREAM / CAPTURE (mantive)
   async function startWebcam(){
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ video:{ width:{ ideal:1920 }, height:{ ideal:1080 } }, audio:false });
@@ -869,7 +921,7 @@
 
   function sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
 
-  // PRINT button (corrigido para abrir blob URL)
+  // PRINT button (corrigido)
   printBtn.addEventListener('click', async function(){
     try {
       var data = currentPrintMontageDataUrl || printCanvas.toDataURL('image/png');
