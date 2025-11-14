@@ -8,14 +8,37 @@ const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
-const Busboy = require('busboy'); // npm i busboy
+
+// BUSBOY require robust (some installs export differently)
+let BusboyModule = null;
+try {
+  BusboyModule = require('busboy');
+} catch (e) {
+  BusboyModule = null;
+  console.warn('busboy require failed (not installed?)', e && e.message ? e.message : e);
+}
+// normalize to constructor
+let Busboy = null;
+if (BusboyModule) {
+  if (typeof BusboyModule === 'function') Busboy = BusboyModule;
+  else if (BusboyModule && typeof BusboyModule.Busboy === 'function') Busboy = BusboyModule.Busboy;
+  else if (BusboyModule && typeof BusboyModule.default === 'function') Busboy = BusboyModule.default;
+  else {
+    // last-resort: try to pull any function property
+    for (const k of Object.keys(BusboyModule)) {
+      if (typeof BusboyModule[k] === 'function') { Busboy = BusboyModule[k]; break; }
+    }
+  }
+}
+if (!Busboy) {
+  console.warn('Warning: Busboy constructor not found. /upload-to-imgbb will fail until busboy is installed properly.');
+}
 
 // fetch compatibility: prefer global.fetch (Node 18+), otherwise try node-fetch (v2 or v3)
 let fetchFn = global.fetch;
 if (!fetchFn) {
   try {
     const nf = require('node-fetch');
-    // node-fetch v3 exports default; v2 exports function directly
     fetchFn = nf.default || nf;
   } catch (e) {
     fetchFn = null;
@@ -44,7 +67,7 @@ const app = express();
 
 // --- CORS middleware (allow browser fetch from operator) ---
 app.use((req, res, next) => {
-  // Allow all origins for ease of local operator use.
+  // Allow all origins for ease of operator use.
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
@@ -52,7 +75,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// body parsers (but not for multipart)
 app.use(express.json({ limit: '120mb' }));
 app.use(express.urlencoded({ extended: true, limit: '120mb' }));
 
@@ -165,134 +187,103 @@ app.get('/visualizador/:sessionId', (req, res) => {
  * - photo1, photo2, photo3 (files) OR photoUrl1..photoUrl3 (strings)
  * - montage (file) OR montageUrl (string)
  * Responds JSON: { ok:true, urls: { photo1, photo2, photo3, montage } }
- *
- * This endpoint returns CORS headers (set globally above). It will try to upload
- * received files to IMGBB using uploadToImgbbFromDataUrl; if IMGBB fails, saves local and returns local URL.
  */
 app.post('/upload-to-imgbb', (req, res) => {
-  try {
-    const busboy = new Busboy({ headers: req.headers, limits: { files: 10, fileSize: 50 * 1024 * 1024 } });
-    const fileBuffers = {};    // fieldName -> { buffer, mime }
-    const urlFields = {};      // fieldName -> string
-    busboy.on('file', (fieldname, file, filename, encoding, mimetype) => {
-      const parts = [];
-      file.on('data', (data) => { parts.push(data); });
-      file.on('limit', () => {
-        console.warn('file limit reached for', fieldname);
-      });
-      file.on('end', () => {
-        const buffer = Buffer.concat(parts);
-        fileBuffers[fieldname] = { buffer, mime: mimetype, filename: filename || (fieldname + '.bin') };
-      });
-    });
-    busboy.on('field', (fieldname, val) => {
-      // accept photoUrl1..photoUrl3 and montageUrl etc
-      urlFields[fieldname] = val;
-    });
-    busboy.on('finish', async () => {
-      const resultUrls = { photo1:null, photo2:null, photo3:null, montage:null };
-      // helper to upload buffer or url
-      async function handlePhotoField(n, fieldBase) {
-        const fileField = fieldBase + n; // e.g., photo1
-        const urlField = 'photoUrl' + n;
-        // if we have a file buffer
-        if (fileBuffers[fileField]) {
-          const item = fileBuffers[fileField];
-          try {
-            const dataUrl = `data:${item.mime};base64,${item.buffer.toString('base64')}`;
-            if (IMGBB_KEY && fetchFn) {
-              try {
-                const u = await uploadToImgbbFromDataUrl(dataUrl, `photo_${Date.now()}_${n}`);
-                return u;
-              } catch (e) {
-                console.warn('IMGBB upload failed for', fileField, e && e.message ? e.message : e);
-                try {
-                  const local = await saveDataUrlToUploads(dataUrl, `photo_${n}`);
-                  return local;
-                } catch (ee) {
-                  console.error('fallback saveDataUrlToUploads failed for', fileField, ee);
-                  return null;
-                }
-              }
-            } else {
-              // save locally
-              try {
-                const local = await saveDataUrlToUploads(dataUrl, `photo_${n}`);
-                return local;
-              } catch (e) {
-                console.error('saveDataUrlToUploads failed for', fileField, e);
-                return null;
-              }
-            }
-          } catch (e) {
-            console.error('handlePhotoField error (buffer) for', fileField, e);
-            return null;
-          }
-        }
-        // else if client provided a URL field, use it (server accepts it as-is)
-        if (urlFields[urlField]) {
-          return urlFields[urlField];
-        }
-        return null;
+  (async () => {
+    try {
+      if (!Busboy) {
+        const err = 'Busboy not available/constructed. Ensure "busboy" is installed (npm i busboy).';
+        console.error(err);
+        return res.status(500).json({ ok:false, err });
       }
 
-      // handle montage
-      async function handleMontage() {
-        if (fileBuffers['montage']) {
-          const item = fileBuffers['montage'];
-          try {
-            const dataUrl = `data:${item.mime};base64,${item.buffer.toString('base64')}`;
-            if (IMGBB_KEY && fetchFn) {
-              try {
-                const u = await uploadToImgbbFromDataUrl(dataUrl, `stories_${Date.now()}`);
-                return u;
-              } catch (e) {
-                console.warn('IMGBB montage upload failed', e && e.message ? e.message : e);
-                try {
-                  const local = await saveDataUrlToUploads(dataUrl, `stories`);
-                  return local;
-                } catch (ee) {
-                  console.error('saveDataUrlToUploads montage failed', ee);
-                  return null;
-                }
-              }
-            } else {
-              try {
-                const local = await saveDataUrlToUploads(dataUrl, `stories`);
-                return local;
-              } catch (e) {
-                console.error('saveDataUrlToUploads montage failed', e);
-                return null;
-              }
-            }
-          } catch (e) {
-            console.error('handleMontage error (buffer)', e);
-            return null;
-          }
-        }
-        if (urlFields['montageUrl']) return urlFields['montageUrl'];
-        return null;
+      let busboy;
+      try {
+        busboy = new Busboy({ headers: req.headers, limits: { files: 10, fileSize: 50 * 1024 * 1024 } });
+      } catch (e) {
+        console.error('Busboy constructor call failed', e && e.stack ? e.stack : e);
+        return res.status(500).json({ ok:false, err: 'Busboy constructor call failed: ' + String(e && e.message ? e.message : e) });
       }
 
-      (async () => {
+      const fileBuffers = {};
+      const urlFields = {};
+
+      busboy.on('file', (fieldname, file, filename, encoding, mimetype) => {
+        const parts = [];
+        file.on('data', (data) => parts.push(data));
+        file.on('limit', () => console.warn('file limit reached for', fieldname));
+        file.on('end', () => {
+          try {
+            const buffer = Buffer.concat(parts);
+            fileBuffers[fieldname] = { buffer, mime: mimetype, filename: filename || (fieldname + '.bin') };
+          } catch (e) {
+            console.error('Error concat file parts for', fieldname, e && e.stack ? e.stack : e);
+          }
+        });
+      });
+
+      busboy.on('field', (fieldname, val) => {
+        urlFields[fieldname] = val;
+      });
+
+      busboy.on('finish', async () => {
         try {
-          resultUrls.photo1 = await handlePhotoField(1, 'photo');
-          resultUrls.photo2 = await handlePhotoField(2, 'photo');
-          resultUrls.photo3 = await handlePhotoField(3, 'photo');
+          const resultUrls = { photo1:null, photo2:null, photo3:null, montage:null };
+
+          async function handlePhotoField(n) {
+            const fileField = 'photo' + n;
+            const urlField = 'photoUrl' + n;
+            if (fileBuffers[fileField]) {
+              const item = fileBuffers[fileField];
+              const dataUrl = `data:${item.mime};base64,${item.buffer.toString('base64')}`;
+              if (IMGBB_KEY && fetchFn) {
+                try {
+                  return await uploadToImgbbFromDataUrl(dataUrl, `photo_${Date.now()}_${n}`);
+                } catch (e) {
+                  console.warn('IMGBB upload failed for', fileField, e && e.message ? e.message : e);
+                  try { return await saveDataUrlToUploads(dataUrl, `photo_${n}`); } catch (ee) { console.error('save fallback failed', ee); return null; }
+                }
+              } else {
+                try { return await saveDataUrlToUploads(dataUrl, `photo_${n}`); } catch (e) { console.error('saveDataUrlToUploads failed', e); return null; }
+              }
+            }
+            if (urlFields[urlField]) return urlFields[urlField];
+            return null;
+          }
+
+          async function handleMontage() {
+            if (fileBuffers['montage']) {
+              const item = fileBuffers['montage'];
+              const dataUrl = `data:${item.mime};base64,${item.buffer.toString('base64')}`;
+              if (IMGBB_KEY && fetchFn) {
+                try { return await uploadToImgbbFromDataUrl(dataUrl, `stories_${Date.now()}`); } catch (e) { console.warn('IMGBB montage upload failed', e && e.message ? e.message : e); try { return await saveDataUrlToUploads(dataUrl, `stories`); } catch (ee) { console.error('saveDataUrlToUploads montage failed', ee); return null; } }
+              } else {
+                try { return await saveDataUrlToUploads(dataUrl, `stories`); } catch (e) { console.error('saveDataUrlToUploads montage failed', e); return null; }
+              }
+            }
+            if (urlFields['montageUrl']) return urlFields['montageUrl'];
+            return null;
+          }
+
+          resultUrls.photo1 = await handlePhotoField(1);
+          resultUrls.photo2 = await handlePhotoField(2);
+          resultUrls.photo3 = await handlePhotoField(3);
           resultUrls.montage = await handleMontage();
+
+          return res.json({ ok:true, urls: resultUrls });
         } catch (e) {
-          console.error('upload-to-imgbb handler error', e && e.stack ? e.stack : e);
+          console.error('upload-to-imgbb finish handler error', e && e.stack ? e.stack : e);
+          return res.status(500).json({ ok:false, err: String(e && e.stack ? e.stack : e) });
         }
+      });
 
-        res.json({ ok: true, urls: resultUrls });
-      })();
-    });
-
-    req.pipe(busboy);
-  } catch (e) {
-    console.error('upload-to-imgbb route caught error', e);
-    res.status(500).json({ ok:false, err: String(e) });
-  }
+      // pipe request into busboy
+      req.pipe(busboy);
+    } catch (e) {
+      console.error('upload-to-imgbb route top error', e && e.stack ? e.stack : e);
+      res.status(500).json({ ok:false, err: String(e && e.stack ? e.stack : e) });
+    }
+  })();
 });
 
 /**
@@ -306,17 +297,10 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
   ensureSession(session);
   const vid = providedViewerId || uuidv4();
 
-  // store placeholder immediately so viewer join can find it
   sessions[session].viewers[vid] = { photos: [], storiesMontage: null, print: null, boomerang: null, createdAt: new Date().toISOString() };
 
-  // Emit immediate creation so operator UI knows a viewer started (fast)
-  try {
-    io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid });
-  } catch (e) {
-    console.warn('emit viewer_session_created failed', e);
-  }
+  try { io.to(`session:${session}`).emit('viewer_session_created', { viewerId: vid }); } catch (e) { console.warn('emit viewer_session_created failed', e); }
 
-  // Process up to first 3 photos
   const maxPhotos = Math.min(3, (photos && photos.length) ? photos.length : 0);
   const photoTasks = [];
 
@@ -330,26 +314,13 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
             return url;
           } catch (e) {
             console.warn('IMGBB upload failed for photo index', i, e && e.message ? e.message : e);
-            try {
-              const local = await saveDataUrlToUploads(p, `photo_${i}`);
-              return local;
-            } catch (ee) {
-              console.error('fallback saveDataUrlToUploads failed', ee);
-              return null;
-            }
+            try { const local = await saveDataUrlToUploads(p, `photo_${i}`); return local; } catch (ee) { console.error('fallback saveDataUrlToUploads failed', ee); return null; }
           }
         } else {
-          try {
-            const local = await saveDataUrlToUploads(p, `photo_${i}`);
-            return local;
-          } catch (e) {
-            console.error('saveDataUrlToUploads failed', e);
-            return null;
-          }
+          try { const local = await saveDataUrlToUploads(p, `photo_${i}`); return local; } catch (e) { console.error('saveDataUrlToUploads failed', e); return null; }
         }
       })());
     } else if (typeof p === 'string' && /^https?:\/\//i.test(p)) {
-      // already remote URL — keep as-is (server won't re-upload)
       photoTasks.push(Promise.resolve(p));
     } else {
       photoTasks.push(Promise.resolve(null));
@@ -360,26 +331,9 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
     if (!storiesMontage) return null;
     if (typeof storiesMontage === 'string' && storiesMontage.startsWith('data:')) {
       if (IMGBB_KEY && fetchFn) {
-        try {
-          return await uploadToImgbbFromDataUrl(storiesMontage, `stories_${Date.now()}`);
-        } catch (e) {
-          console.warn('IMGBB stories upload failed, saving local...', e && e.message ? e.message : e);
-          try {
-            const local = await saveDataUrlToUploads(storiesMontage, `stories`);
-            return local;
-          } catch (ee) {
-            console.error('saveDataUrlToUploads for stories failed', ee);
-            return null;
-          }
-        }
+        try { return await uploadToImgbbFromDataUrl(storiesMontage, `stories_${Date.now()}`); } catch (e) { console.warn('IMGBB stories upload failed, saving local...', e && e.message ? e.message : e); try { return await saveDataUrlToUploads(storiesMontage, `stories`); } catch (ee) { console.error('saveDataUrlToUploads for stories failed', ee); return null; } }
       } else {
-        try {
-          const local = await saveDataUrlToUploads(storiesMontage, `stories`);
-          return local;
-        } catch (e) {
-          console.error('saveDataUrlToUploads for stories failed', e);
-          return null;
-        }
+        try { const local = await saveDataUrlToUploads(storiesMontage, `stories`); return local; } catch (e) { console.error('saveDataUrlToUploads for stories failed', e); return null; }
       }
     } else if (typeof storiesMontage === 'string' && /^https?:\/\//i.test(storiesMontage)) {
       return storiesMontage;
@@ -391,26 +345,9 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
     if (!print) return null;
     if (typeof print === 'string' && print.startsWith('data:')) {
       if (IMGBB_KEY && fetchFn) {
-        try {
-          return await uploadToImgbbFromDataUrl(print, `print_${Date.now()}`);
-        } catch (e) {
-          console.warn('IMGBB print upload failed, saving local...', e && e.message ? e.message : e);
-          try {
-            const local = await saveDataUrlToUploads(print, `print`);
-            return local;
-          } catch (ee) {
-            console.error('saveDataUrlToUploads for print failed', ee);
-            return null;
-          }
-        }
+        try { return await uploadToImgbbFromDataUrl(print, `print_${Date.now()}`); } catch (e) { console.warn('IMGBB print upload failed, saving local...', e && e.message ? e.message : e); try { const local = await saveDataUrlToUploads(print, `print`); return local; } catch (ee) { console.error('saveDataUrlToUploads for print failed', ee); return null; } }
       } else {
-        try {
-          const local = await saveDataUrlToUploads(print, `print`);
-          return local;
-        } catch (e) {
-          console.error('saveDataUrlToUploads for print failed', e);
-          return null;
-        }
+        try { const local = await saveDataUrlToUploads(print, `print`); return local; } catch (e) { console.error('saveDataUrlToUploads for print failed', e); return null; }
       }
     } else if (typeof print === 'string' && /^https?:\/\//i.test(print)) {
       return print;
@@ -516,7 +453,7 @@ app.post('/upload_photos', async (req, res) => {
   }
 });
 
-// Socket handlers and events
+// Socket handlers and events (mantive igual)
 io.on('connection', (socket) => {
   console.log('[socket] connected', socket.id);
 
