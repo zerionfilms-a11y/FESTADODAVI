@@ -6,10 +6,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="icon" href="/favicon.ico">
 
-  <!-- Socket.io + QRCode (CDN) + jsPDF -->
+  <!-- Socket.io + QRCode (CDN) + jsPDF (loader dinâmico, sem SRI quebrado) -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-1M/7wQd9pRkM1B6r2o+YJ2z7H0J6m5E1mX6m0u1k3tqY0Y8h4F1Y+oZqXHq6W0+5F8/0um8iQ2YF3p5l5V4V0g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- Não inserir integrity (parou de casar e travava a execução). Usaremos loader dinâmico no click de imprimir. -->
 
   <style>
     :root{--bg:#0f1113;--panel:#0b0d0f;--accent:#0b84ff;--muted:#7f8c8d}
@@ -120,11 +120,11 @@
   // -----------------------
   const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
   const FIXED_SESSION = "cabine-fixa";
-  const IMGBB_KEY = ""; // if you have one, fill here
+  const IMGBB_KEY = ""; // leave server-side if empty
   const STORIES_TEMPLATE = "storiesdavi.png";
   const PRINT_TEMPLATE = "imprimirdavi.png";
   const FRAME_OVERLAY = "moldura.png";
-  const MAX_WAIT_MS_FOR_BATCH = 1400;
+  const MAX_WAIT_MS_FOR_BATCH = 1400; // wait for photos to batch
   const UPLOAD_TIMEOUT_MS = 20000;
 
   // -----------------------
@@ -158,7 +158,7 @@
   let currentPrintMontageDataUrl = null;
   let currentBoomerangUrl = null;
 
-  const pendingBySession = {};
+  const pendingBySession = {}; // session -> { photos: [], timer, viewerId }
 
   // -----------------------
   // UTIL / LOG
@@ -183,8 +183,8 @@
     socket = io(SERVER_URL, {
       transports: ['websocket','polling'],
       reconnection: true,
-      reconnectionAttempts: 20,
-      reconnectionDelay: 2000,
+      reconnectionAttempts: 50,
+      reconnectionDelay: 1500,
       timeout: 20000,
       path: '/socket.io'
     });
@@ -197,7 +197,7 @@
       genQrBtn.disabled = false;
       finalizarBtn.disabled = false;
       genVisualizadorQrBtn.disabled = false;
-      printBtn.disabled = false;
+      // printBtn will be enabled once montage is ready
       if (autoStartWebcamCheckbox.checked) attemptAutoStartWebcam();
     });
 
@@ -213,6 +213,10 @@
       setStatus('⚠️ Erro de conexão', null);
     });
 
+    socket.on('error', (err) => {
+      log('⚠️ Socket error: ' + JSON.stringify(err));
+    });
+
     function onPhotosReceived(payload){
       if(!payload) return;
       const sess = payload.session || FIXED_SESSION;
@@ -221,6 +225,7 @@
                     : Array.isArray(payload.photosArray) ? payload.photosArray
                     : null;
       const viewerId = payload.viewerId || payload.viewer || null;
+
       log('📥 Fotos recebidas (via socket) — session:' + sess + ' viewer:' + (viewerId || '—') + ' count:' + (photos ? photos.length : 'n/a'));
       if (photos && photos.length) {
         if (photos.length >= 3) {
@@ -407,199 +412,98 @@
     { x:158, y:2808, w:1684 - 158, h:4036 - 2808 }
   ];
 
-  // ---------- UPDATED: drawStories waits for all images to load/draw before applying frame & generating dataURL ----------
   function drawStories(photos){
     const ctx = storiesCanvas.getContext('2d');
     ctx.clearRect(0,0,storiesCanvas.width,storiesCanvas.height);
     const bg = new Image();
     bg.crossOrigin = 'anonymous';
     bg.src = STORIES_TEMPLATE;
-
-    bg.onload = async () => {
-      try {
-        ctx.drawImage(bg, 0, 0, storiesCanvas.width, storiesCanvas.height);
-      } catch(e){
-        log('⚠️ Erro ao desenhar background stories: ' + e);
-      }
-
-      // load all photos, draw them in order, then apply frame
-      const loadPromises = photos.map((p, i) => {
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.onload = () => {
-            try {
-              const c = STORIES_COORDS[i] || STORIES_COORDS[0];
-              drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
-              log(`✅ Foto ${i+1} posicionada no stories: ${c.x},${c.y} ${c.w}x${c.h}`);
-            } catch(e){
-              log('⚠️ Erro ao desenhar foto no stories: ' + e);
-            }
-            resolve();
-          };
-          img.onerror = () => {
-            log('⚠️ Erro ao carregar foto para stories preview (index ' + i + ')');
-            resolve(); // resolve anyway so montage proceeds
-          };
-          img.src = p;
-        });
+    bg.onload = () => {
+      ctx.drawImage(bg, 0, 0, storiesCanvas.width, storiesCanvas.height);
+      let loadedCount = 0;
+      photos.forEach((p, i) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = p;
+        img.onload = () => {
+          const c = STORIES_COORDS[i] || STORIES_COORDS[0];
+          drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
+          log(`✅ Foto ${i+1} posicionada no stories: ${c.x},${c.y} ${c.w}x${c.h}`);
+          loadedCount++;
+        };
+        img.onerror = () => {
+          log('⚠️ Erro ao carregar foto para stories preview');
+          loadedCount++;
+        };
       });
 
-      // wait all photos attempted to draw
-      await Promise.all(loadPromises);
-
-      // apply frame after photos drawn
-      const frame = new Image();
-      frame.crossOrigin = "anonymous";
-      frame.src = FRAME_OVERLAY;
-      frame.onload = () => {
-        try {
-          ctx.drawImage(frame, 0, 0, storiesCanvas.width, storiesCanvas.height);
-          log('✅ Moldura aplicada sobre stories (moldura.png)');
-        } catch(e) {
-          log('⚠️ Erro ao desenhar moldura stories: ' + e);
-        }
-        try {
-          currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95);
-          log('✅ stories montage dataURL gerado');
-        } catch(e){
-          log('⚠️ toDataURL stories failed: ' + e);
-          currentStoriesMontageDataUrl = null;
-        }
+      // wait a bit to let images paint, then apply frame and generate dataURL
+      const finalize = () => {
+        const frame = new Image();
+        frame.crossOrigin = "anonymous";
+        frame.src = FRAME_OVERLAY;
+        frame.onload = () => {
+          try {
+            ctx.drawImage(frame, 0, 0, storiesCanvas.width, storiesCanvas.height);
+            log('✅ Moldura aplicada sobre stories (moldura.png)');
+          } catch(e) { log('⚠️ Erro ao desenhar moldura: ' + e); }
+          try {
+            currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95);
+            log('✅ stories montage dataURL gerado');
+          } catch(e){ log('⚠️ toDataURL stories failed: ' + e); currentStoriesMontageDataUrl = null; }
+        };
+        frame.onerror = () => {
+          try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); log('⚠️ Moldura não encontrada (moldura.png). Continuando sem moldura.'); } catch(e){ log('⚠️ toDataURL stories failed: ' + e); currentStoriesMontageDataUrl = null; }
+        };
       };
-      frame.onerror = () => {
-        try {
-          currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95);
-          log('⚠️ Moldura não encontrada (moldura.png). stories dataURL gerado sem moldura.');
-        } catch(e){
-          log('⚠️ toDataURL stories failed (no frame): ' + e);
-          currentStoriesMontageDataUrl = null;
-        }
-      };
-    };
 
-    bg.onerror = () => {
-      log('❌ Erro ao carregar background stories (verifique STORIES_TEMPLATE path)');
-      // attempt to draw photos even if no bg
-      const ctx2 = storiesCanvas.getContext('2d');
-      ctx2.clearRect(0,0,storiesCanvas.width,storiesCanvas.height);
-      const loadPromises = photos.map((p, i) => {
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.onload = () => {
-            try {
-              const c = STORIES_COORDS[i] || STORIES_COORDS[0];
-              drawImageCover(ctx2, img, c.x, c.y, c.w, c.h);
-              log(`✅ Foto ${i+1} posicionada no stories (sem bg): ${c.x},${c.y} ${c.w}x${c.h}`);
-            } catch(e){
-              log('⚠️ Erro ao desenhar foto no stories sem bg: ' + e);
-            }
-            resolve();
-          };
-          img.onerror = () => { log('⚠️ Erro ao carregar foto para stories preview (index ' + i + ')'); resolve(); };
-          img.src = p;
-        });
-      });
-      Promise.all(loadPromises).then(() => {
-        try {
-          const frame = new Image();
-          frame.crossOrigin = "anonymous";
-          frame.src = FRAME_OVERLAY;
-          frame.onload = () => {
-            try { ctx2.drawImage(frame, 0, 0, storiesCanvas.width, storiesCanvas.height); } catch(e){}
-            try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); log('✅ stories dataURL gerado (sem bg)'); } catch(e){ log('⚠️ toDataURL stories failed (no bg): ' + e); currentStoriesMontageDataUrl = null; }
-          };
-          frame.onerror = () => {
-            try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); log('✅ stories dataURL gerado (sem bg e sem moldura)'); } catch(e){ log('⚠️ toDataURL stories failed final: ' + e); currentStoriesMontageDataUrl = null; }
-          };
-        } catch(e){ log('⚠️ Erro final stories fallback: ' + e); }
-      });
+      // ensure finalize runs after images loaded (but don't wait forever)
+      const waitStart = Date.now();
+      (function waitForImages(){
+        if (typeof loadedCount === 'number' && loadedCount >= photos.length) { finalize(); return; }
+        if (Date.now() - waitStart > 1200) { finalize(); return; }
+        setTimeout(waitForImages, 120);
+      })();
     };
+    bg.onerror = () => log('❌ Erro ao carregar background stories (verifique STORIES_TEMPLATE path)');
   }
 
-  // ---------- UPDATED: drawPrint waits for all images to load/draw before generating dataURL ----------
   function drawPrint(photos){
     const ctx = printCanvas.getContext('2d');
     ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
     const bg = new Image();
     bg.crossOrigin = 'anonymous';
     bg.src = PRINT_TEMPLATE;
-
-    bg.onload = async () => {
-      try {
-        ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
-      } catch(e){
-        log('⚠️ Erro ao desenhar background print: ' + e);
-      }
-
-      const loadPromises = photos.map((p, i) => {
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.onload = () => {
-            try {
-              const c = PRINT_COORDS[i] || PRINT_COORDS[0];
-              drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
-              log(`✅ Foto ${i+1} posicionada no print: ${c.x},${c.y} ${c.w}x${c.h}`);
-            } catch(e){
-              log('⚠️ Erro ao desenhar foto no print: ' + e);
-            }
-            resolve();
-          };
-          img.onerror = () => { log('⚠️ Erro ao carregar foto para print preview (index ' + i + ')'); resolve(); };
-          img.src = p;
-        });
+    bg.onload = () => {
+      ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
+      let loadedCount = 0;
+      photos.forEach((p, i) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = p;
+        img.onload = () => {
+          const c = PRINT_COORDS[i] || PRINT_COORDS[0];
+          drawImageCover(ctx, img, c.x, c.y, c.w, c.h);
+          log(`✅ Foto ${i+1} posicionada no print: ${c.x},${c.y} ${c.w}x${c.h}`);
+          loadedCount++;
+        };
+        img.onerror = () => { log('⚠️ Erro ao carregar foto para print preview'); loadedCount++; };
       });
 
-      await Promise.all(loadPromises);
-
-      try {
-        currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
-        log('✅ print montage dataURL gerado');
+      const finalize = () => {
+        try { currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95); log('✅ print montage dataURL gerado'); } catch(e){ log('⚠️ toDataURL print failed: ' + e); currentPrintMontageDataUrl = null; }
         if (currentPrintMontageDataUrl) printBtn.disabled = false;
-      } catch(e){
-        log('⚠️ toDataURL print failed: ' + e);
-        currentPrintMontageDataUrl = null;
-        printBtn.disabled = true;
-      }
-    };
+        else printBtn.disabled = true;
+      };
 
-    bg.onerror = () => {
-      log('❌ Erro ao carregar background print (verifique PRINT_TEMPLATE path)');
-      // fallback: draw photos without bg
-      const ctx2 = printCanvas.getContext('2d');
-      ctx2.clearRect(0,0,printCanvas.width,printCanvas.height);
-      const loadPromises = photos.map((p, i) => {
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.crossOrigin = "anonymous";
-          img.onload = () => {
-            try {
-              const c = PRINT_COORDS[i] || PRINT_COORDS[0];
-              drawImageCover(ctx2, img, c.x, c.y, c.w, c.h);
-              log(`✅ Foto ${i+1} posicionada no print (sem bg): ${c.x},${c.y} ${c.w}x${c.h}`);
-            } catch(e){
-              log('⚠️ Erro ao desenhar foto no print sem bg: ' + e);
-            }
-            resolve();
-          };
-          img.onerror = () => { log('⚠️ Erro ao carregar foto para print preview (index ' + i + ')'); resolve(); };
-          img.src = p;
-        });
-      });
-      Promise.all(loadPromises).then(() => {
-        try {
-          currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
-          log('✅ print dataURL gerado (sem bg)');
-          if (currentPrintMontageDataUrl) printBtn.disabled = false;
-        } catch(e){
-          log('⚠️ toDataURL print failed final: ' + e);
-          currentPrintMontageDataUrl = null;
-          printBtn.disabled = true;
-        }
-      });
+      const waitStart = Date.now();
+      (function waitForImages(){
+        if (typeof loadedCount === 'number' && loadedCount >= photos.length) { finalize(); return; }
+        if (Date.now() - waitStart > 1200) { finalize(); return; }
+        setTimeout(waitForImages, 120);
+      })();
     };
+    bg.onerror = () => log('❌ Erro ao carregar background print (verifique PRINT_TEMPLATE path)');
   }
 
   // -----------------------
@@ -700,10 +604,8 @@
       } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
 
       showVisualizadorQr(visualizadorUrl);
-
       genVisualizadorQrBtn.disabled = false;
       printBtn.disabled = false;
-
       addToViewerHistory(viewerIdLocal, uploadedPhotos.length || photos.length);
       log('🎉 Visualizador criado automaticamente. viewerId: ' + viewerIdLocal);
     } catch(e){
@@ -713,7 +615,7 @@
   }
 
   // -----------------------
-  // rest unchanged...
+  // BOOMERANG
   // -----------------------
   async function processBoomerangAndPublish(videoUrlOrData, viewerId){
     try {
@@ -750,6 +652,9 @@
     v.play().catch(()=>{});
   }
 
+  // -----------------------
+  // HISTORY
+  // -----------------------
   function addToViewerHistory(id, photosCount){
     viewerHistory.unshift({ id, timestamp: new Date().toLocaleString(), photosCount });
     updateViewerHistory();
@@ -764,6 +669,9 @@
     });
   }
 
+  // -----------------------
+  // WEBCAM
+  // -----------------------
   async function startWebcam(){
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
@@ -798,6 +706,31 @@
     log('🛑 Webcam parada');
   }
 
+  async function captureHighResAndSend(index, viewerId){
+    if(!localStream){ log('⚠️ Webcam não ativa para captura high-res'); return; }
+    try {
+      const v = document.createElement('video');
+      v.srcObject = localStream;
+      v.muted = true;
+      await v.play().catch(()=>{});
+      const c = document.createElement('canvas');
+      c.width = v.videoWidth || 1920;
+      c.height = v.videoHeight || 1080;
+      const ctx = c.getContext('2d');
+      ctx.save(); ctx.translate(c.width, 0); ctx.scale(-1, 1);
+      ctx.drawImage(v, 0, 0, c.width, c.height);
+      ctx.restore();
+      const photo = c.toDataURL('image/jpeg', 0.95);
+      socket.emit('photo_ready', { session: FIXED_SESSION, index, viewerId, photo });
+      log('✅ photo_ready enviado para ' + viewerId + ' (index ' + index + ')');
+    } catch(e){
+      log('❌ Erro capture high-res: ' + (e.message || e));
+    }
+  }
+
+  // -----------------------
+  // STREAM
+  // -----------------------
   function startStreamingToSession(session){
     if(!localStream){ log('⚠️ Webcam não iniciada'); return; }
     const fps = 18;
@@ -832,15 +765,105 @@
     startStreamBtn.disabled = false;
   }
 
+  // -----------------------
+  // UTIL sleep
+  // -----------------------
   function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-  // PRINT button (unchanged)
+  // -----------------------
+  // jsPDF loader util (dynamic, robust)
+  // -----------------------
+  function loadJsPDFOnce() {
+    return new Promise((resolve, reject) => {
+      if (window.jspdf) return resolve(window.jspdf);
+      // try known global first (some cdns expose as window.jspdf)
+      if (window.jspdf) return resolve(window.jspdf);
+      // if already loading, wait
+      if (loadJsPDFOnce._promise) return loadJsPDFOnce._promise;
+      const src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.onload = () => {
+        // UMD exports to window.jspdf or window.jspdf.jsPDF depending on build. Ensure jsPDF is available
+        const lib = window.jspdf || (window.jspdf && window.jspdf.jsPDF) || (window.jspdf === undefined ? null : window.jspdf);
+        if (window.jspdf || (window.jspdf && window.jspdf.jsPDF)) {
+          resolve(window.jspdf);
+        } else {
+          // sometimes UMD attaches to window.jspdf but jsPDF is under window.jspdf.jsPDF
+          if (window.jspdf && window.jspdf.jsPDF) return resolve(window.jspdf);
+          // if still not present, try to require global var
+          setTimeout(() => {
+            if (window.jspdf || (window.jspdf && window.jspdf.jsPDF)) resolve(window.jspdf);
+            else reject(new Error('jsPDF não carregou corretamente (global não encontrado).'));
+          }, 200);
+        }
+      };
+      s.onerror = (e) => {
+        reject(new Error('Falha ao carregar jsPDF: ' + e));
+      };
+      loadJsPDFOnce._promise = new Promise((res, rej) => {
+        s.onload = () => { res(window.jspdf || (window.jspdf && window.jspdf.jsPDF) || window.jspdf); };
+        s.onerror = (err) => { rej(err); };
+      });
+      document.head.appendChild(s);
+      return loadJsPDFOnce._promise;
+    });
+  }
+
+  // -----------------------
+  // PRINT BUTTON
+  // -----------------------
   printBtn.addEventListener('click', async () => {
     try {
-      const data = currentPrintMontageDataUrl || printCanvas.toDataURL('image/png');
+      const data = currentPrintMontageDataUrl || (printCanvas.toDataURL ? printCanvas.toDataURL('image/png') : null);
       if (!data) { alert('Montagem de impressão não disponível ainda.'); return; }
 
-      const { jsPDF } = window.jspdf;
+      // try to load jsPDF (dynamic). If fails, fallback to opening image in new tab so user can print manually.
+      try {
+        await loadJsPDFOnce();
+      } catch(e) {
+        log('⚠️ jsPDF falhou ao carregar: ' + (e.message || e) + ' — usando fallback de abrir imagem em nova aba.');
+        // fallback: open image in new tab to print
+        const w = window.open();
+        if (!w) { alert('Permita popups para abrir a janela de impressão.'); return; }
+        const html = `<!doctype html><html><head><meta charset="utf-8"><title>Impressão 5x15 - Fallback</title><style>html,body{height:100%;margin:0;background:#fff;display:flex;align-items:center;justify-content:center}img{max-width:100%;height:auto}</style></head><body><img src="${data}" alt="print"><script>setTimeout(()=>{ try{ window.print(); }catch(e){} },500);</script></body></html>`;
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+        return;
+      }
+
+      // at this point jsPDF lib should be available
+      const { jsPDF } = window.jspdf || window.jspdf || {}; // UMD may attach differently
+      if (!jsPDF && window.jspdf && window.jspdf.jsPDF) {
+        // sometimes window.jspdf is the module and jsPDF is under it
+        const lib = window.jspdf;
+        if (lib && lib.jsPDF) {
+          const PDF = lib.jsPDF;
+          const pdf = new PDF({ unit: 'mm', format: [50,150], orientation: 'portrait' });
+          pdf.addImage(data, 'JPEG', 0, 0, 50, 150);
+          const blob = pdf.output('blob');
+          const url = URL.createObjectURL(blob);
+          const html = `<!doctype html><html><head><meta charset="utf-8"><title>Impressão 5x15</title>
+            <style>html,body{height:100%;margin:0;background:#fff} embed{width:100%;height:100%;display:block;border:0}</style>
+            </head><body><embed id="pdfEmbed" src="${url}" type="application/pdf"></embed>
+            <script>
+              function tryPrint(){ try{ window.focus(); setTimeout(()=>{ window.print(); }, 300); }catch(e){} }
+              document.getElementById('pdfEmbed').addEventListener('load', tryPrint);
+              setTimeout(tryPrint, 800);
+            <\/script></body></html>`;
+          const w = window.open('', '_blank', 'noopener');
+          if (!w) { alert('Permita popups para abrir a janela de impressão.'); return; }
+          w.document.open();
+          w.document.write(html);
+          w.document.close();
+          return;
+        }
+      }
+
+      if (!jsPDF) throw new Error('window.jspdf/jsPDF não disponível após carregamento.');
+
       const pdf = new jsPDF({ unit: 'mm', format: [50,150], orientation: 'portrait' });
       pdf.addImage(data, 'JPEG', 0, 0, 50, 150);
       const blob = pdf.output('blob');
@@ -861,7 +884,9 @@
     } catch(e){ log('❌ Erro imprimir: ' + (e.message || e)); }
   });
 
-  // UI buttons wiring (unchanged)
+  // -----------------------
+  // UI Buttons wiring
+  // -----------------------
   genQrBtn.addEventListener('click', generateQrCodeForCell);
   limparVisualizadorBtn.addEventListener('click', () => {
     if (confirm('Limpar visualizador da UI?')) {
@@ -897,11 +922,15 @@
     await processPhotosAndUpload(lastPhotos, null);
   });
 
+  // webcam buttons
   startWebcamBtn.addEventListener('click', async () => { try { await startWebcam(); } catch(e){} });
   stopWebcamBtn.addEventListener('click', stopWebcam);
   startStreamBtn.addEventListener('click', () => startStreamingToSession(streamSelect.value || FIXED_SESSION));
   stopStreamBtn.addEventListener('click', () => { try { socket && socket.emit('stop_stream', { session: FIXED_SESSION }); } catch(e){} stopStream(); });
 
+  // -----------------------
+  // RENDER INIT
+  // -----------------------
   window.addEventListener('DOMContentLoaded', () => {
     initSocket();
     genVisualizadorQrBtn.disabled = true;
