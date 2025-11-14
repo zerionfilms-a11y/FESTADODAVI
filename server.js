@@ -1,4 +1,4 @@
-// server.js
+// server.js - FESTADODAVI (versão revisada / compatível / preservando funções)
 // Node >= 16+ recommended
 // Replace IMGBB_KEY via env for production
 
@@ -387,215 +387,110 @@ app.post('/upload_photos', async (req, res) => {
   }
 });
 
-// Socket handlers and events
-io.on('connection', (socket) => {
-  console.log('[socket] connected', socket.id);
+/**
+ * NEW ROUTE: /upload-to-imgbb
+ * - Accepts:
+ *   - multipart/form-data with fields: photo1, photo2, photo3, montage (files)
+ *   - or JSON body: { photos: [dataURL...], montage: dataURL }
+ * - Returns: { ok: true, urls: { photo1, photo2, photo3, montage } }
+ */
+const multer = (() => {
+  try { return require('multer'); } catch (e) { return null; }
+})();
 
-  socket.on('join_session', ({ session, role }) => {
-    if (!session) return;
-    ensureSession(session);
-    socket.join(`session:${session}`);
-    socket.data.session = session;
-    socket.data.role = role || 'operator';
-    if (role === 'operator') sessions[session].operators.add(socket.id);
-    const lastFrame = sessions[session].lastStreamFrame;
-    if (lastFrame) socket.emit('stream_frame', { session, frame: lastFrame });
-    console.log(`[socket] ${socket.id} joined session:${session} role=${socket.data.role}`);
+if (multer) {
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+    filename: (req, file, cb) => {
+      const safe = (file.originalname || 'file').replace(/[^a-zA-Z0-9.\-_]/g, '_');
+      cb(null, `${Date.now()}-${uuidv4()}-${safe}`);
+    }
   });
+  const uploader = multer({ storage });
+  app.post('/upload-to-imgbb', uploader.fields([
+    { name: 'photo1', maxCount: 1 },
+    { name: 'photo2', maxCount: 1 },
+    { name: 'photo3', maxCount: 1 },
+    { name: 'montage', maxCount: 1 }
+  ]), async (req, res) => {
+    try {
+      const results = { photo1: null, photo2: null, photo3: null, montage: null };
+      const files = req.files || {};
 
-  socket.on('cell_connected', ({ session, id }) => {
-    if (!session) return;
-    ensureSession(session);
-    socket.join(`session:${session}`);
-    socket.data.session = session;
-    socket.data.role = 'cell';
-    console.log(`[socket] cell_connected ${socket.id} joined session:${session}`);
-  });
-
-  socket.on('viewer_join', ({ session, viewerId, viewer }) => {
-    const vid = viewerId || viewer;
-    if (vid) {
-      socket.join(`viewer:${vid}`);
-      socket.data.viewerId = vid;
-      // if stored, emit payload
-      for (const sid of Object.keys(sessions)) {
-        const v = sessions[sid].viewers[vid];
-        if (v) {
-          socket.emit('viewer_photos_ready', {
-            session: sid,
-            viewerId: vid,
-            photos: v.photos || [],
-            storiesMontage: v.storiesMontage || null,
-            print: v.print || null,
-            boomerang: v.boomerang || null,
-            createdAt: v.createdAt
-          });
-          console.log(`[socket] viewer_join by id sent payload to ${socket.id} for viewer:${vid}`);
-          return;
+      // Helper to read file and upload or return local URL
+      async function processFile(file) {
+        try {
+          const buf = await fs.promises.readFile(file.path);
+          const base64 = buf.toString('base64');
+          const dataUrl = `data:image/${(file.mimetype || 'png').split('/')[1]};base64,${base64}`;
+          if (IMGBB_KEY && fetchFn) {
+            try {
+              const url = await uploadToImgbbFromDataUrl(dataUrl, file.originalname);
+              // remove local
+              try { await fs.promises.unlink(file.path); } catch(_) {}
+              return url;
+            } catch (e) {
+              // fallback to serve locally
+              const publicUrl = `${VISUALIZADOR_ORIGIN.replace(/\/+$/,'')}/uploads/${path.basename(file.path)}`;
+              return publicUrl;
+            }
+          } else {
+            return `${VISUALIZADOR_ORIGIN.replace(/\/+$/,'')}/uploads/${path.basename(file.path)}`;
+          }
+        } catch (e) {
+          console.error('processFile error', e);
+          return null;
         }
       }
-      console.log(`[socket] viewer_join (id) but no stored data for viewer:${vid}`);
-      return;
-    }
 
-    if (session) {
-      const s = sessions[session];
-      if (!s) {
-        console.log(`[socket] viewer_join for session:${session} but no session found`);
-        return;
-      }
-      const viewers = s.viewers || {};
-      const keys = Object.keys(viewers);
-      if (keys.length === 0) {
-        console.log(`[socket] viewer_join for session:${session} but no viewers yet`);
-        return;
-      }
-      // pick most recent by createdAt
-      let latestId = keys[0];
-      let latestTs = viewers[latestId].createdAt || 0;
-      for (const k of keys) {
-        const ts = viewers[k].createdAt || 0;
-        if (ts > latestTs) {
-          latestTs = ts;
-          latestId = k;
+      // files from multipart
+      if (files.photo1 && files.photo1[0]) results.photo1 = await processFile(files.photo1[0]);
+      if (files.photo2 && files.photo2[0]) results.photo2 = await processFile(files.photo2[0]);
+      if (files.photo3 && files.photo3[0]) results.photo3 = await processFile(files.photo3[0]);
+      if (files.montage && files.montage[0]) results.montage = await processFile(files.montage[0]);
+
+      // If not provided via multipart, accept JSON body with dataURLs
+      if ((!results.photo1 || !results.photo2 || !results.photo3 || !results.montage) && req.body) {
+        const photos = req.body.photos || req.body.photosArray || null;
+        if (Array.isArray(photos)) {
+          for (let i = 0; i < photos.length && i < 3; i++) {
+            const key = `photo${i+1}`;
+            if (!results[key] && photos[i]) {
+              try {
+                results[key] = IMGBB_KEY && fetchFn ? await uploadToImgbbFromDataUrl(photos[i], key) : await saveDataUrlToUploads(photos[i], key);
+              } catch (e) {
+                console.error('upload/data save failed for', key, e);
+              }
+            }
+          }
+        }
+        if (!results.montage && req.body.montage) {
+          try {
+            results.montage = IMGBB_KEY && fetchFn ? await uploadToImgbbFromDataUrl(req.body.montage, 'montage') : await saveDataUrlToUploads(req.body.montage, 'montage');
+          } catch (e) {
+            console.error('upload/data save failed for montage', e);
+          }
         }
       }
-      socket.join(`viewer:${latestId}`);
-      socket.data.viewerId = latestId;
-      const v = viewers[latestId];
-      socket.emit('viewer_photos_ready', {
-        session,
-        viewerId: latestId,
-        photos: v.photos || [],
-        storiesMontage: v.storiesMontage || null,
-        print: v.print || null,
-        boomerang: v.boomerang || null,
-        createdAt: v.createdAt
-      });
-      console.log(`[socket] viewer_join for session:${session} -> joined viewer:${latestId} and delivered payload`);
-      return;
-    }
-  });
 
-  socket.on('stream_frame', ({ session, frame }) => {
-    if (!session || !frame) return;
-    ensureSession(session);
-    sessions[session].lastStreamFrame = frame;
-    io.to(`session:${session}`).emit('stream_frame', { session, frame });
-  });
+      const any = Object.values(results).some(Boolean);
+      if (!any) return res.status(400).json({ ok:false, error: 'No images received' });
 
-  // photos_from_cell (socket flow) - accept payload of photos (dataURLs or URLs)
-  socket.on('photos_from_cell', async (payload, ack) => {
-    try {
-      const { session, photos, viewerId } = payload || {};
-      const sess = session || 'cabine-fixa';
-      // immediate create viewer id and ack quickly
-      const vid = viewerId || uuidv4();
-      ensureSession(sess);
-      sessions[sess].viewers[vid] = { photos: [], storiesMontage: null, print: null, boomerang: null, createdAt: new Date().toISOString() };
-      // emit quick creation to operators
-      io.to(`session:${sess}`).emit('viewer_session_created', { viewerId: vid });
-      // ack if provided
-      try { if (typeof ack === 'function') ack(null, { ok:true, viewerId: vid }); } catch(e){}
-      // process and upload in background then notify when ready
-      handleIncomingPhotos({ session: sess, photos: photos || [], viewerId: vid }).catch(err => {
-        console.error('handleIncomingPhotos (socket) error', err && err.stack ? err.stack : err);
-      });
-    } catch (err) {
-      console.error('photos_from_cell handler error', err && err.stack ? err.stack : err);
-      try { if (typeof ack === 'function') ack(err); } catch(e){}
-    }
-  });
-
-  // legacy: photos_submit (same processing)
-  socket.on('photos_submit', async (payload, ack) => {
-    try {
-      const { session, photos, viewerId } = payload || {};
-      const sess = session || 'cabine-fixa';
-      const vid = viewerId || uuidv4();
-      ensureSession(sess);
-      try { if (typeof ack === 'function') ack(null, { ok:true, viewerId: vid }); } catch(e){}
-      handleIncomingPhotos({ session: sess, photos: photos || [], viewerId: vid }).catch(err => console.error('photos_submit flow error', err && err.stack ? err.stack : err));
-    } catch (err) {
-      console.error('photos_submit handler error', err && err.stack ? err.stack : err);
-      try { if (typeof ack === 'function') ack(err); } catch(e){}
-    }
-  });
-
-  // create_viewer_session: server-side flow triggered by operator (accepts photos or urls)
-  socket.on('create_viewer_session', async (payload) => {
-    try {
-      await handleIncomingPhotos(payload);
+      return res.json({ ok:true, urls: results });
     } catch (e) {
-      console.error('create_viewer_session error', e && e.stack ? e.stack : e);
+      console.error('/upload-to-imgbb error', e && e.stack ? e.stack : e);
+      return res.status(500).json({ ok:false, error: String(e) });
     }
   });
-
-  // boomerang/video flow
-  socket.on('boomerang_ready', async ({ session, viewerId, data, dataUrl, videoUrl, previewFrame }) => {
+} else {
+  // multer not installed: provide a JSON-only endpoint fallback
+  app.post('/upload-to-imgbb', async (req, res) => {
     try {
-      const sess = session || 'cabine-fixa';
-      ensureSession(sess);
-      const vid = viewerId || uuidv4();
-      let previewUrl = previewFrame || null;
-      if (previewFrame && typeof previewFrame === 'string' && previewFrame.startsWith('data:')) {
-        if (IMGBB_KEY && fetchFn) {
-          try { previewUrl = await uploadToImgbbFromDataUrl(previewFrame, `boom_preview_${Date.now()}`); } catch(e) { previewUrl = await saveDataUrlToUploads(previewFrame, 'boom_preview').catch(()=> previewFrame); }
-        } else {
-          previewUrl = await saveDataUrlToUploads(previewFrame, 'boom_preview').catch(()=> previewFrame);
-        }
-      }
-      sessions[sess].viewers[vid] = sessions[sess].viewers[vid] || { photos: [], storiesMontage: null, print: null, boomerang: null, createdAt: new Date().toISOString() };
-      sessions[sess].viewers[vid].boomerang = videoUrl || data || dataUrl || null;
-      sessions[sess].viewers[vid].storiesMontage = previewUrl || sessions[sess].viewers[vid].storiesMontage || null;
-      sessions[sess].viewers[vid].createdAt = new Date().toISOString();
-      const visualizadorUrl = `${VISUALIZADOR_ORIGIN.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(vid)}`;
-      io.to(`viewer:${vid}`).emit('viewer_photos_ready', {
-        session: sess,
-        viewerId: vid,
-        photos: sessions[sess].viewers[vid].photos || [],
-        storiesMontage: sessions[sess].viewers[vid].storiesMontage || null,
-        print: sessions[sess].viewers[vid].print || null,
-        boomerang: sessions[sess].viewers[vid].boomerang || null,
-        createdAt: sessions[sess].viewers[vid].createdAt
-      });
-      io.to(`session:${sess}`).emit('boomerang_ready', { session: sess, videoUrl: sessions[sess].viewers[vid].boomerang, visualizadorUrl });
-      io.to(`session:${sess}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
-      io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
-    } catch (e) {
-      console.error('boomerang_ready error', e && e.stack ? e.stack : e);
-    }
-  });
-
-  socket.on('photo_ready', ({ session, index, viewerId, photo }) => {
-    try {
-      if (viewerId) io.to(`viewer:${viewerId}`).emit('photo_ready', { session, index, photo });
-      else if (session) io.to(`session:${session}`).emit('photo_ready', { session, index, photo });
-    } catch (e) { console.warn('photo_ready forward error', e); }
-  });
-
-  socket.on('finalize_session', ({ session }) => {
-    if (!session) return;
-    io.to(`session:${session}`).emit('finalize_session', { session });
-    console.log('finalize_session for', session);
-  });
-
-  socket.on('reset_session', ({ session }) => {
-    if (!session) return;
-    io.to(`session:${session}`).emit('reset_session', { session });
-    if (sessions[session]) delete sessions[session];
-    console.log('reset_session for', session);
-  });
-
-  socket.on('disconnect', () => {
-    try {
-      for (const sid of Object.keys(sessions)) {
-        if (sessions[sid].operators && sessions[sid].operators.has(socket.id)) {
-          sessions[sid].operators.delete(socket.id);
-        }
-      }
-    } catch (e) { /* ignore */ }
-  });
-});
-
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+      const results = { photo1: null, photo2: null, photo3: null, montage: null };
+      const photos = req.body.photos || req.body.photosArray || null;
+      if (Array.isArray(photos)) {
+        for (let i = 0; i < photos.length && i < 3; i++) {
+          const key = `photo${i+1}`;
+          if (photos[i]) {
+            try {
+              results[key] = IMGB
