@@ -249,7 +249,16 @@
         const normalized = normalizeVisualizerUrl(visualizadorUrl);
         showVisualizadorQr(normalized);
       }
-      if (storiesUrl) log('✅ Stories montage available: ' + storiesUrl);
+      if (storiesUrl) {
+        log('✅ Stories montage available: ' + storiesUrl);
+        // show montage preview (remote URL)
+        displayStoriesFromUrl(storiesUrl).catch(e => log('❌ displayStoriesFromUrl error: ' + (e.message||e)));
+      }
+      if (printUrl) {
+        currentPrintMontageDataUrl = printUrl;
+        printBtn.disabled = false;
+        log('✅ Print montage available: ' + printUrl);
+      }
     });
 
     socket.on('viewer_photos_ready', ({ session, photos, storiesMontage, print, visualizadorUrl }) => {
@@ -259,6 +268,14 @@
         renderThumbs();
       }
       if (visualizadorUrl) showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+      if (storiesMontage) {
+        log('✅ viewer_photos_ready traz storiesMontage: ' + storiesMontage);
+        displayStoriesFromUrl(storiesMontage).catch(e => log('❌ displayStoriesFromUrl error: ' + (e.message||e)));
+      }
+      if (print) {
+        currentPrintMontageDataUrl = print;
+        printBtn.disabled = false;
+      }
     });
 
     socket.on('boomerang_ready', ({ session, videoUrl, visualizadorUrl }) => {
@@ -371,7 +388,6 @@
       thumbsEl.appendChild(img);
     });
     // trigger draws but do not block here
-    // drawStories and drawPrint will be awaited by processPhotosAndUpload when necessary
     drawStories(lastPhotos).catch(()=>{});
     drawPrint(lastPhotos).catch(()=>{});
   }
@@ -406,6 +422,42 @@
     { x:158, y:1502, w:1685 - 158, h:2733 - 1502 },
     { x:158, y:2808, w:1684 - 158, h:4036 - 2808 }
   ];
+
+  // load a remote image (url) and draw it full-size into a canvas
+  function displayStoriesFromUrl(url) {
+    return new Promise((resolve, reject) => {
+      try {
+        if (!url) return resolve(null);
+        const ctx = storiesCanvas.getContext('2d');
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            // clear and draw full image fitting canvas
+            ctx.clearRect(0,0,storiesCanvas.width,storiesCanvas.height);
+            // compute scale to fit
+            const ratio = Math.min(storiesCanvas.width / img.width, storiesCanvas.height / img.height);
+            const w = img.width * ratio;
+            const h = img.height * ratio;
+            const x = (storiesCanvas.width - w) / 2;
+            const y = (storiesCanvas.height - h) / 2;
+            ctx.drawImage(img, x, y, w, h);
+            currentStoriesMontageDataUrl = url; // remote URL used as source
+            log('✅ stories montagem (remota) desenhada no canvas: ' + url);
+            resolve(url);
+          } catch (e) {
+            log('⚠️ erro ao desenhar stories remota: ' + e);
+            reject(e);
+          }
+        };
+        img.onerror = (e) => {
+          log('❌ falha ao carregar stories remota: ' + url);
+          reject(new Error('load error'));
+        };
+        img.src = url;
+      } catch (e) { reject(e); }
+    });
+  }
 
   // Returns a Promise that resolves to the dataURL (or null)
   function drawStories(photos){
@@ -629,16 +681,29 @@
           log('✅ foto ' + (i+1) + ' -> ' + (u || 'dataURL fallback'));
         }
         if (storiesMontage) {
-          log('⏫ Upload montagem stories...');
-          const u = await uploadToImgbb(storiesMontage, `cabine_stories_${Date.now()}`);
-          storiesUrl = u || storiesMontage;
-          log('✅ stories -> ' + (u || 'dataURL fallback'));
+          // If the stories montage was generated as a canvas dataURL, upload it too.
+          // If it's already a remote URL (string not starting with data:), use it directly.
+          if (typeof storiesMontage === 'string' && storiesMontage.startsWith('data:')) {
+            log('⏫ Upload montagem stories...');
+            const u = await uploadToImgbb(storiesMontage, `cabine_stories_${Date.now()}`);
+            storiesUrl = u || storiesMontage;
+            log('✅ stories -> ' + (u || 'dataURL fallback'));
+          } else {
+            // already a URL — use directly
+            storiesUrl = storiesMontage;
+            log('ℹ️ storiesMontage já é URL: ' + storiesUrl);
+          }
         }
         if (printMontage) {
-          log('⏫ Upload montagem print...');
-          const u = await uploadToImgbb(printMontage, `cabine_print_${Date.now()}`);
-          printUrl = u || printMontage;
-          log('✅ print -> ' + (u || 'dataURL fallback'));
+          if (typeof printMontage === 'string' && printMontage.startsWith('data:')) {
+            log('⏫ Upload montagem print...');
+            const u = await uploadToImgbb(printMontage, `cabine_print_${Date.now()}`);
+            printUrl = u || printMontage;
+            log('✅ print -> ' + (u || 'dataURL fallback'));
+          } else {
+            printUrl = printMontage;
+            log('ℹ️ printMontage já é URL: ' + printUrl);
+          }
         }
 
         // send create_viewer_session to server with final URLs
@@ -650,14 +715,15 @@
         });
         log('✅ create_viewer_session emitido (com URLs IMGBB).');
 
-        // Only now that storiesUrl exists (or storiesMontage as fallback) : emit show_qr_on_viewer so cellphone receives final QR
-        try {
-          const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
-          socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl: storiesUrl || visualizadorUrl });
-          log('📲 Solicitação de envio do QR ao celular emitida (show_qr_on_viewer) — stories pronto.');
-        } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
+        // If we have a remote storiesUrl, draw it in preview so operator sees exactly
+        if (storiesUrl && typeof storiesUrl === 'string' && /^https?:\/\//i.test(storiesUrl)) {
+          try { await displayStoriesFromUrl(storiesUrl); } catch(e){ log('⚠️ displayStoriesFromUrl failed: ' + e); }
+        } else if (storiesMontage && typeof storiesMontage === 'string' && storiesMontage.startsWith('data:')) {
+          // canvas already has it (we generated it)
+          currentStoriesMontageDataUrl = storiesMontage;
+        }
 
-        // show on operator UI
+        // show on operator UI (preview link)
         const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
         showVisualizadorQr(visualizadorUrl);
         genVisualizadorQrBtn.disabled = false;
@@ -837,15 +903,33 @@
   // PRINT button (no changes in behavior except ensuring jsPDF loaded)
   printBtn.addEventListener('click', async () => {
     try {
-      const data = currentPrintMontageDataUrl || printCanvas.toDataURL('image/png');
+      // If print montage is remote URL (string starting with http), fetch it and convert to dataURL for embedding in PDF
+      let data = currentPrintMontageDataUrl || printCanvas.toDataURL('image/png');
+      if (data && typeof data === 'string' && /^https?:\/\//i.test(data)) {
+        // fetch as blob and convert
+        try {
+          const resp = await fetch(data);
+          const blob = await resp.blob();
+          data = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+        } catch(e) { log('⚠️ falha ao buscar print remote para PDF: ' + e); data = null; }
+      }
+
       if (!data) { alert('Montagem de impressão não disponível ainda.'); return; }
 
       const { jsPDF } = window.jspdf;
       if (!jsPDF) { alert('jsPDF não carregado. Verifique conexão e recarregue a página.'); return; }
+      // PDF dimension: 50x150 mm (5x15 cm)
       const pdf = new jsPDF({ unit: 'mm', format: [50,150], orientation: 'portrait' });
+      // convert px size to mm roughly by letting jsPDF scale the image to fit width 50mm
       pdf.addImage(data, 'JPEG', 0, 0, 50, 150);
       const blob = pdf.output('blob');
       const url = URL.createObjectURL(blob);
+
+      // open new window with the PDF embedded and trigger print
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>Impressão 5x15</title>
         <style>html,body{height:100%;margin:0;background:#fff} embed{width:100%;height:100%;display:block;border:0}</style>
         </head><body><embed id="pdfEmbed" src="${url}" type="application/pdf"></embed>
