@@ -917,7 +917,7 @@
 
   function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-  // PRINT button (no changes in behavior except ensuring jsPDF loaded)
+  // PRINT button - ALTERAÇÃO: abre diretamente nova aba com o PDF (blob URL)
   printBtn.addEventListener('click', async () => {
     try {
       const data = currentPrintMontageDataUrl || printCanvas.toDataURL('image/png');
@@ -929,20 +929,19 @@
       pdf.addImage(data, 'JPEG', 0, 0, 50, 150);
       const blob = pdf.output('blob');
       const url = URL.createObjectURL(blob);
-      const html = `<!doctype html><html><head><meta charset="utf-8"><title>Impressão 5x15</title>
-        <style>html,body{height:100%;margin:0;background:#fff} embed{width:100%;height:100%;display:block;border:0}</style>
-        </head><body><embed id="pdfEmbed" src="${url}" type="application/pdf"></embed>
-        <script>
-          function tryPrint(){ try{ window.focus(); setTimeout(()=>{ window.print(); }, 300); }catch(e){} }
-          var embed = document.getElementById('pdfEmbed');
-          if (embed) { embed.addEventListener('load', tryPrint); }
-          setTimeout(tryPrint, 800);
-        <\/script></body></html>`;
-      const w = window.open('', '_blank', 'noopener');
-      if (!w) { alert('Permita popups para abrir a janela de impressão.'); return; }
-      w.document.open();
-      w.document.write(html);
-      w.document.close();
+
+      // Abre diretamente o blob URL em nova aba — o visualizador de PDF do navegador normalmente exibirá o PDF.
+      const newTab = window.open(url, '_blank', 'noopener');
+      if (!newTab) {
+        alert('Permita popups para abrir a janela de impressão.');
+        // cleanup object URL pois não foi usado
+        setTimeout(()=> URL.revokeObjectURL(url), 2000);
+        return;
+      }
+      try { newTab.focus(); } catch(e){}
+      log('✅ PDF gerado e aberto em nova aba para impressão.');
+      // opcional: revogar URL depois de algum tempo para liberar memória (não imediato para permitir visualização)
+      setTimeout(()=> URL.revokeObjectURL(url), 60_000);
     } catch(e){ log('❌ Erro imprimir: ' + (e.message || e)); }
   });
 
