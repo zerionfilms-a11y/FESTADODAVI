@@ -158,6 +158,9 @@
   let currentPrintMontageDataUrl = null;
   let currentBoomerangUrl = null;
 
+  // pendingVisualizers holds objects keyed by viewerId when the server announces visualizador early
+  const pendingVisualizers = {}; // viewerId -> { visualizadorUrl, waitingSince }
+
   const pendingBySession = {};
 
   // -----------------------
@@ -172,6 +175,17 @@
     connectionStatusEl.textContent = text;
     connectionStatusEl.className = 'status';
     if(cssClass) connectionStatusEl.classList.add(cssClass);
+  }
+
+  function parseViewerIdFromVisualizerUrl(url){
+    try {
+      const u = new URL(url, location.origin);
+      // look for session param
+      if (u.searchParams.has('session')) return u.searchParams.get('session');
+      // fallback: last path segment
+      const segs = u.pathname.split('/').filter(Boolean);
+      return segs[segs.length-1] || null;
+    } catch(e){ return null; }
   }
 
   // -----------------------
@@ -213,52 +227,58 @@
       setStatus('⚠️ Erro de conexão', null);
     });
 
-    function onPhotosReceived(payload){
-      if(!payload) return;
-      const sess = payload.session || FIXED_SESSION;
-      const photos = Array.isArray(payload.photos) ? payload.photos
-                    : Array.isArray(payload.uploaded) ? payload.uploaded
-                    : Array.isArray(payload.photosArray) ? payload.photosArray
-                    : null;
-      const viewerId = payload.viewerId || payload.viewer || null;
-      log('📥 Fotos recebidas (via socket) — session:' + sess + ' viewer:' + (viewerId || '—') + ' count:' + (photos ? photos.length : 'n/a'));
-      if (photos && photos.length) {
-        if (photos.length >= 3) {
-          processPhotosAndUpload(photos.slice(0,3), viewerId).catch(e => log('❌ processPhotosAndUpload error: ' + (e.message||e)));
-        } else {
-          appendToPendingAndMaybeProcess(sess, photos, viewerId);
-        }
-      } else {
-        if (payload.visualizadorUrl) {
-          showVisualizadorQr(normalizeVisualizerUrl(payload.visualizadorUrl));
-        }
-      }
-    }
-
-    socket.on('photos_from_cell', onPhotosReceived);
-    socket.on('photos_submit', onPhotosReceived);
-    socket.on('photos_submit_saved', onPhotosReceived);
-
+    // photos_ready can arrive before stories are uploaded on the server.
+    // We will NOT show visualizador here unless the server included storiesUrl.
     socket.on('photos_ready', ({ session, uploaded, visualizadorUrl, storiesUrl, printUrl }) => {
       log('📥 photos_ready recebido (uploaded:' + (uploaded ? uploaded.length : 0) + ')');
       if (uploaded && uploaded.length) {
         lastPhotos = uploaded.slice(0,3);
         renderThumbs();
       }
-      if (visualizadorUrl) {
-        const normalized = normalizeVisualizerUrl(visualizadorUrl);
-        showVisualizadorQr(normalized);
+      if (storiesUrl) {
+        // server already has stories -> safe to show
+        log('✅ photos_ready contém storiesUrl -> exibindo visualizador');
+        if (visualizadorUrl) showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+      } else {
+        // no stories yet: store pending visualizer and wait for viewer_photos_ready
+        if (visualizadorUrl) {
+          const vid = parseViewerIdFromVisualizerUrl(visualizadorUrl) || (Date.now().toString());
+          pendingVisualizers[vid] = { visualizadorUrl: normalizeVisualizerUrl(visualizadorUrl), waitingSince: Date.now() };
+          log('⏳ Visualizador pendente armazenado para viewer=' + vid + ' — aguardando stories montages do servidor');
+        } else {
+          log('⚠️ photos_ready sem visualizadorUrl e sem storiesUrl — aguardando servidor.');
+        }
       }
-      if (storiesUrl) log('✅ Stories montage available: ' + storiesUrl);
     });
 
-    socket.on('viewer_photos_ready', ({ session, photos, storiesMontage, print, visualizadorUrl }) => {
-      log('📡 viewer_photos_ready recebido (session:' + session + ')');
+    // viewer_photos_ready is the definitive payload (it may include storiesMontage once server finishes uploads)
+    socket.on('viewer_photos_ready', ({ session, photos, storiesMontage, print, viewerId, visualizadorUrl }) => {
+      log('📡 viewer_photos_ready recebido (session:' + session + ', viewer:' + (viewerId||'—') + ')');
+      // update photos if provided
       if (Array.isArray(photos) && photos.length) {
         lastPhotos = photos.slice(0,3);
         renderThumbs();
       }
-      if (visualizadorUrl) showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+      // If the server included storiesMontage, now we can show the visualizer.
+      const vid = viewerId || parseViewerIdFromVisualizerUrl(visualizadorUrl) || null;
+      if (storiesMontage) {
+        log('✅ viewer_photos_ready contém storiesMontage (mostrando visualizador) for viewer=' + (vid||'—'));
+        // prefer provided visualizadorUrl, else use pending, else build one
+        const pending = (vid && pendingVisualizers[vid]) ? pendingVisualizers[vid].visualizadorUrl : null;
+        const urlToShow = visualizadorUrl || pending || (vid ? `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(vid)}` : visualizadorUrl);
+        if (urlToShow) showVisualizadorQr(normalizeVisualizerUrl(urlToShow));
+        // cleanup pending entry
+        if (vid && pendingVisualizers[vid]) delete pendingVisualizers[vid];
+      } else {
+        // no stories yet in this payload; if visualizadorUrl present and no pending, store it
+        if (visualizadorUrl) {
+          const pv = parseViewerIdFromVisualizerUrl(visualizadorUrl) || viewerId || (Date.now().toString());
+          if (!pendingVisualizers[pv]) {
+            pendingVisualizers[pv] = { visualizadorUrl: normalizeVisualizerUrl(visualizadorUrl), waitingSince: Date.now() };
+            log('⏳ Visualizador pendente (viewer_photos_ready sem stories) para ' + pv);
+          }
+        }
+      }
     });
 
     socket.on('boomerang_ready', ({ session, videoUrl, visualizadorUrl }) => {
@@ -266,6 +286,10 @@
       currentBoomerangUrl = videoUrl || null;
       renderBoomerangPreview(currentBoomerangUrl);
       if (visualizadorUrl) {
+        // same rule: only show if server indicates montage is ready — boomerang_ready often includes visualizadorUrl after processing
+        const vid = parseViewerIdFromVisualizerUrl(visualizadorUrl);
+        pendingVisualizers[vid] = { visualizadorUrl: normalizeVisualizerUrl(visualizadorUrl), waitingSince: Date.now() };
+        // if boomerangReady includes content we can show immediately (assume server finished), so show:
         showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
       }
     });
@@ -273,6 +297,7 @@
     socket.on('viewer_session_created', ({ viewerId }) => {
       log('🎉 Sessão do visualizador criada no servidor: ' + viewerId);
       addToViewerHistory(viewerId, lastPhotos.length);
+      // do NOT show the visualizador here — wait for stories to be ready
     });
 
     socket.on('reset_session', ({ session }) => {
@@ -283,6 +308,8 @@
       qrcodeVisualizadorEl.innerHTML = '';
       genVisualizadorQrBtn.disabled = true;
       printBtn.disabled = true;
+      // clear pending visualizers
+      for (const k of Object.keys(pendingVisualizers)) delete pendingVisualizers[k];
     });
 
     socket.on('stream_frame', ({ session, frame }) => {
@@ -343,6 +370,7 @@
   }
 
   function showVisualizadorQr(visualizadorUrl){
+    if (!visualizadorUrl) return;
     qrcodeVisualizadorEl.innerHTML = '';
     const qrCanvas = document.createElement('canvas');
     QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => { if (err) log('❌ Erro ao gerar QR: ' + err); });
@@ -596,9 +624,6 @@
 
   // -----------------------
   // PROCESS PHOTOS / PUBLISH VISUALIZADOR (AUTO) — updated ordering & waits
-  // This function now attempts a JSON POST to /upload-to-imgbb with:
-  // { photos: [url-or-dataURL,...], montage: dataURL-or-url }
-  // and uses returned urls before emitting create_viewer_session.
   // -----------------------
   async function processPhotosAndUpload(photosArray, viewerId){
     try {
@@ -624,8 +649,8 @@
       let storiesUrl = null;
       let printUrl = null;
 
-      // If operator has IMGBB_KEY, try direct uploads from operator (existing behavior)
       if (IMGBB_KEY) {
+        // operator uploads directly to IMGBB — ensure we upload stories before showing visualizer
         for (let i = 0; i < 3; i++){
           log('⏫ Upload foto ' + (i+1) + ' para IMGBB...');
           const u = await uploadToImgbb(photos[i], `cabine_photo_${Date.now()}_${i+1}`);
@@ -637,6 +662,8 @@
           const u = await uploadToImgbb(storiesMontage, `cabine_stories_${Date.now()}`);
           storiesUrl = u || storiesMontage;
           log('✅ stories -> ' + (u || 'dataURL fallback'));
+        } else {
+          log('⚠️ storiesMontage não disponível no operador (não será mostrado até o servidor processar).');
         }
         if (printMontage) {
           log('⏫ Upload montagem print...');
@@ -645,35 +672,43 @@
           log('✅ print -> ' + (u || 'dataURL fallback'));
         }
 
-        // send create_viewer_session to server with final URLs
+        // send create_viewer_session to server with final URLs (storiesUrl may be null if failed)
         socket.emit('create_viewer_session', {
           session: FIXED_SESSION,
           photos: uploadedPhotos,
           storiesMontage: storiesUrl || storiesMontage,
           print: printUrl || printMontage
         });
-        log('✅ create_viewer_session emitido (com URLs IMGBB).');
+        log('✅ create_viewer_session emitido (com URLs IMGBB, storiesUrl=' + Boolean(storiesUrl) + ').');
 
-        // Only now that storiesUrl exists (or storiesMontage as fallback) : emit show_qr_on_viewer so cellphone receives final QR
-        try {
+        // Only show visualizer if storiesUrl is present (we require montage to appear)
+        if (storiesUrl) {
+          try {
+            const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
+            socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl: storiesUrl || visualizadorUrl });
+            log('📲 show_qr_on_viewer emitido (stories pronto).');
+          } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
+
           const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
-          socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl: storiesUrl || visualizadorUrl });
-          log('📲 Solicitação de envio do QR ao celular emitida (show_qr_on_viewer) — stories pronto.');
-        } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
-
-        // show on operator UI
-        const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
-        showVisualizadorQr(visualizadorUrl);
-        genVisualizadorQrBtn.disabled = false;
-        printBtn.disabled = false;
-        addToViewerHistory(viewerIdLocal, uploadedPhotos.length || photos.length);
-        log('🎉 Visualizador criado automaticamente. viewerId: ' + viewerIdLocal);
+          showVisualizadorQr(visualizadorUrl);
+          addToViewerHistory(viewerIdLocal, uploadedPhotos.length || photos.length);
+          genVisualizadorQrBtn.disabled = false;
+          printBtn.disabled = false;
+          log('🎉 Visualizador criado automaticamente. viewerId: ' + viewerIdLocal);
+        } else {
+          // stories not uploaded successfully — store pending visualizer and wait for server to update
+          const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
+          pendingVisualizers[viewerIdLocal] = { visualizadorUrl, waitingSince: Date.now() };
+          genVisualizadorQrBtn.disabled = false;
+          printBtn.disabled = false;
+          addToViewerHistory(viewerIdLocal, uploadedPhotos.length || photos.length);
+          log('⏳ Visualizador pendente (stories não disponível do operador). Será exibido quando server fornecer storiesMontage.');
+        }
 
       } else {
-        // Try to POST JSON to /upload-to-imgbb on server to get remote URLs (preferred)
+        // Try server-side upload via JSON endpoint
         try {
           log('⏫ Enviando montagem (operador) para o servidor para obter URL remota...');
-          // prepare payload: photos may already be remote URLs or dataURLs
           const payloadPhotos = photos.map(p => p);
           const body = { photos: payloadPhotos, montage: storiesMontage || null };
           const controller = new AbortController();
@@ -698,13 +733,11 @@
             throw new Error('Invalid response from /upload-to-imgbb');
           }
 
-          // map results
           const urls = json.urls || {};
           const maybePhotoUrls = [];
           if (urls.photo1) maybePhotoUrls.push(urls.photo1);
           if (urls.photo2) maybePhotoUrls.push(urls.photo2);
           if (urls.photo3) maybePhotoUrls.push(urls.photo3);
-          // fallback: if less than 3 returned, use originals
           while (maybePhotoUrls.length < 3) {
             const idx = maybePhotoUrls.length;
             maybePhotoUrls.push(photos[idx] || null);
@@ -718,26 +751,40 @@
             storiesMontage: storiesUrl || null,
             print: printMontage || null
           });
-          log('✅ create_viewer_session emitido (com URLs do servidor).');
+          log('✅ create_viewer_session emitido (com URLs do servidor). storiesUrl=' + Boolean(storiesUrl));
 
-          // also ask server to show QR on viewer (server will send when upload completed)
-          try {
+          // Only show the visualizer if server returned a stories URL (we require montage)
+          if (storiesUrl) {
+            try {
+              const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
+              socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl: storiesUrl || visualizadorUrl });
+              log('📲 Solicitação show_qr_on_viewer enviada (servidor possui URLs).');
+            } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
+
             const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
-            socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl: storiesUrl || visualizadorUrl });
-            log('📲 Solicitação show_qr_on_viewer enviada (servidor possui URLs).');
-          } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
-
-          // show on operator UI with final url
-          const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
-          showVisualizadorQr(visualizadorUrl);
-          genVisualizadorQrBtn.disabled = false;
-          printBtn.disabled = false;
-          addToViewerHistory(viewerIdLocal, maybePhotoUrls.length || photos.length);
-          log('🎉 Visualizador criado com URLs do servidor. viewerId: ' + viewerIdLocal);
+            showVisualizadorQr(visualizadorUrl);
+            genVisualizadorQrBtn.disabled = false;
+            printBtn.disabled = false;
+            addToViewerHistory(viewerIdLocal, maybePhotoUrls.length || photos.length);
+            log('🎉 Visualizador criado com URLs do servidor. viewerId: ' + viewerIdLocal);
+          } else {
+            // server didn't provide montage URLs yet -> fallback to send dataURLs via socket and keep visualizer pending
+            pendingVisualizers[viewerIdLocal] = { visualizadorUrl: `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`, waitingSince: Date.now() };
+            socket.emit('create_viewer_session', {
+              session: FIXED_SESSION,
+              photos: photos, // dataURLs
+              storiesMontage: storiesMontage || null,
+              print: printMontage || null
+            });
+            log('⚠️ /upload-to-imgbb não retornou URLs; fallback create_viewer_session (dataURLs) enviado e visualizador pendente.');
+            genVisualizadorQrBtn.disabled = false;
+            printBtn.disabled = false;
+            addToViewerHistory(viewerIdLocal, photos.length);
+          }
 
         } catch (err) {
+          log('⚠️ /upload-to-imgbb falhou completamente: ' + (err.message || err));
           // fallback: server couldn't handle /upload-to-imgbb, send raw dataURLs via socket like before
-          log('⚠️ /upload-to-imgbb não retornou URLs; enviando dataURLs via socket como fallback');
           try {
             socket.emit('create_viewer_session', {
               session: FIXED_SESSION,
@@ -745,9 +792,9 @@
               storiesMontage: storiesMontage || null,
               print: printMontage || null
             });
+            // mark visualizer pending and wait for server to emit viewer_photos_ready with storiesMontage
+            pendingVisualizers[viewerIdLocal] = { visualizadorUrl: `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`, waitingSince: Date.now() };
             log('🔁 Fallback create_viewer_session (dataURLs) enviado ao servidor para viewer: ' + viewerIdLocal);
-            const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
-            showVisualizadorQr(visualizadorUrl);
             genVisualizadorQrBtn.disabled = false;
             printBtn.disabled = false;
             addToViewerHistory(viewerIdLocal, photos.length);
