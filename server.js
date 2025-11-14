@@ -1,4 +1,4 @@
-// server.js - FESTADODAVI (versão revisada / compatível / preservando funções)
+// server.js
 // Node >= 16+ recommended
 // Replace IMGBB_KEY via env for production
 
@@ -8,6 +8,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
+const Busboy = require('busboy'); // npm i busboy
 
 // fetch compatibility: prefer global.fetch (Node 18+), otherwise try node-fetch (v2 or v3)
 let fetchFn = global.fetch;
@@ -40,14 +41,27 @@ const VISUALIZADOR_ORIGIN = (process.env.VISUALIZADOR_ORIGIN && process.env.VISU
   (`https://festadodavi-production-0591.up.railway.app`);
 
 const app = express();
+
+// --- CORS middleware (allow browser fetch from operator) ---
+app.use((req, res, next) => {
+  // Allow all origins for ease of local operator use.
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+// body parsers (but not for multipart)
+app.use(express.json({ limit: '120mb' }));
+app.use(express.urlencoded({ extended: true, limit: '120mb' }));
+
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET","POST"] }
+  cors: { origin: "*", methods: ["GET","POST","OPTIONS"] }
 });
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
-app.use(express.json({ limit: '80mb' }));
-app.use(express.urlencoded({ extended: true, limit: '80mb' }));
 app.use(express.static(PUBLIC_DIR));
 
 // uploads dir
@@ -57,15 +71,12 @@ if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   } catch (e) {
     console.error('Failed to create uploads dir', e);
-    // continue — write operations will fail later and be logged
   }
 }
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 // in-memory session store
-// sessions[sessionId] = { viewers: { viewerId: { photos: [], storiesMontage, print, createdAt } }, operators: Set(socketId), lastStreamFrame }
 const sessions = {};
-
 function ensureSession(sessionId) {
   if (!sessionId) return null;
   if (!sessions[sessionId]) {
@@ -87,12 +98,10 @@ async function saveDataUrlToUploads(dataUrl, filenamePrefix = 'photo') {
     const filePath = path.join(UPLOADS_DIR, name);
     const buffer = Buffer.from(b64, 'base64');
     await fs.promises.writeFile(filePath, buffer);
-    // return absolute public URL including origin so callers don't have to guess
     const origin = VISUALIZADOR_ORIGIN.replace(/\/+$/, '');
     const publicUrl = `${origin}/uploads/${name}`;
     return publicUrl;
   } catch (e) {
-    // bubble up with context
     throw new Error('saveDataUrlToUploads error: ' + (e && e.message ? e.message : e));
   }
 }
@@ -102,7 +111,6 @@ async function uploadToImgbbFromDataUrl(dataUrl, name) {
   if (!IMGBB_KEY) throw new Error('IMGBB_KEY not configured');
   if (!fetchFn) throw new Error('No fetch available for IMGBB upload');
 
-  // Use URLSearchParams (imgbb accepts urlencoded or multipart)
   const parts = dataUrl.split(',');
   if (parts.length < 2) throw new Error('Invalid dataURL');
   const base64 = parts[1];
@@ -112,7 +120,6 @@ async function uploadToImgbbFromDataUrl(dataUrl, name) {
   body.append('image', base64);
   if (name) body.append('name', name);
 
-  // try with AbortController if available
   const controller = AbortControllerLocal ? new AbortControllerLocal() : null;
   const signal = controller ? controller.signal : undefined;
   const timeout = controller ? setTimeout(()=>controller.abort(), 25000) : null;
@@ -153,6 +160,142 @@ app.get('/visualizador/:sessionId', (req, res) => {
 });
 
 /**
+ * POST /upload-to-imgbb
+ * Accepts multipart/form-data with files or URL fields:
+ * - photo1, photo2, photo3 (files) OR photoUrl1..photoUrl3 (strings)
+ * - montage (file) OR montageUrl (string)
+ * Responds JSON: { ok:true, urls: { photo1, photo2, photo3, montage } }
+ *
+ * This endpoint returns CORS headers (set globally above). It will try to upload
+ * received files to IMGBB using uploadToImgbbFromDataUrl; if IMGBB fails, saves local and returns local URL.
+ */
+app.post('/upload-to-imgbb', (req, res) => {
+  try {
+    const busboy = new Busboy({ headers: req.headers, limits: { files: 10, fileSize: 50 * 1024 * 1024 } });
+    const fileBuffers = {};    // fieldName -> { buffer, mime }
+    const urlFields = {};      // fieldName -> string
+    busboy.on('file', (fieldname, file, filename, encoding, mimetype) => {
+      const parts = [];
+      file.on('data', (data) => { parts.push(data); });
+      file.on('limit', () => {
+        console.warn('file limit reached for', fieldname);
+      });
+      file.on('end', () => {
+        const buffer = Buffer.concat(parts);
+        fileBuffers[fieldname] = { buffer, mime: mimetype, filename: filename || (fieldname + '.bin') };
+      });
+    });
+    busboy.on('field', (fieldname, val) => {
+      // accept photoUrl1..photoUrl3 and montageUrl etc
+      urlFields[fieldname] = val;
+    });
+    busboy.on('finish', async () => {
+      const resultUrls = { photo1:null, photo2:null, photo3:null, montage:null };
+      // helper to upload buffer or url
+      async function handlePhotoField(n, fieldBase) {
+        const fileField = fieldBase + n; // e.g., photo1
+        const urlField = 'photoUrl' + n;
+        // if we have a file buffer
+        if (fileBuffers[fileField]) {
+          const item = fileBuffers[fileField];
+          try {
+            const dataUrl = `data:${item.mime};base64,${item.buffer.toString('base64')}`;
+            if (IMGBB_KEY && fetchFn) {
+              try {
+                const u = await uploadToImgbbFromDataUrl(dataUrl, `photo_${Date.now()}_${n}`);
+                return u;
+              } catch (e) {
+                console.warn('IMGBB upload failed for', fileField, e && e.message ? e.message : e);
+                try {
+                  const local = await saveDataUrlToUploads(dataUrl, `photo_${n}`);
+                  return local;
+                } catch (ee) {
+                  console.error('fallback saveDataUrlToUploads failed for', fileField, ee);
+                  return null;
+                }
+              }
+            } else {
+              // save locally
+              try {
+                const local = await saveDataUrlToUploads(dataUrl, `photo_${n}`);
+                return local;
+              } catch (e) {
+                console.error('saveDataUrlToUploads failed for', fileField, e);
+                return null;
+              }
+            }
+          } catch (e) {
+            console.error('handlePhotoField error (buffer) for', fileField, e);
+            return null;
+          }
+        }
+        // else if client provided a URL field, use it (server accepts it as-is)
+        if (urlFields[urlField]) {
+          return urlFields[urlField];
+        }
+        return null;
+      }
+
+      // handle montage
+      async function handleMontage() {
+        if (fileBuffers['montage']) {
+          const item = fileBuffers['montage'];
+          try {
+            const dataUrl = `data:${item.mime};base64,${item.buffer.toString('base64')}`;
+            if (IMGBB_KEY && fetchFn) {
+              try {
+                const u = await uploadToImgbbFromDataUrl(dataUrl, `stories_${Date.now()}`);
+                return u;
+              } catch (e) {
+                console.warn('IMGBB montage upload failed', e && e.message ? e.message : e);
+                try {
+                  const local = await saveDataUrlToUploads(dataUrl, `stories`);
+                  return local;
+                } catch (ee) {
+                  console.error('saveDataUrlToUploads montage failed', ee);
+                  return null;
+                }
+              }
+            } else {
+              try {
+                const local = await saveDataUrlToUploads(dataUrl, `stories`);
+                return local;
+              } catch (e) {
+                console.error('saveDataUrlToUploads montage failed', e);
+                return null;
+              }
+            }
+          } catch (e) {
+            console.error('handleMontage error (buffer)', e);
+            return null;
+          }
+        }
+        if (urlFields['montageUrl']) return urlFields['montageUrl'];
+        return null;
+      }
+
+      (async () => {
+        try {
+          resultUrls.photo1 = await handlePhotoField(1, 'photo');
+          resultUrls.photo2 = await handlePhotoField(2, 'photo');
+          resultUrls.photo3 = await handlePhotoField(3, 'photo');
+          resultUrls.montage = await handleMontage();
+        } catch (e) {
+          console.error('upload-to-imgbb handler error', e && e.stack ? e.stack : e);
+        }
+
+        res.json({ ok: true, urls: resultUrls });
+      })();
+    });
+
+    req.pipe(busboy);
+  } catch (e) {
+    console.error('upload-to-imgbb route caught error', e);
+    res.status(500).json({ ok:false, err: String(e) });
+  }
+});
+
+/**
  * Unified handler used by both HTTP fallback and socket flow.
  * - creates viewerId immediately and stores placeholder
  * - uploads images (imgbb if key, otherwise save local)
@@ -180,9 +323,7 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
   for (let i = 0; i < maxPhotos; i++) {
     const p = photos[i];
     if (typeof p === 'string' && p.startsWith('data:')) {
-      // dataURL -> upload to IMGBB or save locally
       photoTasks.push((async () => {
-        // prefer IMGBB
         if (IMGBB_KEY && fetchFn) {
           try {
             const url = await uploadToImgbbFromDataUrl(p, `photo_${Date.now()}_${i}`);
@@ -198,7 +339,6 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
             }
           }
         } else {
-          // save locally
           try {
             const local = await saveDataUrlToUploads(p, `photo_${i}`);
             return local;
@@ -209,14 +349,13 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
         }
       })());
     } else if (typeof p === 'string' && /^https?:\/\//i.test(p)) {
-      // already remote URL
+      // already remote URL — keep as-is (server won't re-upload)
       photoTasks.push(Promise.resolve(p));
     } else {
       photoTasks.push(Promise.resolve(null));
     }
   }
 
-  // stories and print tasks
   const storyTask = (async () => {
     if (!storiesMontage) return null;
     if (typeof storiesMontage === 'string' && storiesMontage.startsWith('data:')) {
@@ -279,24 +418,20 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
     return null;
   })();
 
-  // run uploads in parallel and wait
   logServer(`handleIncomingPhotos: starting upload tasks for session=${session} viewer=${vid} photos=${maxPhotos}`);
   let results;
   try {
     results = await Promise.allSettled([ Promise.all(photoTasks), storyTask, printTask ]);
   } catch (e) {
-    // Shouldn't happen because allSettled used below, but keep defensive
     console.error('parallel upload error', e);
     results = [];
   }
 
-  // parse results
   let photoResults = [];
   try {
     if (results && results.length >= 1 && results[0].status === 'fulfilled') {
       photoResults = Array.isArray(results[0].value) ? results[0].value : [];
     } else {
-      // fallback: try to map original http urls
       photoResults = (photos || []).slice(0, maxPhotos).map(p => (typeof p === 'string' && /^https?:\/\//i.test(p)) ? p : null);
     }
   } catch (e) {
@@ -306,7 +441,6 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
   const storyUrl = (results && results[1] && results[1].status === 'fulfilled') ? results[1].value : null;
   const printUrl = (results && results[2] && results[2].status === 'fulfilled') ? results[2].value : null;
 
-  // store final record (filter out nulls)
   const finalPhotos = (photoResults || []).filter(Boolean).slice(0,3);
   sessions[session].viewers[vid] = {
     photos: finalPhotos,
@@ -318,7 +452,6 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
 
   const visualizadorUrl = `${VISUALIZADOR_ORIGIN.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(vid)}`;
 
-  // emit to viewer room (if any)
   try {
     io.to(`viewer:${vid}`).emit('viewer_photos_ready', {
       session,
@@ -332,7 +465,6 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
     console.warn('emit viewer_photos_ready failed', e);
   }
 
-  // emit convenience events to operator/session
   try {
     io.to(`session:${session}`).emit('photos_ready', {
       session,
@@ -345,7 +477,6 @@ async function handleIncomingPhotos({ session, photos = [], storiesMontage = nul
     console.warn('emit photos_ready failed', e);
   }
 
-  // Ask cell(s) to show QR / visualizer (so they display the QR AFTER server processed)
   try {
     io.to(`session:${session}`).emit('show_qr_on_viewer', { viewerId: vid, visualizadorUrl });
     io.to(`viewer:${vid}`).emit('show_qr', { visualizadorUrl });
@@ -374,10 +505,8 @@ app.post('/upload_photos', async (req, res) => {
     ensureSession(session);
     sessions[session].viewers[vid] = { photos: [], storiesMontage: null, print: null, boomerang: null, createdAt: new Date().toISOString() };
     const previewVisualizadorUrl = `${VISUALIZADOR_ORIGIN.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(vid)}`;
-    // respond quickly
     res.json({ ok:true, viewerId: vid, visualizadorUrl: previewVisualizadorUrl });
 
-    // process uploads and emit when ready, run async
     handleIncomingPhotos({ session, photos, viewerId: vid }).catch(err => {
       console.error('handleIncomingPhotos (http) error', err && err.stack ? err.stack : err);
     });
@@ -386,132 +515,6 @@ app.post('/upload_photos', async (req, res) => {
     return res.status(500).json({ ok: false, err: String(err) });
   }
 });
-
-/**
- * NEW ROUTE: /upload-to-imgbb
- * - Accepts:
- *   - multipart/form-data with fields: photo1, photo2, photo3, montage (files)
- *   - or JSON body: { photos: [dataURL...], montage: dataURL }
- * - Returns: { ok: true, urls: { photo1, photo2, photo3, montage } }
- */
-const multer = (() => {
-  try { return require('multer'); } catch (e) { return null; }
-})();
-
-if (multer) {
-  const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, UPLOADS_DIR),
-    filename: (req, file, cb) => {
-      const safe = (file.originalname || 'file').replace(/[^a-zA-Z0-9.\-_]/g, '_');
-      cb(null, `${Date.now()}-${uuidv4()}-${safe}`);
-    }
-  });
-  const uploader = multer({ storage });
-  app.post('/upload-to-imgbb', uploader.fields([
-    { name: 'photo1', maxCount: 1 },
-    { name: 'photo2', maxCount: 1 },
-    { name: 'photo3', maxCount: 1 },
-    { name: 'montage', maxCount: 1 }
-  ]), async (req, res) => {
-    try {
-      const results = { photo1: null, photo2: null, photo3: null, montage: null };
-      const files = req.files || {};
-
-      // Helper to read file and upload or return local URL
-      async function processFile(file) {
-        try {
-          const buf = await fs.promises.readFile(file.path);
-          const base64 = buf.toString('base64');
-          const dataUrl = `data:image/${(file.mimetype || 'png').split('/')[1]};base64,${base64}`;
-          if (IMGBB_KEY && fetchFn) {
-            try {
-              const url = await uploadToImgbbFromDataUrl(dataUrl, file.originalname);
-              // remove local
-              try { await fs.promises.unlink(file.path); } catch(_) {}
-              return url;
-            } catch (e) {
-              // fallback to serve locally
-              const publicUrl = `${VISUALIZADOR_ORIGIN.replace(/\/+$/,'')}/uploads/${path.basename(file.path)}`;
-              return publicUrl;
-            }
-          } else {
-            return `${VISUALIZADOR_ORIGIN.replace(/\/+$/,'')}/uploads/${path.basename(file.path)}`;
-          }
-        } catch (e) {
-          console.error('processFile error', e);
-          return null;
-        }
-      }
-
-      // files from multipart
-      if (files.photo1 && files.photo1[0]) results.photo1 = await processFile(files.photo1[0]);
-      if (files.photo2 && files.photo2[0]) results.photo2 = await processFile(files.photo2[0]);
-      if (files.photo3 && files.photo3[0]) results.photo3 = await processFile(files.photo3[0]);
-      if (files.montage && files.montage[0]) results.montage = await processFile(files.montage[0]);
-
-      // If not provided via multipart, accept JSON body with dataURLs
-      if ((!results.photo1 || !results.photo2 || !results.photo3 || !results.montage) && req.body) {
-        const photos = req.body.photos || req.body.photosArray || null;
-        if (Array.isArray(photos)) {
-          for (let i = 0; i < photos.length && i < 3; i++) {
-            const key = `photo${i+1}`;
-            if (!results[key] && photos[i]) {
-              try {
-                results[key] = IMGBB_KEY && fetchFn ? await uploadToImgbbFromDataUrl(photos[i], key) : await saveDataUrlToUploads(photos[i], key);
-              } catch (e) {
-                console.error('upload/data save failed for', key, e);
-              }
-            }
-          }
-        }
-        if (!results.montage && req.body.montage) {
-          try {
-            results.montage = IMGBB_KEY && fetchFn ? await uploadToImgbbFromDataUrl(req.body.montage, 'montage') : await saveDataUrlToUploads(req.body.montage, 'montage');
-          } catch (e) {
-            console.error('upload/data save failed for montage', e);
-          }
-        }
-      }
-
-      const any = Object.values(results).some(Boolean);
-      if (!any) return res.status(400).json({ ok:false, error: 'No images received' });
-
-      return res.json({ ok:true, urls: results });
-    } catch (e) {
-      console.error('/upload-to-imgbb error', e && e.stack ? e.stack : e);
-      return res.status(500).json({ ok:false, error: String(e) });
-    }
-  });
-} else {
-  // multer not installed: provide a JSON-only endpoint fallback
-  app.post('/upload-to-imgbb', async (req, res) => {
-    try {
-      const results = { photo1: null, photo2: null, photo3: null, montage: null };
-      const photos = req.body.photos || req.body.photosArray || null;
-      if (Array.isArray(photos)) {
-        for (let i = 0; i < photos.length && i < 3; i++) {
-          const key = `photo${i+1}`;
-          if (photos[i]) {
-            try {
-              results[key] = IMGBB_KEY && fetchFn ? await uploadToImgbbFromDataUrl(photos[i], key) : await saveDataUrlToUploads(photos[i], key);
-            } catch (e) { console.error('upload/data save failed for', key, e); }
-          }
-        }
-      }
-      if (req.body.montage) {
-        try {
-          results.montage = IMGBB_KEY && fetchFn ? await uploadToImgbbFromDataUrl(req.body.montage, 'montage') : await saveDataUrlToUploads(req.body.montage, 'montage');
-        } catch (e) { console.error('upload/data save failed for montage', e); }
-      }
-      const any = Object.values(results).some(Boolean);
-      if (!any) return res.status(400).json({ ok:false, error: 'No images received' });
-      return res.json({ ok:true, urls: results });
-    } catch (e) {
-      console.error('/upload-to-imgbb fallback error', e && e.stack ? e.stack : e);
-      return res.status(500).json({ ok:false, error: String(e) });
-    }
-  });
-}
 
 // Socket handlers and events
 io.on('connection', (socket) => {
@@ -543,7 +546,6 @@ io.on('connection', (socket) => {
     if (vid) {
       socket.join(`viewer:${vid}`);
       socket.data.viewerId = vid;
-      // if stored, emit payload
       for (const sid of Object.keys(sessions)) {
         const v = sessions[sid].viewers[vid];
         if (v) {
@@ -576,7 +578,6 @@ io.on('connection', (socket) => {
         console.log(`[socket] viewer_join for session:${session} but no viewers yet`);
         return;
       }
-      // pick most recent by createdAt
       let latestId = keys[0];
       let latestTs = viewers[latestId].createdAt || 0;
       for (const k of keys) {
@@ -610,51 +611,38 @@ io.on('connection', (socket) => {
     io.to(`session:${session}`).emit('stream_frame', { session, frame });
   });
 
-  // photos_from_cell (socket flow) - accept payload of photos (dataURLs or URLs)
-  // Accept multiple event names for compatibility with different clients
-  const photosHandlers = async (payload, ack) => {
+  socket.on('photos_from_cell', async (payload, ack) => {
     try {
-      // normalize payload: support { photos }, { photosArray }, { photosFromCell }, or top-level array
-      let session = payload && payload.session ? payload.session : (payload && payload.room) ? payload.room : 'cabine-fixa';
-      let photos = payload && (payload.photos || payload.photosArray || payload.photosFromCell || payload.photos_from_cell) ? (payload.photos || payload.photosArray || payload.photosFromCell || payload.photos_from_cell) : [];
-      // also accept payload as array directly
-      if (!photos && Array.isArray(payload)) photos = payload;
-
-      const viewerId = payload && (payload.viewerId || payload.viewerId === 0) ? payload.viewerId : null;
-
+      const { session, photos, viewerId } = payload || {};
       const sess = session || 'cabine-fixa';
-      // immediate create viewer id and ack quickly
       const vid = viewerId || uuidv4();
       ensureSession(sess);
       sessions[sess].viewers[vid] = { photos: [], storiesMontage: null, print: null, boomerang: null, createdAt: new Date().toISOString() };
-      // emit quick creation to operators
       io.to(`session:${sess}`).emit('viewer_session_created', { viewerId: vid });
-
-      // ack if provided
       try { if (typeof ack === 'function') ack(null, { ok:true, viewerId: vid }); } catch(e){}
-
-      // call handleIncomingPhotos with possible storiesMontage/print fields if present
-      const storiesMontage = payload && (payload.storiesMontage || payload.montage || payload.story || payload.stories) ? (payload.storiesMontage || payload.montage || payload.story || payload.stories) : null;
-      const print = payload && payload.print ? payload.print : null;
-
-      handleIncomingPhotos({ session: sess, photos: photos || [], storiesMontage, print, viewerId: vid }).catch(err => {
+      handleIncomingPhotos({ session: sess, photos: photos || [], viewerId: vid }).catch(err => {
         console.error('handleIncomingPhotos (socket) error', err && err.stack ? err.stack : err);
       });
     } catch (err) {
-      console.error('photos handler error', err && err.stack ? err.stack : err);
+      console.error('photos_from_cell handler error', err && err.stack ? err.stack : err);
       try { if (typeof ack === 'function') ack(err); } catch(e){}
     }
-  };
+  });
 
-  // register handlers for various event names clients might use
-  socket.on('photos_from_cell', photosHandlers);
-  socket.on('photos_submit', photosHandlers);
-  socket.on('photos_from_cell_v2', photosHandlers);
-  socket.on('photosFromCell', photosHandlers); // camelCase variant (some clients use this)
-  socket.on('photosFromClient', photosHandlers);
-  socket.on('photosSubmit', photosHandlers);
+  socket.on('photos_submit', async (payload, ack) => {
+    try {
+      const { session, photos, viewerId } = payload || {};
+      const sess = session || 'cabine-fixa';
+      const vid = viewerId || uuidv4();
+      ensureSession(sess);
+      try { if (typeof ack === 'function') ack(null, { ok:true, viewerId: vid }); } catch(e){}
+      handleIncomingPhotos({ session: sess, photos: photos || [], viewerId: vid }).catch(err => console.error('photos_submit flow error', err && err.stack ? err.stack : err));
+    } catch (err) {
+      console.error('photos_submit handler error', err && err.stack ? err.stack : err);
+      try { if (typeof ack === 'function') ack(err); } catch(e){}
+    }
+  });
 
-  // create_viewer_session: server-side flow triggered by operator (accepts photos or urls)
   socket.on('create_viewer_session', async (payload) => {
     try {
       await handleIncomingPhotos(payload);
@@ -663,7 +651,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // boomerang/video flow
   socket.on('boomerang_ready', async ({ session, viewerId, data, dataUrl, videoUrl, previewFrame }) => {
     try {
       const sess = session || 'cabine-fixa';
