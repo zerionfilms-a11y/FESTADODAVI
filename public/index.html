@@ -120,11 +120,11 @@
   // -----------------------
   const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
   const FIXED_SESSION = "cabine-fixa";
-  const IMGBB_KEY = ""; // ex: "fc52605669365cdf28ea379d10f2a341"
+  const IMGBB_KEY = "fc52605669365cdf28ea379d10f2a341"; // se desejar o Index faça upload direto, coloque aqui
   const STORIES_TEMPLATE = "storiesdavi.png";
   const PRINT_TEMPLATE = "imprimirdavi.png";
   const FRAME_OVERLAY = "moldura.png";
-  const MAX_WAIT_MS_FOR_BATCH = 1400; // wait for more photos to arrive before processing batch
+  const MAX_WAIT_MS_FOR_BATCH = 1400;
   const UPLOAD_TIMEOUT_MS = 20000;
   const MONTAGE_READY_TIMEOUT = 5000;
 
@@ -159,8 +159,7 @@
   let currentPrintMontageDataUrl = null;
   let currentBoomerangUrl = null;
 
-  // pending buffer for photos that arrive 1-by-1
-  const pendingBySession = {}; // session -> { photos: [], timer }
+  const pendingBySession = {};
 
   // -----------------------
   // UTIL / LOG
@@ -215,31 +214,26 @@
       setStatus('⚠️ Erro de conexão', null);
     });
 
-    // Unified handler: photos may arrive via different events
     function onPhotosReceived(payload){
       if(!payload) return;
-      // payload may be: { session, photos } or { photos } or { uploaded, ... }
       const sess = payload.session || FIXED_SESSION;
       const photos = Array.isArray(payload.photos) ? payload.photos
                     : Array.isArray(payload.uploaded) ? payload.uploaded
                     : Array.isArray(payload.photosArray) ? payload.photosArray
                     : null;
-
       const viewerId = payload.viewerId || payload.viewer || null;
 
       log('📥 Fotos recebidas (via socket) — session:' + sess + ' viewer:' + (viewerId || '—') + ' count:' + (photos ? photos.length : 'n/a'));
       if (photos && photos.length) {
-        // If it's 3 or more, process immediately under its own viewerId (if provided).
         if (photos.length >= 3) {
           processPhotosAndUpload(photos.slice(0,3), viewerId).catch(e => log('❌ processPhotosAndUpload error: ' + (e.message||e)));
         } else {
-          // accumulate in pending buffer for the session
           appendToPendingAndMaybeProcess(sess, photos, viewerId);
         }
       } else {
-        // some server emits may not include photos array but may include visualizadorUrl or storiesUrl
         if (payload.visualizadorUrl) {
-          showVisualizadorQr(normalizeVisualizerUrl(payload.visualizadorUrl));
+          // Don't auto-show visualizer here unless there's a montage present
+          log('ℹ️ received photos event without photos array; ignoring visualizadorUrl until montage present (if any)');
         }
       }
     }
@@ -248,26 +242,36 @@
     socket.on('photos_submit', onPhotosReceived);
     socket.on('photos_submit_saved', onPhotosReceived);
 
+    // IMPORTANT: only show QR if payload includes stories/print (avoid premature QR)
     socket.on('photos_ready', ({ session, uploaded, visualizadorUrl, storiesUrl, printUrl }) => {
       log('📥 photos_ready recebido (uploaded:' + (uploaded ? uploaded.length : 0) + ')');
       if (uploaded && uploaded.length) {
         lastPhotos = uploaded.slice(0,3);
         renderThumbs();
       }
-      if (visualizadorUrl) {
+      // Only show visualizer if server included stories or print (montagens)
+      const hasMontage = !!(storiesUrl || printUrl);
+      if (visualizadorUrl && hasMontage) {
         const normalized = normalizeVisualizerUrl(visualizadorUrl);
         showVisualizadorQr(normalized);
+      } else {
+        log('ℹ️ photos_ready sem montagens — aguardando montagem antes de mostrar visualizador.');
       }
       if (storiesUrl) log('✅ Stories montage available: ' + storiesUrl);
     });
 
+    // viewer_photos_ready may include storiesMontage — require it to show QR immediately
     socket.on('viewer_photos_ready', ({ session, photos, storiesMontage, print, visualizadorUrl }) => {
       log('📡 viewer_photos_ready recebido (session:' + session + ')');
       if (Array.isArray(photos) && photos.length) {
         lastPhotos = photos.slice(0,3);
         renderThumbs();
       }
-      if (visualizadorUrl) showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+      if (visualizadorUrl && (storiesMontage || print)) {
+        showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+      } else {
+        log('ℹ️ viewer_photos_ready sem montagem — aguardando montagem (ou server poderá reenviar com stories).');
+      }
     });
 
     socket.on('boomerang_ready', ({ session, videoUrl, visualizadorUrl }) => {
@@ -307,7 +311,6 @@
     const p = pendingBySession[session];
     p.photos.push(...photosArray);
     if (viewerId) p.viewerId = viewerId;
-    // if reached 3, process immediately
     if (p.photos.length >= 3) {
       const take = p.photos.slice(0,3);
       p.photos = p.photos.slice(3);
@@ -317,7 +320,6 @@
       processPhotosAndUpload(take, vid).catch(e => log('❌ processPhotosAndUpload error: ' + e));
       return;
     }
-    // otherwise set/refresh timer to wait for more (short)
     if (p.timer) clearTimeout(p.timer);
     p.timer = setTimeout(() => {
       const take = p.photos.splice(0,3);
@@ -359,7 +361,6 @@
     QRCode.toCanvas(qrCanvas, visualizadorUrl, { width: 220 }, (err) => { if (err) log('❌ Erro ao gerar QR: ' + err); });
     qrcodeVisualizadorEl.appendChild(qrCanvas);
 
-    // show clickable link (anchor) so browsers treat it as a link (avoid Safari search behavior)
     const a = document.createElement('a');
     a.href = visualizadorUrl;
     a.target = '_blank';
@@ -466,7 +467,6 @@
     };
     bg.onerror = () => {
       log('❌ Erro ao carregar background stories (verifique STORIES_TEMPLATE path)');
-      // fallback: just draw photos on black background
       ctx.fillStyle = '#000';
       ctx.fillRect(0,0,storiesCanvas.width,storiesCanvas.height);
       let loaded = 0;
@@ -553,7 +553,7 @@
   }
 
   // -----------------------
-  // IMGBB upload util (client-side optional)
+  // IMGBB upload util
   // -----------------------
   async function uploadToImgbb(dataUrl, name = 'cabine_photo') {
     if (!IMGBB_KEY) {
@@ -589,7 +589,6 @@
     timeoutMs = timeoutMs || MONTAGE_READY_TIMEOUT;
     return new Promise((resolve) => {
       (function poll(){
-        // prefer explicit var then fallback to try toDataURL
         try {
           const candidate = currentStoriesMontageDataUrl || (storiesCanvas.toDataURL ? storiesCanvas.toDataURL('image/jpeg', 0.95) : null);
           if (candidate) return resolve(candidate);
@@ -608,9 +607,8 @@
 
       log('🔄 Gerando montagem stories e print automaticamente...');
       lastPhotos = photos.slice(0,3);
-      renderThumbs(); // this will start drawing stories & print
+      renderThumbs();
 
-      // wait (poll) for stories montage to become available (or timeout)
       const storiesCandidate = await waitForMontageGeneration(MONTAGE_READY_TIMEOUT + 1000);
       const storiesMontage = storiesCandidate || currentStoriesMontageDataUrl || (storiesCanvas.toDataURL ? (function(){ try{ return storiesCanvas.toDataURL('image/jpeg',0.95); }catch(e){ return null;} })() : null);
       const printMontage = currentPrintMontageDataUrl || (printCanvas.toDataURL ? (function(){ try{ return printCanvas.toDataURL('image/jpeg',0.95); }catch(e){ return null;} })() : null);
@@ -619,7 +617,6 @@
 
       genVisualizadorQrBtn.disabled = true;
 
-      // generate or reuse a viewerIdLocal (prefer provided one, otherwise unique)
       const viewerIdLocal = viewerId || (FIXED_SESSION + ':' + Date.now());
 
       const uploadedPhotos = [];
@@ -627,11 +624,10 @@
       let printUrl = null;
 
       if (IMGBB_KEY) {
-        // upload each photo (if dataURL) to IMGBB
         for (let i = 0; i < 3; i++){
           log('⏫ Upload foto ' + (i+1) + ' para IMGBB...');
           const u = await uploadToImgbb(photos[i], `cabine_photo_${Date.now()}_${i+1}`);
-          uploadedPhotos.push(u || photos[i]); // fallback to original if upload failed
+          uploadedPhotos.push(u || photos[i]);
           log('✅ foto ' + (i+1) + ' -> ' + (u || 'dataURL fallback'));
         }
 
@@ -649,41 +645,85 @@
           log('✅ print -> ' + (u || 'dataURL fallback'));
         }
 
-        // notify server with uploaded urls (or dataURL fallback)
-        socket.emit('create_viewer_session', {
+        const payload = {
           session: FIXED_SESSION,
+          viewerId: viewerIdLocal,
           photos: uploadedPhotos,
+          uploaded: uploadedPhotos,
           storiesMontage: storiesUrl || storiesMontage,
-          print: printUrl || printMontage
-        });
-        log('✅ create_viewer_session emitido (com URLs IMGBB).');
+          storiesUrl: storiesUrl || storiesMontage,
+          stories: storiesUrl || storiesMontage,
+          stories_montage: storiesUrl || storiesMontage,
+          print: printUrl || printMontage,
+          printUrl: printUrl || printMontage,
+          print_montage: printUrl || printMontage
+        };
+
+        try {
+          socket.timeout(15000).emit('create_viewer_session', payload, (err, ack) => {
+            if (err) {
+              log('⚠️ create_viewer_session emit ACK error/timeout: ' + err);
+            } else {
+              log('✅ create_viewer_session ack recebido: ' + JSON.stringify(ack));
+            }
+          });
+        } catch(e){
+          log('⚠️ create_viewer_session emit exception: ' + (e.message||e));
+          try { socket.emit('create_viewer_session', payload); } catch(e2){ log('❌ fallback create_viewer_session failed: ' + (e2.message||e2)); }
+        }
+
+        try {
+          socket.emit('photos_ready', { session: FIXED_SESSION, uploaded: uploadedPhotos, visualizadorUrl: `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`, storiesUrl: storiesUrl || storiesMontage, printUrl: printUrl || printMontage });
+          socket.emit('viewer_photos_ready', { session: FIXED_SESSION, photos: uploadedPhotos, storiesMontage: storiesUrl || storiesMontage, print: printUrl || printMontage, visualizadorUrl: `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}` });
+          log('🔁 Emitted photos_ready & viewer_photos_ready (compat payload).');
+        } catch(e){ log('⚠️ emit fallback photos_ready/viewer_photos_ready falhou: ' + (e.message||e)); }
+
       } else {
-        // no IMGBB key: always include dataURLs so server can upload
-        socket.emit('create_viewer_session', {
+        const payload2 = {
           session: FIXED_SESSION,
-          photos: photos, // dataURLs
+          viewerId: viewerIdLocal,
+          photos: photos,
+          uploaded: photos,
           storiesMontage: storiesMontage || null,
-          print: printMontage || null
-        });
-        log('🔁 Fotos brutas e montagens enviadas ao servidor para processamento (server fará upload).');
+          storiesUrl: storiesMontage || null,
+          stories: storiesMontage || null,
+          print: printMontage || null,
+          printUrl: printMontage || null
+        };
+
+        try {
+          socket.timeout(15000).emit('create_viewer_session', payload2, (err, ack) => {
+            if (err) {
+              log('⚠️ create_viewer_session (dataURLs) ACK error/timeout: ' + err);
+            } else {
+              log('✅ create_viewer_session (dataURLs) ack recebido: ' + JSON.stringify(ack));
+            }
+          });
+        } catch(e){
+          log('⚠️ create_viewer_session (dataURLs) emit exception: ' + (e.message||e));
+          try { socket.emit('create_viewer_session', payload2); } catch(e2){ log('❌ fallback create_viewer_session failed: ' + (e2.message||e2)); }
+        }
+
+        try {
+          socket.emit('photos_ready', { session: FIXED_SESSION, uploaded: photos, visualizadorUrl: `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`, storiesUrl: storiesMontage || null, printUrl: printMontage || null });
+          socket.emit('viewer_photos_ready', { session: FIXED_SESSION, photos: photos, storiesMontage: storiesMontage || null, print: printMontage || null, visualizadorUrl: `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}` });
+          log('🔁 Emitted photos_ready & viewer_photos_ready (dataURL payload).');
+        } catch(e){ log('⚠️ emit fallback photos_ready/viewer_photos_ready falhou: ' + (e.message||e)); }
       }
 
-      // craft visualizador URL (pointing to visualizador.html?session=viewerIdLocal)
       const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
 
-      // Ask server (and consequently celular) to show the visualizer QR/iframe immediately
       try {
         socket.emit('show_qr_on_viewer', { session: FIXED_SESSION, viewerId: viewerIdLocal, visualizadorUrl, qrUrl: visualizadorUrl });
         log('📲 Solicitação de envio do QR ao celular emitida (show_qr_on_viewer).');
       } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
 
-      // also show on operator UI
       showVisualizadorQr(visualizadorUrl);
 
       genVisualizadorQrBtn.disabled = false;
       printBtn.disabled = !currentPrintMontageDataUrl && !printMontage;
 
-      addToViewerHistory(viewerIdLocal, uploadedPhotos.length || photos.length);
+      addToViewerHistory(viewerIdLocal, (IMGBB_KEY ? (uploadedPhotos.length || photos.length) : photos.length));
       log('🎉 Visualizador criado automaticamente. viewerId: ' + viewerIdLocal);
     } catch(e){
       log('❌ ERRO no processo auto: ' + (e.message || e));
@@ -692,7 +732,7 @@
   }
 
   // -----------------------
-  // PROCESS BOOMERANG (video) AND PUBLISH
+  // BOOMERANG / HISTORY / WEBCAM / STREAM (mantidos)
   // -----------------------
   async function processBoomerangAndPublish(videoUrlOrData, viewerId){
     try {
@@ -729,9 +769,6 @@
     v.play().catch(()=>{});
   }
 
-  // -----------------------
-  // HISTORY
-  // -----------------------
   function addToViewerHistory(id, photosCount){
     viewerHistory.unshift({ id, timestamp: new Date().toLocaleString(), photosCount });
     updateViewerHistory();
@@ -746,9 +783,6 @@
     });
   }
 
-  // -----------------------
-  // WEBCAM (optional for operator)
-  // -----------------------
   async function startWebcam(){
     try {
       localStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
@@ -805,9 +839,6 @@
     }
   }
 
-  // -----------------------
-  // STREAM
-  // -----------------------
   function startStreamingToSession(session){
     if(!localStream){ log('⚠️ Webcam não iniciada'); return; }
     const fps = 18;
@@ -842,13 +873,10 @@
     startStreamBtn.disabled = false;
   }
 
-  // -----------------------
-  // UTIL sleep
-  // -----------------------
   function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
   // -----------------------
-  // PRINT BUTTON
+  // PRINT BUTTON (mantido)
   // -----------------------
   printBtn.addEventListener('click', async () => {
     try {
@@ -914,7 +942,6 @@
     await processPhotosAndUpload(lastPhotos, null);
   });
 
-  // webcam buttons
   startWebcamBtn.addEventListener('click', async () => { try { await startWebcam(); } catch(e){} });
   stopWebcamBtn.addEventListener('click', stopWebcam);
   startStreamBtn.addEventListener('click', () => startStreamingToSession(streamSelect.value || FIXED_SESSION));
