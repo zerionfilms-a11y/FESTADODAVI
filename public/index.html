@@ -114,17 +114,14 @@
   <div id="log"></div>
 
 <script>
-/*
-  Nota importante: o IIFE abaixo foi convertido para async IIFE para evitar
-  o erro "await is only valid in async functions..." que você relatou.
-*/
-(async function(){
+(async function(){ // async IIFE - permite usar await livremente
+
   // -----------------------
   // CONFIG
   // -----------------------
   const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
   const FIXED_SESSION = "cabine-fixa";
-  const IMGBB_KEY = "fc52605669365cdf28ea379d10f2a341"; // if set, operator uploads directly; otherwise server will upload
+  const IMGBB_KEY = "fc52605669365cdf28ea379d10f2a341"; // se estiver vazio, servidor fará upload
   const STORIES_TEMPLATE = "storiesdavi.png";
   const PRINT_TEMPLATE = "imprimirdavi.png";
   const FRAME_OVERLAY = "moldura.png";
@@ -162,7 +159,10 @@
   let currentPrintMontageDataUrl = null;
   let currentBoomerangUrl = null;
 
-  const pendingBySession = {};
+  // pendingVisualizers: quando server envia fotos antes das montagens, guardamos o payload aqui e processamos depois
+  const pendingVisualizers = {}; // viewerId => { session, uploadedPhotos, payload }
+
+  const pendingBySession = {}; // batch aggregator as before
 
   // -----------------------
   // UTIL / LOG
@@ -179,27 +179,49 @@
   }
 
   // -----------------------
+  // IMGBB upload util (client-side optional)
+  // -----------------------
+  async function uploadToImgbb(dataUrl, name = 'cabine_photo') {
+    if (!IMGBB_KEY) {
+      log('ℹ️ IMGBB_KEY não configurada no index — retornando null (o servidor fará upload).');
+      return null;
+    }
+    try {
+      const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+      const form = new FormData();
+      form.append('key', IMGBB_KEY);
+      form.append('image', base64);
+      form.append('name', name);
+      const controller = new AbortController();
+      const id = setTimeout(()=>controller.abort(), UPLOAD_TIMEOUT_MS);
+      const res = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form, signal: controller.signal });
+      clearTimeout(id);
+      const json = await res.json();
+      if (json && json.success && json.data && (json.data.url || json.data.display_url)) {
+        return json.data.display_url || json.data.url;
+      }
+      throw new Error('IMGBB upload failed: ' + JSON.stringify(json));
+    } catch(e){
+      log('❌ Falha upload IMGBB: ' + (e.message || e));
+      return null;
+    }
+  }
+
+  // -----------------------
   // SOCKET INIT
   // -----------------------
   function initSocket(){
     if (socket && socket.connected) return;
     log('📡 Inicializando socket para ' + SERVER_URL);
 
-    // try to be robust vs CORS/proxy: pass transports and path explicitly
-    try {
-      socket = io(SERVER_URL, {
-        transports: ['websocket','polling'],
-        reconnection: true,
-        reconnectionAttempts: 20,
-        reconnectionDelay: 2000,
-        timeout: 20000,
-        path: '/socket.io'
-      });
-    } catch(e){
-      log('❌ Erro iniciando io(): ' + (e && e.message ? e.message : e));
-      setStatus('⚠️ Falha ao iniciar socket', null);
-      return;
-    }
+    socket = io(SERVER_URL, {
+      transports: ['websocket','polling'],
+      reconnection: true,
+      reconnectionAttempts: 20,
+      reconnectionDelay: 2000,
+      timeout: 20000,
+      path: '/socket.io'
+    });
 
     socket.on('connect', () => {
       log('✅ Conectado ao servidor: ' + SERVER_URL + ' (id: ' + socket.id + ')');
@@ -225,52 +247,83 @@
       setStatus('⚠️ Erro de conexão', null);
     });
 
-    function onPhotosReceived(payload){
-      if(!payload) return;
-      const sess = payload.session || FIXED_SESSION;
-      const photos = Array.isArray(payload.photos) ? payload.photos
-                    : Array.isArray(payload.uploaded) ? payload.uploaded
-                    : Array.isArray(payload.photosArray) ? payload.photosArray
-                    : null;
-      const viewerId = payload.viewerId || payload.viewer || null;
-      log('📥 Fotos recebidas (via socket) — session:' + sess + ' viewer:' + (viewerId || '—') + ' count:' + (photos ? photos.length : 'n/a'));
-      if (photos && photos.length) {
-        if (photos.length >= 3) {
-          processPhotosAndUpload(photos.slice(0,3), viewerId).catch(e => log('❌ processPhotosAndUpload error: ' + (e.message||e)));
+    // IMPORTANT: handle photos_ready in a way that never creates visualizador before montages
+    socket.on('photos_ready', async (payload) => {
+      try {
+        // payload might be { session, uploaded: [urls], visualizadorUrl, storiesUrl, printUrl, viewerId }
+        log('📥 photos_ready recebido (uploaded:' + (payload && Array.isArray(payload.uploaded) ? payload.uploaded.length : 0) + ')');
+
+        const session = payload.session || FIXED_SESSION;
+        const uploaded = Array.isArray(payload.uploaded) ? payload.uploaded.slice(0,3) : null;
+        const viewerId = payload.viewerId || payload.viewer || null;
+        const serverStoriesUrl = payload.storiesUrl || payload.storiesMontage || null;
+        const serverPrintUrl = payload.printUrl || payload.print || null;
+
+        if (uploaded && uploaded.length) {
+          // update local thumbs
+          lastPhotos = uploaded.slice(0,3);
+          renderThumbs();
+
+          // If server already provided storiesUrl -> show it
+          if (serverStoriesUrl) {
+            log('ℹ️ Stories URL já fornecido pelo servidor: ' + serverStoriesUrl);
+            // show visualizador (server already has final URLs)
+            const visualizadorUrl = payload.visualizadorUrl || `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerId || (FIXED_SESSION+':'+Date.now()))}`;
+            showVisualizadorQr(visualizadorUrl);
+            addToViewerHistory(viewerId || visualizadorUrl, uploaded.length);
+            return;
+          }
+
+          // If server did NOT provide stories, we must generate montages and upload them BEFORE creating/confirming visualizador.
+          // store pending and process
+          if (!viewerId) {
+            // create a local viewerId placeholder to track; prefer server to assign but we can reuse session+timestamp
+            const provisionalId = FIXED_SESSION + ':' + Date.now();
+            pendingVisualizers[provisionalId] = { session, uploadedPhotos: uploaded, payload, viewerId: provisionalId };
+            processPendingViewer(provisionalId).catch(e => log('❌ processPendingViewer error: ' + e));
+          } else {
+            pendingVisualizers[viewerId] = { session, uploadedPhotos: uploaded, payload, viewerId };
+            processPendingViewer(viewerId).catch(e => log('❌ processPendingViewer error: ' + e));
+          }
         } else {
-          appendToPendingAndMaybeProcess(sess, photos, viewerId);
+          // Nothing to do; maybe payload only had visualizadorUrl (rare). If there's a visualizadorUrl ensure we don't show until we have story montages locally if possible.
+          if (payload.visualizadorUrl) {
+            // Wait a tick to see if we have montages; if not, show (but this should be rare)
+            setTimeout(() => {
+              if (!currentStoriesMontageDataUrl) {
+                showVisualizadorQr(normalizeVisualizerUrl(payload.visualizadorUrl));
+              } else {
+                // prefer local montage -> upload and re-emit to server (handled elsewhere)
+              }
+            }, 400);
+          }
         }
-      } else {
-        if (payload.visualizadorUrl) {
-          showVisualizadorQr(normalizeVisualizerUrl(payload.visualizadorUrl));
-        }
-      }
-    }
-
-    socket.on('photos_from_cell', onPhotosReceived);
-    socket.on('photos_submit', onPhotosReceived);
-    socket.on('photos_submit_saved', onPhotosReceived);
-
-    socket.on('photos_ready', ({ session, uploaded, visualizadorUrl, storiesUrl, printUrl }) => {
-      log('📥 photos_ready recebido (uploaded:' + (uploaded ? uploaded.length : 0) + ')');
-      if (uploaded && uploaded.length) {
-        lastPhotos = uploaded.slice(0,3);
-        renderThumbs();
-      }
-      if (visualizadorUrl) {
-        const normalized = normalizeVisualizerUrl(visualizadorUrl);
-        showVisualizadorQr(normalized);
-      }
-      if (storiesUrl) log('✅ Stories montage available: ' + storiesUrl);
+      } catch(e){ log('❌ photos_ready handler error: ' + (e.message || e)); }
     });
 
-    socket.on('viewer_photos_ready', ({ session, photos, storiesMontage, print, visualizadorUrl }) => {
-      log('📡 viewer_photos_ready recebido (session:' + session + ')');
-      if (Array.isArray(photos) && photos.length) {
-        lastPhotos = photos.slice(0,3);
-        renderThumbs();
-      }
-      if (visualizadorUrl) showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+    // viewer_photos_ready: if server sends final viewer payload, still avoid showing visualizer prematurely if we can generate local montage
+    socket.on('viewer_photos_ready', async ({ session, photos, storiesMontage, print, visualizadorUrl, viewerId }) => {
+      try {
+        log('📡 viewer_photos_ready recebido (session:' + session + ')');
+        if (Array.isArray(photos) && photos.length) {
+          lastPhotos = photos.slice(0,3);
+          renderThumbs();
+        }
+        // If visualizadorUrl present and server included storiesMontage -> safe to show.
+        if (visualizadorUrl && (storiesMontage || print || currentStoriesMontageDataUrl)) {
+          showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+        } else if (viewerId && !visualizadorUrl) {
+          // server gave viewerId, but not visualizadorUrl -> process pending to ensure montage uploaded and viewer updated
+          pendingVisualizers[viewerId] = { session, uploadedPhotos: photos || lastPhotos, payload: { viewerId }, viewerId };
+          processPendingViewer(viewerId).catch(e => log('❌ processPendingViewer error (viewer_photos_ready): ' + e));
+        }
+      } catch(e){ log('❌ viewer_photos_ready handler error: ' + (e.message || e)); }
+    });
+
+    socket.on('viewer_session_created', ({ viewerId }) => {
+      log('🎉 Sessão do visualizador criada no servidor: ' + viewerId);
+      addToViewerHistory(viewerId, lastPhotos.length);
+      // Do NOT automatically show visualizador here — photos_ready/viewer_photos_ready flow will take care of showing AFTER montages.
     });
 
     socket.on('boomerang_ready', ({ session, videoUrl, visualizadorUrl }) => {
@@ -278,32 +331,82 @@
       currentBoomerangUrl = videoUrl || null;
       renderBoomerangPreview(currentBoomerangUrl);
       if (visualizadorUrl) {
-        showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+        // only show if server claims it's final and we already have stories (safe)
+        if (currentStoriesMontageDataUrl || visualizadorUrl.indexOf('visualizador.html')!==-1) showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
       }
     });
 
-    socket.on('viewer_session_created', ({ viewerId }) => {
-      log('🎉 Sessão do visualizador criada no servidor: ' + viewerId);
-      addToViewerHistory(viewerId, lastPhotos.length);
+    socket.on('viewer_session_error', ({ error }) => {
+      log('❌ viewer_session_error: ' + error);
     });
 
-    socket.on('reset_session', ({ session }) => {
-      log('🔁 reset_session recebido para ' + session);
-      lastPhotos = [];
-      renderThumbs();
-      clearCanvases();
-      qrcodeVisualizadorEl.innerHTML = '';
-      genVisualizadorQrBtn.disabled = true;
-      printBtn.disabled = true;
-    });
-
-    socket.on('stream_frame', ({ session, frame }) => {
-      log('🔁 stream_frame relay recebido (len=' + (frame ? frame.length : 0) + ')');
-    });
   } // initSocket
 
   // -----------------------
-  // PENDING BATCH MANAGEMENT
+  // processPendingViewer
+  // Ensure montage generated & uploaded BEFORE create_viewer_session / show_qr_on_viewer
+  // -----------------------
+  async function processPendingViewer(viewerKey){
+    const entry = pendingVisualizers[viewerKey];
+    if (!entry) return;
+    const { session, uploadedPhotos } = entry;
+    log(`⏳ processPendingViewer: garantindo geração local da montagem antes de mostrar visualizador... (viewer=${viewerKey})`);
+
+    try {
+      // draw local montages from uploaded photos (they might be remote URLs)
+      const storiesDataUrl = await drawStories(uploadedPhotos);
+      const printDataUrl = await drawPrint(uploadedPhotos);
+
+      // prefer client-side upload to IMGBB if we have key
+      let storiesUrl = null;
+      let printUrl = null;
+
+      if (IMGBB_KEY && storiesDataUrl) {
+        log('⏫ Upload montagem (operador) para IMGBB (stories)...');
+        storiesUrl = await uploadToImgbb(storiesDataUrl, `cabine_stories_${Date.now()}`);
+        log('⏫ stories upload (operador) -> ' + (storiesUrl || 'FALHOU'));
+      }
+
+      if (IMGBB_KEY && printDataUrl) {
+        log('⏫ Upload montagem (operador) para IMGBB (print)...');
+        printUrl = await uploadToImgbb(printDataUrl, `cabine_print_${Date.now()}`);
+        log('⏫ print upload (operador) -> ' + (printUrl || 'FALHOU'));
+      }
+
+      // If we uploaded to IMGBB, update server by emitting create_viewer_session with uploaded photo URLs + storiesUrl
+      // If IMGBB_KEY not set or upload failed, fallback to sending dataURLs to server and let server do uploads.
+      const photosToSend = uploadedPhotos.map(p => p); // usually remote URLs
+      const payload = {
+        session: session || FIXED_SESSION,
+        viewerId: viewerKey,
+        photos: photosToSend,
+        storiesMontage: storiesUrl || storiesDataUrl || null,
+        print: printUrl || printDataUrl || null
+      };
+
+      log('🔁 Enviando create_viewer_session final ao servidor com stories montado (viewer=' + viewerKey + ')');
+      socket.emit('create_viewer_session', payload);
+
+      // After creating, ask server to push QR to cellphone / viewer
+      const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerKey)}`;
+      try {
+        socket.emit('show_qr_on_viewer', { session: session || FIXED_SESSION, viewerId: viewerKey, visualizadorUrl, qrUrl: storiesUrl || visualizadorUrl });
+        log('📲 show_qr_on_viewer emitido (viewer=' + viewerKey + ')');
+      } catch(e){ log('⚠️ emit show_qr_on_viewer falhou: ' + (e.message||e)); }
+
+      // Update operator UI
+      showVisualizadorQr(visualizadorUrl);
+      addToViewerHistory(viewerKey, photosToSend.length);
+      // cleanup pending
+      delete pendingVisualizers[viewerKey];
+      log('🎉 Visualizador criado (após montagem) e QR enviado: ' + visualizadorUrl);
+    } catch(e){
+      log('❌ processPendingViewer error: ' + (e.message || e));
+    }
+  }
+
+  // -----------------------
+  // PENDING BATCH MANAGEMENT (unchanged)
   // -----------------------
   function appendToPendingAndMaybeProcess(session, photosArray, viewerId) {
     if (!pendingBySession[session]) pendingBySession[session] = { photos: [], timer: null, viewerId: viewerId || null };
@@ -577,36 +680,8 @@
   }
 
   // -----------------------
-  // IMGBB upload util (client-side optional)
-  // -----------------------
-  async function uploadToImgbb(dataUrl, name = 'cabine_photo') {
-    if (!IMGBB_KEY) {
-      log('ℹ️ IMGBB_KEY não configurada no index — pulando upload local (use server para upload).');
-      return null;
-    }
-    try {
-      const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
-      const form = new FormData();
-      form.append('key', IMGBB_KEY);
-      form.append('image', base64);
-      form.append('name', name);
-      const controller = new AbortController();
-      const id = setTimeout(()=>controller.abort(), UPLOAD_TIMEOUT_MS);
-      const res = await fetch('https://api.imgbb.com/1/upload', { method: 'POST', body: form, signal: controller.signal });
-      clearTimeout(id);
-      const json = await res.json();
-      if (json && json.success && json.data && (json.data.url || json.data.display_url)) {
-        return json.data.display_url || json.data.url;
-      }
-      throw new Error('IMGBB upload failed: ' + JSON.stringify(json));
-    } catch(e){
-      log('❌ Falha upload IMGBB: ' + (e.message || e));
-      return null;
-    }
-  }
-
-  // -----------------------
-  // PROCESS PHOTOS / PUBLISH VISUALIZADOR (AUTO) — updated ordering & waits
+  // PROCESS PHOTOS / PUBLISH VISUALIZADOR (manual flow / operator click)
+  // This flow already waited for montages before uploading/creating visualizer.
   // -----------------------
   async function processPhotosAndUpload(photosArray, viewerId){
     try {
@@ -620,7 +695,6 @@
       const storiesDataUrl = await drawStories(photos);
       const printDataUrl = await drawPrint(photos);
 
-      // now we have currentStoriesMontageDataUrl and currentPrintMontageDataUrl
       const storiesMontage = storiesDataUrl || currentStoriesMontageDataUrl || null;
       const printMontage = printDataUrl || currentPrintMontageDataUrl || null;
 
@@ -657,7 +731,8 @@
           session: FIXED_SESSION,
           photos: uploadedPhotos,
           storiesMontage: storiesUrl || storiesMontage,
-          print: printUrl || printMontage
+          print: printUrl || printMontage,
+          viewerId: viewerIdLocal
         });
         log('✅ create_viewer_session emitido (com URLs IMGBB).');
 
@@ -682,17 +757,14 @@
           session: FIXED_SESSION,
           photos: photos, // dataURLs
           storiesMontage: storiesMontage || null,
-          print: printMontage || null
+          print: printMontage || null,
+          viewerId: viewerIdLocal
         });
         log('🔁 Fotos brutas e montagens enviadas ao servidor para processamento (server fará upload).');
 
-        // show operator UI link (but do NOT send show_qr_on_viewer yet — server will send to cellphone when upload done)
-        const visualizadorUrl = `${SERVER_URL.replace(/\/+$/,'')}/visualizador.html?session=${encodeURIComponent(viewerIdLocal)}`;
-        showVisualizadorQr(visualizadorUrl);
-        genVisualizadorQrBtn.disabled = false;
-        printBtn.disabled = false;
+        // Do NOT show visualizador preview until server responds with final URLs (photos_ready/viewer_photos_ready)
         addToViewerHistory(viewerIdLocal, photos.length);
-        log('🎉 Visualizador (preview) criado localmente — servidor enviará QR ao celular quando terminar upload.');
+        log('🎉 Visualizador solicitado ao servidor — aguardando conclusão do upload para mostrar QR.');
       }
     } catch(e){
       log('❌ ERRO no processo auto: ' + (e.message || e));
@@ -701,7 +773,7 @@
   }
 
   // -----------------------
-  // BOOMERANG / HISTORY / WEBCAM / STREAM / PRINT
+  // BOOMERANG / HISTORY / WEBCAM / STREAM / PRINT (kept)
   // -----------------------
   async function processBoomerangAndPublish(videoUrlOrData, viewerId){
     try {
@@ -935,7 +1007,7 @@
     }
   };
 
-})(); // async IIFE end
+})(); // end async IIFE
 </script>
 </body>
 </html>
