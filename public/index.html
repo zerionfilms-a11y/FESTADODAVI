@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="icon" href="/favicon.ico">
 
-  <!-- dependências -->
+  <!-- Socket.io + QRCode (CDN) + jsPDF -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
@@ -118,7 +118,7 @@
   // -----------------------
   // CONFIG
   // -----------------------
-  var SERVER_URL = 'https://festadodavi-production-0591.up.railway.app'; // verifique se está correto
+  var SERVER_URL = 'https://festadodavi-production-0591.up.railway.app';
   var FIXED_SESSION = 'cabine-fixa';
   var STORIES_TEMPLATE = 'storiesdavi.png';
   var PRINT_TEMPLATE = 'imprimirdavi.png';
@@ -216,82 +216,88 @@
       setStatus('⚠️ Erro de conexão', null);
     });
 
-    function onPhotosReceived(payload){
-      if(!payload) return;
-      var sess = payload.session || FIXED_SESSION;
-      var photos = Array.isArray(payload.photos) ? payload.photos
-                    : Array.isArray(payload.uploaded) ? payload.uploaded
-                    : Array.isArray(payload.photosArray) ? payload.photosArray
-                    : null;
-      var viewerId = payload.viewerId || payload.viewer || null;
-      log('📥 Fotos recebidas (via socket) — session:' + sess + ' viewer:' + (viewerId || '—') + ' count:' + (photos ? photos.length : 'n/a'));
-      if (photos && photos.length) {
-        if (photos.length >= 3) {
-          processPhotosAndUpload(photos.slice(0,3), viewerId).catch(function(e){ log('❌ processPhotosAndUpload error: ' + (e.message||e)); });
+    // central async handler that ensures montages are ready before showing visualizador
+    async function handleIncomingServerPhotos(obj){
+      try {
+        var session = obj.session;
+        var uploaded = obj.uploaded || obj.photos || obj.photosArray || null;
+        var visualizadorUrl = obj.visualizadorUrl || obj.visualizador || null;
+        var storiesUrl = obj.storiesUrl || obj.storiesMontage || obj.stories || null;
+        var printUrl = obj.print || obj.printUrl || null;
+
+        log('📥 handleIncomingServerPhotos (session:' + (session||'—') + ')');
+
+        // update lastPhotos if provided
+        if (Array.isArray(uploaded) && uploaded.length) {
+          lastPhotos = uploaded.slice(0,3);
+          renderThumbs();
+        }
+
+        // 1) if server provided a remote storiesUrl, try to fetch & render it first
+        if (storiesUrl && typeof storiesUrl === 'string' && /^https?:\/\//i.test(storiesUrl)) {
+          log('⏬ storiesUrl fornecido pelo servidor, baixando e desenhando antes de mostrar visualizador...');
+          try {
+            await displayStoriesFromUrl(storiesUrl);
+            currentStoriesMontageDataUrl = storiesUrl;
+            log('✅ stories remoto desenhado com sucesso');
+          } catch(e){
+            log('⚠️ Falha ao desenhar stories remoto: ' + e);
+            // fallback: try to generate locally from photos
+            await drawStories(lastPhotos).catch(function(e){ log('⚠️ drawStories fallback falhou: ' + e); });
+          }
         } else {
-          appendToPendingAndMaybeProcess(sess, photos, viewerId);
+          // 2) no stories remoto — generate locally (ensure canvases are ready)
+          log('⏳ Garantindo geração local da montagem stories antes de mostrar visualizador...');
+          await drawStories(lastPhotos).catch(function(e){ log('⚠️ drawStories local falhou: ' + e); });
         }
-      } else {
-        if (payload.visualizadorUrl) {
-          showVisualizadorQr(normalizeVisualizerUrl(payload.visualizadorUrl));
+
+        // Ensure print montage too
+        if (printUrl && typeof printUrl === 'string' && /^https?:\/\//i.test(printUrl)) {
+          currentPrintMontageDataUrl = printUrl;
+          printBtn.disabled = false;
+          log('✅ print remote disponível: ' + printUrl);
+        } else {
+          await drawPrint(lastPhotos).catch(function(e){ log('⚠️ drawPrint local falhou: ' + e); });
         }
+
+        // Only now show visualizador (if provided), otherwise wait for server to send it
+        if (visualizadorUrl && typeof visualizadorUrl === 'string') {
+          log('✅ Mostrando visualizador somente após montagens estarem prontas: ' + visualizadorUrl);
+          showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+        } else {
+          log('ℹ️ Nenhum visualizadorUrl fornecido ainda — aguardando servidor (ou crie manualmente).');
+        }
+
+      } catch(e){
+        log('❌ handleIncomingServerPhotos error: ' + (e && e.message ? e.message : e));
       }
     }
 
-    socket.on('photos_from_cell', onPhotosReceived);
-    socket.on('photos_submit', onPhotosReceived);
-    socket.on('photos_submit_saved', onPhotosReceived);
+    // wire socket events to the centralized handler
+    socket.on('photos_from_cell', function(payload){ handleIncomingServerPhotos(payload).catch(function(e){ log('❌ photos_from_cell handler error: ' + e); }); });
+    socket.on('photos_submit', function(payload){ handleIncomingServerPhotos(payload).catch(function(e){ log('❌ photos_submit handler error: ' + e); }); });
+    socket.on('photos_submit_saved', function(payload){ handleIncomingServerPhotos(payload).catch(function(e){ log('❌ photos_submit_saved handler error: ' + e); }); });
 
-    socket.on('photos_ready', function(obj){
-      var session = obj.session, uploaded = obj.uploaded, visualizadorUrl = obj.visualizadorUrl, storiesUrl = obj.storiesUrl, printUrl = obj.printUrl;
-      log('📥 photos_ready recebido (uploaded:' + (uploaded ? uploaded.length : 0) + ')');
-      if (uploaded && uploaded.length) {
-        lastPhotos = uploaded.slice(0,3);
-        renderThumbs();
-      }
-      if (visualizadorUrl) {
-        var normalized = normalizeVisualizerUrl(visualizadorUrl);
-        showVisualizadorQr(normalized);
-      }
-      if (storiesUrl) {
-        log('✅ Stories montage available: ' + storiesUrl);
-        displayStoriesFromUrl(storiesUrl).catch(function(e){ log('❌ displayStoriesFromUrl error: ' + (e.message||e)); });
-      }
-      if (printUrl) {
-        currentPrintMontageDataUrl = printUrl;
-        printBtn.disabled = false;
-        log('✅ Print montage available: ' + printUrl);
-      }
-    });
+    socket.on('photos_ready', function(payload){ handleIncomingServerPhotos(payload).catch(function(e){ log('❌ photos_ready handler error: ' + e); }); });
 
-    socket.on('viewer_photos_ready', function(obj){
-      var session = obj.session, photos = obj.photos, storiesMontage = obj.storiesMontage, print = obj.print, visualizadorUrl = obj.visualizadorUrl;
-      log('📡 viewer_photos_ready recebido (session:' + session + ')');
-      if (Array.isArray(photos) && photos.length) {
-        lastPhotos = photos.slice(0,3);
-        renderThumbs();
-      }
-      if (visualizadorUrl) showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
-      if (storiesMontage) {
-        log('✅ viewer_photos_ready traz storiesMontage: ' + storiesMontage);
-        displayStoriesFromUrl(storiesMontage).catch(function(e){ log('❌ displayStoriesFromUrl error: ' + (e.message||e)); });
-      }
-      if (print) {
-        currentPrintMontageDataUrl = print;
-        printBtn.disabled = false;
-      }
-    });
+    socket.on('viewer_photos_ready', function(payload){ handleIncomingServerPhotos(payload).catch(function(e){ log('❌ viewer_photos_ready handler error: ' + e); }); });
 
+    // boomerang: keep existing behavior (preview + show visualizador if present)
     socket.on('boomerang_ready', function(obj){
       var session = obj.session, videoUrl = obj.videoUrl, visualizadorUrl = obj.visualizadorUrl;
       log('🎞 boomerang_ready recebido (viewer:' + (session||'—') + ')');
       currentBoomerangUrl = videoUrl || null;
       renderBoomerangPreview(currentBoomerangUrl);
       if (visualizadorUrl) {
-        showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+        // ensure montages drawn before show (try to draw local if needed)
+        (async function(){
+          await drawStories(lastPhotos).catch(function(){});
+          showVisualizadorQr(normalizeVisualizerUrl(visualizadorUrl));
+        })();
       }
     });
 
+    // viewer_session_created: don't show visualizador here (server will send photos_ready later)
     socket.on('viewer_session_created', function(obj){
       var viewerId = obj.viewerId;
       log('🎉 Sessão do visualizador criada no servidor: ' + viewerId);
@@ -394,6 +400,7 @@
       var img = document.createElement('img'); img.src = p; img.alt = 'foto-' + (idx+1);
       thumbsEl.appendChild(img);
     });
+    // draws will be awaited by upload flow or handlers when needed
     drawStories(lastPhotos).catch(function(){});
     drawPrint(lastPhotos).catch(function(){});
   }
@@ -660,8 +667,8 @@
       } catch(e){ log('⚠️ Falha ao emitir create_viewer_session: ' + e); }
 
       var visualizadorUrl = SERVER_URL.replace(/\/+$/,'') + '/visualizador.html?session=' + encodeURIComponent(viewerIdLocal);
-      showVisualizadorQr(visualizadorUrl);
 
+      // ensure remote montage shown before we present visualizador
       if (remoteMontage && /^https?:\/\//i.test(remoteMontage)) {
         try { await displayStoriesFromUrl(remoteMontage); } catch(e) { log('⚠️ displayStoriesFromUrl fail: ' + e); }
       } else if (remoteMontage && remoteMontage.indexOf('data:') === 0) {
@@ -671,6 +678,7 @@
       currentPrintMontageDataUrl = remotePrint || currentPrintMontageDataUrl;
       if (currentPrintMontageDataUrl) printBtn.disabled = false;
 
+      showVisualizadorQr(visualizadorUrl);
       genVisualizadorQrBtn.disabled = false;
       addToViewerHistory(viewerIdLocal, remotePhotos.length || photos.length);
       log('🎉 Visualizador criado e enviado: ' + visualizadorUrl);
