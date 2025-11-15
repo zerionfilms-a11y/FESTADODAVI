@@ -144,7 +144,7 @@
 
   <script>
     /* ---------- Config ---------- */
-    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
+    const SERVER_URL = "https://festadodavi.onrender.com";
     const MAX_PHOTOS = 3;
     const COUNTDOWN_SECONDS = 5;
     const MAX_SEND_WIDTH = 1280; // resize before sending to reduce upload time
@@ -258,10 +258,17 @@
       canvasEl.width = targetW; canvasEl.height = targetH;
       const ctx = canvasEl.getContext('2d');
       ctx.clearRect(0,0,targetW,targetH);
-      ctx.save();
-      ctx.translate(targetW,0); ctx.scale(-1,1);
+
+      // --- CORREÇÃO AQUI ---
+      // Removido espelhamento (translate + scale) para que a foto salva tenha a mesma orientação que o vídeo visto no preview.
+      // Antes:
+      // ctx.save();
+      // ctx.translate(targetW,0); ctx.scale(-1,1);
+      // ctx.drawImage(videoEl, 0, 0, targetW, targetH);
+      // ctx.restore();
+      // Agora:
       ctx.drawImage(videoEl, 0, 0, targetW, targetH);
-      ctx.restore();
+
       return canvasEl.toDataURL('image/jpeg', quality);
     }
 
