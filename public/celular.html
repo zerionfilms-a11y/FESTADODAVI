@@ -246,8 +246,8 @@
 
     // grab and compress/rescale frame for faster transfer
     function grabFrameDataURL(quality=SEND_QUALITY, maxWidth=MAX_SEND_WIDTH){
-      const vw = videoEl.videoWidth || 1280;
-      const vh = videoEl.videoHeight || 720;
+      const vw = videoEl.videoWidth || 3264;
+      const vh = videoEl.videoHeight || 1836;
       let targetW = vw, targetH = vh;
       if (vw > maxWidth) {
         targetW = maxWidth;
