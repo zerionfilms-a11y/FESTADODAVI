@@ -40,8 +40,8 @@
     #startBtn .label{ pointer-events:none }
 
     /* Video & canvas */
-    /* agora: DEFAULT está espelhado horizontalmente (scaleX(-1)) */
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5;transform:scaleX(-1)}
+    /* NOTE: agora usamos flag MIRROR_PREVIEW pra controlar espelhamento; css default sem espelhamento */
+    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5}
     #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:6}
     #progress{position:fixed;left:50%;transform:translateX(-50%);top:18px;padding:8px 12px;border-radius:10px;background:rgba(0,0,0,0.55);font-weight:700;z-index:200}
     #countdown{position:fixed;left:50%;transform:translateX(-50%);top:28%;font-size:120px;font-weight:900;text-shadow:0 0 20px #000;color:#fff;z-index:201}
@@ -155,6 +155,10 @@
     const MAX_SEND_WIDTH = 1280; // resize before sending to reduce upload time
     const SEND_QUALITY = 0.78; // jpeg quality for faster transfers
 
+    // control preview/capture mirroring:
+    // set to true if you want the preview mirrored (user sees mirror). You asked to invert to the other side:
+    const MIRROR_PREVIEW = false;
+
     /* ---------- Socket ---------- */
     const socket = io(SERVER_URL, {
       transports: ["websocket","polling"],
@@ -200,10 +204,9 @@
     let isCapturing = false;
     let visualizerLocked = false;
 
-    // pendingVisualizerUrl: guardamos a URL que o index passou (se passou), MAS
-    // o celular só "ativa" o visualizador/click quando receber também o qrImage.
+    // pending visualizer (URL) and current active visualizer (only set when qr image arrives)
     let pendingVisualizerUrl = null;
-    let currentVisualizerUrl = null; // só setado quando o servidor envia também o qr image
+    let currentVisualizerUrl = null;
 
     /* debug */
     setInterval(() => {
@@ -237,8 +240,8 @@
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         videoEl.srcObject = stream;
         videoEl.style.display = 'block';
-        // <-- ESPALHAMENTO: agora espelhado (scaleX(-1)) — conforme pedido "inverter a câmera"
-        videoEl.style.transform = 'scaleX(-1)';
+        // apply preview transform only if MIRROR_PREVIEW true
+        videoEl.style.transform = MIRROR_PREVIEW ? 'scaleX(-1)' : 'scaleX(1)';
         await videoEl.play().catch(()=>{});
         await new Promise(r=>setTimeout(r,100));
       }catch(err){
@@ -269,13 +272,17 @@
       const ctx = canvasEl.getContext('2d');
       ctx.clearRect(0,0,targetW,targetH);
 
-      // <-- desenhar espelhado (pra manter pré-visualização igual ao que o usuário enxerga)
-      ctx.save();
-      ctx.translate(targetW, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoEl, 0, 0, targetW, targetH);
-      ctx.restore();
-
+      if (MIRROR_PREVIEW) {
+        // mirror draw so captured image matches preview
+        ctx.save();
+        ctx.translate(targetW, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(videoEl, 0, 0, targetW, targetH);
+        ctx.restore();
+      } else {
+        // normal draw
+        ctx.drawImage(videoEl, 0, 0, targetW, targetH);
+      }
       return canvasEl.toDataURL('image/jpeg', quality);
     }
 
@@ -389,9 +396,8 @@
       });
     }
 
-    /* ---------- Visualizer lock flow (sem geração local de QR) ---------- */
+    /* ---------- Visualizer + QR handling (robusto) ---------- */
 
-    // draw qr canvas ONLY if the server provided an image (data: or image URL)
     function drawQrImageOnly(canvas, qrImageUrlOrData) {
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -437,24 +443,24 @@
       visualizerOverlay.style.display = 'flex';
       visualizerOverlay.setAttribute('aria-hidden','false');
 
-      // store pending visualizer url so we know what it is, but DO NOT make it active/clicável until qr image is received
-      pendingVisualizerUrl = visualizerUrl || null;
-      currentVisualizerUrl = null; // será setado SOMENTE quando qr image chegar
+      // store pending visualizer url but only activate when qr image arrives
+      pendingVisualizerUrl = visualizerUrl || pendingVisualizerUrl || null;
+      currentVisualizerUrl = null; // será setado somente quando qr image chegar
 
-      // If server explicitly provided a QR image (qrUrl) — draw it and activate click
       if (qrUrl) {
+        // server provided image -> draw and activate open
         drawQrImageOnly(vizQrCanvas, qrUrl);
-        currentVisualizerUrl = visualizerUrl || qrUrl; // allow click open
+        currentVisualizerUrl = visualizerUrl || qrUrl;
         vizNotice.textContent = 'QR recebido — escaneie ou toque para abrir.';
         vizQR.style.cursor = 'pointer';
       } else {
-        // no qr image provided — show waiting notice; do NOT generate QR locally
+        // no qr image -> show waiting message, do not activate
         drawQrImageOnly(vizQrCanvas, null);
         vizNotice.textContent = 'Aguardando QR do operador...';
         vizQR.style.cursor = 'default';
       }
 
-      // show/hide iframe depending on server instruction and only if showIframe true AND server provided visualizerUrl
+      // iframe only if both showIframe true and a pending visualizer url exists AND qr image arrived (we require qr to be present to show)
       if (showIframe && pendingVisualizerUrl && currentVisualizerUrl) {
         vizIframe.style.display = 'block';
         vizIframe.src = pendingVisualizerUrl;
@@ -471,42 +477,47 @@
       hideProgress();
     }
 
-    // clicking QR opens visualizer only if we have a currentVisualizerUrl (i.e., QR image was provided by server)
+    // open only if currentVisualizerUrl set (i.e., qr image arrived)
     vizQR.addEventListener('click', (ev) => {
-      if (!currentVisualizerUrl) return; // do nothing unless qr image arrived
+      if (!currentVisualizerUrl) return;
       try { window.open(currentVisualizerUrl, '_blank', 'noopener'); } catch(e){}
     });
 
-    // When server later sends the QR image for the existing pending visualizer, this handler activates it.
-    // The server may emit something like { session, qr: 'data:...' , visualizerUrl: '...' } later.
-    socket.on('viewer_qr', (data) => {
-      console.log('socket viewer_qr ->', data);
+    // central handler for QR-like payloads (robustly accept many shapes)
+    function handleIncomingQr(data) {
+      console.log('handleIncomingQr data ->', data);
       if (!data) return;
-      if (data.session && data.session !== session) return;
-
-      // If the server sends a qr image now, draw it and activate the visualizer URL (if any)
-      const qrImage = data.qr || data.qrcode || data.qrUrl || data.qrcode_image || null;
-      const visualizerUrl = data.visualizerUrl || data.visualizadorUrl || data.url || data.visualizador || pendingVisualizerUrl || null;
-
-      if (qrImage) {
-        // draw it and activate click
-        drawQrImageOnly(vizQrCanvas, qrImage);
-        currentVisualizerUrl = visualizerUrl || qrImage;
-        pendingVisualizerUrl = visualizerUrl || pendingVisualizerUrl;
-        vizNotice.textContent = 'QR recebido — escaneie ou toque para abrir.';
-        vizQR.style.cursor = 'pointer';
-        // If server asks to show iframe and provided url, do it
-        if (data.showIframe && visualizerUrl) {
-          vizIframe.style.display = 'block';
-          vizIframe.src = visualizerUrl;
-          vizQR.style.display = 'none';
-        }
-      } else {
-        console.log('viewer_qr arrived but no qr image contained.');
+      if (data.session && data.session !== session) {
+        console.log('incoming QR ignored: session mismatch', data.session, '!=', session);
+        return;
       }
-    });
 
-    /* ---------- Events wiring ---------- */
+      // try many possible field names
+      const qrImage = data.qr || data.qrcode || data.qrUrl || data.qrcode_image || data.qrImage || data.qr_img || data.image || data.qr_data_url || null;
+      const visualizerUrl = data.visualizerUrl || data.visualizadorUrl || data.url || data.visualizador || data.visualizer || data.viewerUrl || null;
+      const showIframe = !!data.showIframe;
+
+      // If an explicit qr image arrived, show overlay with that image (and activate)
+      if (qrImage) {
+        console.log('QR image received for session', session);
+        // show overlay immediately and activate
+        showVisualizerOverlay({ visualizerUrl, qrUrl: qrImage, showIframe });
+        return;
+      }
+
+      // No qr image but maybe visualizerUrl alone — store pending url but do not show or generate QR
+      if (visualizerUrl) {
+        console.log('visualizerUrl received WITHOUT qr image; storing as pending and waiting for qr image.');
+        pendingVisualizerUrl = visualizerUrl;
+        // do not call showVisualizerOverlay here to avoid showing overlay without QR
+        return;
+      }
+
+      console.log('handleIncomingQr: nothing actionable in payload');
+    }
+
+    /* ---------- Events wiring & multi-name listeners ---------- */
+
     enterFsBtn.addEventListener('click', async () => {
       try { await document.documentElement.requestFullscreen(); } catch(e){ console.warn('fullscreen failed', e); }
       if(!visualizerLocked) showScreen(welcomeScreen);
@@ -529,38 +540,15 @@
     });
     socket.on('disconnect', () => { console.log('socket disconnected'); });
 
-    // server instructs show visualizer and lock the cell UI
-    socket.on('visualizer_ready', (data) => {
-      console.log('socket visualizer_ready ->', data);
-      if(!data) return;
-      if(data.session && data.session !== session) return;
-
-      // Accept many possible fields; but DO NOT generate QR from URL.
-      const visualizerUrl = data.visualizerUrl || data.visualizadorUrl || data.url || data.visualizador || null;
-      // qrCandidate must be an actual image (data: or image url). If server only provided a plain URL, we DO NOT generate it here.
-      const qrCandidate = data.qr || data.qrcode || data.qrUrl || data.qrcode_image || null;
-
-      showVisualizerOverlay({ visualizerUrl, qrUrl: qrCandidate, showIframe: data.showIframe });
-    });
-
-    // server may instruct show_qr_on_viewer (index uses this)
-    socket.on('show_qr_on_viewer', (data) => {
-      console.log('socket show_qr_on_viewer ->', data);
-      if(!data) return;
-      if(data.session && data.session !== session) return;
-      const visualizerUrl = data.visualizadorUrl || data.visualizerUrl || data.url || data.visualizador || null;
-      const qrCandidate = data.qr || data.qrcode || data.qrUrl || data.qrcode_image || null;
-      showVisualizerOverlay({ visualizerUrl, qrUrl: qrCandidate, showIframe: data.showIframe });
-    });
-
-    socket.on('show_qr', (data) => {
-      console.log('socket show_qr ->', data);
-      if(!data) return;
-      if(data.session && data.session !== session) return;
-      const visualizerUrl = data.visualizadorUrl || data.url || data.visualizerUrl || null;
-      const qrCandidate = data.qr || data.qrcode || data.qrUrl || null;
-      showVisualizerOverlay({ visualizerUrl, qrUrl: qrCandidate, showIframe: data.showIframe });
-    });
+    // Listen to many variants the server might emit
+    socket.on('visualizer_ready', (d)=> { console.log('evt visualizer_ready', d); handleIncomingQr(d); });
+    socket.on('visualizador_ready', (d)=> { console.log('evt visualizador_ready (pt)', d); handleIncomingQr(d); });
+    socket.on('show_qr_on_viewer', (d)=> { console.log('evt show_qr_on_viewer', d); handleIncomingQr(d); });
+    socket.on('show_qr', (d)=> { console.log('evt show_qr', d); handleIncomingQr(d); });
+    socket.on('viewer_qr', (d)=> { console.log('evt viewer_qr', d); handleIncomingQr(d); });
+    socket.on('viewer_qr_image', (d)=> { console.log('evt viewer_qr_image', d); handleIncomingQr(d); });
+    socket.on('qr_for_cell', (d)=> { console.log('evt qr_for_cell', d); handleIncomingQr(d); });
+    socket.on('qr_image', (d)=> { console.log('evt qr_image', d); handleIncomingQr(d); });
 
     // finalize/reset session — unlock cell
     socket.on('finalize_session', (data) => {
