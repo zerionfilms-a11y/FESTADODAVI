@@ -40,8 +40,8 @@
     #startBtn .label{ pointer-events:none }
 
     /* Video & canvas */
-    /* NOTE: video transform default is no mirror (scaleX(1)) - updated in script */
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5;transform:scaleX(1)}
+    /* agora: DEFAULT está espelhado horizontalmente (scaleX(-1)) */
+    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5;transform:scaleX(-1)}
     #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:6}
     #progress{position:fixed;left:50%;transform:translateX(-50%);top:18px;padding:8px 12px;border-radius:10px;background:rgba(0,0,0,0.55);font-weight:700;z-index:200}
     #countdown{position:fixed;left:50%;transform:translateX(-50%);top:28%;font-size:120px;font-weight:900;text-shadow:0 0 20px #000;color:#fff;z-index:201}
@@ -62,9 +62,9 @@
     #vizContainer{width:100%;max-width:920px;height:70vh;background:#111;border-radius:12px;display:flex;align-items:center;justify-content:center;position:relative;padding:18px;flex-direction:column}
     #vizIframe{width:100%;height:100%;border:0;border-radius:8px;background:#000;display:none}
     /* QR centered and larger */
-    #vizQR{width:320px;height:320px;background:#fff;padding:8px;border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+    #vizQR{width:320px;height:320px;background:#fff;padding:8px;border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:default}
     #vizQrCanvas{width:100%;height:100%;display:block}
-    #vizNotice{margin-top:14px;color:#ddd;font-size:16px;text-align:center;display:none}
+    #vizNotice{margin-top:14px;color:#ddd;font-size:16px;text-align:center;display:block}
     #vizLockNote{display:none}
 
     /* thank screen */
@@ -121,9 +121,14 @@
   <div id="visualizerOverlay" aria-hidden="true">
     <div id="vizContainer">
       <iframe id="vizIframe" src="about:blank" title="Visualizador"></iframe>
-      <div id="vizQR" title="Abrir visualizador">
+
+      <!-- QR area: não clicável se o QR não vier do servidor -->
+      <div id="vizQR" title="Aguardando QR do operador">
         <canvas id="vizQrCanvas" width="300" height="300"></canvas>
       </div>
+
+      <!-- aviso sempre visível quando sem QR -->
+      <div id="vizNotice">Aguardando QR do operador... (o visualizador só aparece quando o operador enviar o QR)</div>
     </div>
   </div>
 
@@ -180,6 +185,7 @@
     const vizIframe = document.getElementById('vizIframe');
     const vizQrCanvas = document.getElementById('vizQrCanvas');
     const vizQR = document.getElementById('vizQR');
+    const vizNotice = document.getElementById('vizNotice');
 
     const thankScreen = document.getElementById('thankScreen');
     const debugInfo = document.getElementById('debugInfo');
@@ -193,7 +199,11 @@
     let currentPhotoData = null;
     let isCapturing = false;
     let visualizerLocked = false;
-    let currentVisualizerUrl = null; // stored so clicking canvas opens the link
+
+    // pendingVisualizerUrl: guardamos a URL que o index passou (se passou), MAS
+    // o celular só "ativa" o visualizador/click quando receber também o qrImage.
+    let pendingVisualizerUrl = null;
+    let currentVisualizerUrl = null; // só setado quando o servidor envia também o qr image
 
     /* debug */
     setInterval(() => {
@@ -227,8 +237,8 @@
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         videoEl.srcObject = stream;
         videoEl.style.display = 'block';
-        // <-- ESPALHAMENTO: sem espelhamento (scaleX(1))
-        videoEl.style.transform = 'scaleX(1)';
+        // <-- ESPALHAMENTO: agora espelhado (scaleX(-1)) — conforme pedido "inverter a câmera"
+        videoEl.style.transform = 'scaleX(-1)';
         await videoEl.play().catch(()=>{});
         await new Promise(r=>setTimeout(r,100));
       }catch(err){
@@ -258,16 +268,14 @@
       canvasEl.width = targetW; canvasEl.height = targetH;
       const ctx = canvasEl.getContext('2d');
       ctx.clearRect(0,0,targetW,targetH);
-      // <-- desenhar direto (sem espelhar)
-      try {
-        ctx.drawImage(videoEl, 0, 0, targetW, targetH);
-      } catch(e) {
-        // fallback (não deve acontecer normalmente)
-        ctx.save();
-        ctx.translate(targetW,0); ctx.scale(-1,1);
-        ctx.drawImage(videoEl, 0, 0, targetW, targetH);
-        ctx.restore();
-      }
+
+      // <-- desenhar espelhado (pra manter pré-visualização igual ao que o usuário enxerga)
+      ctx.save();
+      ctx.translate(targetW, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(videoEl, 0, 0, targetW, targetH);
+      ctx.restore();
+
       return canvasEl.toDataURL('image/jpeg', quality);
     }
 
@@ -324,11 +332,12 @@
             // try socket path with ack
             if (socket && socket.connected) {
               socket.timeout(15000).emit('photos_from_cell', { session, photos }, (err, ack) => {
-                // we don't force-show QR here; server will emit show_qr_on_viewer when ready
+                // server is responsible for creating visualizador+QR and emitting show_qr_on_viewer / visualizer_ready
                 hideProgress();
-                // ack may contain viewerId; show a short msg
                 if (ack && ack.viewerId) {
                   showMsg('Fotos recebidas pelo servidor. Aguardando montagem do visualizador...');
+                } else {
+                  showMsg('Fotos enviadas. Aguardando montagem do operador...');
                 }
               });
             } else {
@@ -380,48 +389,25 @@
       });
     }
 
-    /* ---------- Visualizer lock flow (novo) ---------- */
-    // helper to draw QR (accepts image URLs, data URLs, or generates QR from a visualizer URL as fallback)
-    function drawQrOnCanvas(canvas, url){
+    /* ---------- Visualizer lock flow (sem geração local de QR) ---------- */
+
+    // draw qr canvas ONLY if the server provided an image (data: or image URL)
+    function drawQrImageOnly(canvas, qrImageUrlOrData) {
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0,0,canvas.width,canvas.height);
 
-      // normalize possible fields
-      if (!url) {
-        // no URL/image -> show waiting text
+      if(!qrImageUrlOrData) {
+        // show waiting text
         ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
         ctx.fillStyle = '#fff'; ctx.font = '14px Arial';
         const text = 'Aguardando QR do operador...';
-        const lines = [];
-        if (text.length > 28) {
-          let rem = text;
-          while (rem.length > 28) { lines.push(rem.slice(0,28)); rem = rem.slice(28); }
-          lines.push(rem);
-        } else lines.push(text);
-        lines.forEach((ln,i)=> ctx.fillText(ln, 8, 22 + i*18));
+        ctx.fillText(text, 10, 24);
         return;
       }
 
-      // If it's a data URL, draw directly
-      if (/^\s*data:image\/(png|jpeg|jpg|webp);base64,/i.test(url)) {
-        const img = new Image();
-        img.onload = () => {
-          ctx.clearRect(0,0,canvas.width,canvas.height);
-          const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
-          const w = img.width * scale, h = img.height * scale;
-          ctx.drawImage(img, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
-        };
-        img.onerror = () => {
-          ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-          ctx.fillStyle = '#fff'; ctx.font = '13px Arial';
-          ctx.fillText('Falha ao carregar data:image do QR.', 8, 20);
-        };
-        img.src = url;
-        return;
-      }
-
-      // If it looks like an image (ends with extension), try to load as image
-      if (/\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(url)) {
+      // only accept explicit image (data: or image URL)
+      if (/^\s*data:image\/(png|jpeg|jpg|webp);base64,/i.test(qrImageUrlOrData) ||
+          /\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(qrImageUrlOrData)) {
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
@@ -431,85 +417,94 @@
           ctx.drawImage(img, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
         };
         img.onerror = () => {
-          // if loading as image fails, fallback to QR-generation from URL (in case server sent an image-like path but CORS blocks it)
-          generateQrFromUrlAndDraw(canvas, url);
+          ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+          ctx.fillStyle = '#fff'; ctx.font = '12px Arial';
+          ctx.fillText('Falha ao carregar imagem do QR.', 8, 20);
         };
-        img.src = url;
+        img.src = qrImageUrlOrData;
         return;
       }
 
-      // If it's a URL (not image), generate QR from it via qrserver (fallback)
-      if (/^https?:\/\//i.test(url) || /^www\./i.test(url)) {
-        generateQrFromUrlAndDraw(canvas, url);
-        return;
-      }
-
-      // Otherwise: unknown format — show as text fallback
+      // otherwise: server didn't send an image -> do NOT generate QR here.
       ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle = '#fff'; ctx.font = '12px Arial';
-      ctx.fillText('QR: ' + (String(url).slice(0,60)), 8, 20);
+      ctx.fillStyle = '#fff'; ctx.font = '13px Arial';
+      ctx.fillText('Aguardando QR do operador (imagem não recebida).', 8, 20);
     }
 
-    function generateQrFromUrlAndDraw(canvas, targetUrl){
-      // use qrserver to generate an image of the QR for the given URL
-      const qrApi = 'https://api.qrserver.com/v1/create-qr-code/?size=' + canvas.width + 'x' + canvas.height + '&data=' + encodeURIComponent(targetUrl);
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
-        const w = img.width * scale, h = img.height * scale;
-        ctx.drawImage(img, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
-      };
-      img.onerror = () => {
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-        ctx.fillStyle = '#fff'; ctx.font = '12px Arial';
-        ctx.fillText('Falha ao gerar QR (qrserver).', 8, 20);
-      };
-      img.src = qrApi;
-    }
-
-    function showVisualizerOverlay({ visualizerUrl, qrUrl, showIframe }){
+    function showVisualizerOverlay({ visualizerUrl, qrUrl, showIframe }) {
       visualizerLocked = true;
       stopCamera();
       visualizerOverlay.style.display = 'flex';
       visualizerOverlay.setAttribute('aria-hidden','false');
-      currentVisualizerUrl = visualizerUrl || qrUrl || null;
 
-      // decide whether to show iframe or QR. by default show QR centered.
-      if(showIframe && visualizerUrl){
+      // store pending visualizer url so we know what it is, but DO NOT make it active/clicável until qr image is received
+      pendingVisualizerUrl = visualizerUrl || null;
+      currentVisualizerUrl = null; // será setado SOMENTE quando qr image chegar
+
+      // If server explicitly provided a QR image (qrUrl) — draw it and activate click
+      if (qrUrl) {
+        drawQrImageOnly(vizQrCanvas, qrUrl);
+        currentVisualizerUrl = visualizerUrl || qrUrl; // allow click open
+        vizNotice.textContent = 'QR recebido — escaneie ou toque para abrir.';
+        vizQR.style.cursor = 'pointer';
+      } else {
+        // no qr image provided — show waiting notice; do NOT generate QR locally
+        drawQrImageOnly(vizQrCanvas, null);
+        vizNotice.textContent = 'Aguardando QR do operador...';
+        vizQR.style.cursor = 'default';
+      }
+
+      // show/hide iframe depending on server instruction and only if showIframe true AND server provided visualizerUrl
+      if (showIframe && pendingVisualizerUrl && currentVisualizerUrl) {
         vizIframe.style.display = 'block';
-        vizIframe.src = visualizerUrl;
+        vizIframe.src = pendingVisualizerUrl;
         vizQR.style.display = 'none';
       } else {
         vizIframe.style.display = 'none';
         vizIframe.src = 'about:blank';
         vizQR.style.display = 'flex';
-        // Use server-provided qrUrl preferentially (can be image or data:). If not provided, use visualizerUrl to generate QR.
-        const source = qrUrl || visualizerUrl || null;
-        drawQrOnCanvas(vizQrCanvas, source);
       }
 
-      // disable camera start while visualizer locked
       enterFsBtn.disabled = true;
       startBtn.disabled = true;
       hideMsg();
       hideProgress();
     }
 
-    function hideVisualizerOverlay(){
-      visualizerLocked = false;
-      visualizerOverlay.style.display = 'none';
-      visualizerOverlay.setAttribute('aria-hidden','true');
-      vizIframe.src = 'about:blank';
-      enterFsBtn.disabled = false;
-      startBtn.disabled = false;
-      currentVisualizerUrl = null;
-      showScreen(welcomeScreen);
-    }
+    // clicking QR opens visualizer only if we have a currentVisualizerUrl (i.e., QR image was provided by server)
+    vizQR.addEventListener('click', (ev) => {
+      if (!currentVisualizerUrl) return; // do nothing unless qr image arrived
+      try { window.open(currentVisualizerUrl, '_blank', 'noopener'); } catch(e){}
+    });
+
+    // When server later sends the QR image for the existing pending visualizer, this handler activates it.
+    // The server may emit something like { session, qr: 'data:...' , visualizerUrl: '...' } later.
+    socket.on('viewer_qr', (data) => {
+      console.log('socket viewer_qr ->', data);
+      if (!data) return;
+      if (data.session && data.session !== session) return;
+
+      // If the server sends a qr image now, draw it and activate the visualizer URL (if any)
+      const qrImage = data.qr || data.qrcode || data.qrUrl || data.qrcode_image || null;
+      const visualizerUrl = data.visualizerUrl || data.visualizadorUrl || data.url || data.visualizador || pendingVisualizerUrl || null;
+
+      if (qrImage) {
+        // draw it and activate click
+        drawQrImageOnly(vizQrCanvas, qrImage);
+        currentVisualizerUrl = visualizerUrl || qrImage;
+        pendingVisualizerUrl = visualizerUrl || pendingVisualizerUrl;
+        vizNotice.textContent = 'QR recebido — escaneie ou toque para abrir.';
+        vizQR.style.cursor = 'pointer';
+        // If server asks to show iframe and provided url, do it
+        if (data.showIframe && visualizerUrl) {
+          vizIframe.style.display = 'block';
+          vizIframe.src = visualizerUrl;
+          vizQR.style.display = 'none';
+        }
+      } else {
+        console.log('viewer_qr arrived but no qr image contained.');
+      }
+    });
 
     /* ---------- Events wiring ---------- */
     enterFsBtn.addEventListener('click', async () => {
@@ -526,14 +521,6 @@
       await runCaptureSequence();
     });
 
-    // clicking QR opens visualizer in new tab (if currentVisualizerUrl set)
-    vizQR.addEventListener('click', (ev) => {
-      if(!currentVisualizerUrl) return;
-      try {
-        window.open(currentVisualizerUrl, '_blank', 'noopener');
-      } catch(e){}
-    });
-
     // socket basic events
     socket.on('connect', () => {
       console.log('socket connected', socket.id);
@@ -547,10 +534,12 @@
       console.log('socket visualizer_ready ->', data);
       if(!data) return;
       if(data.session && data.session !== session) return;
-      // accept many possible fields for visualizer url and qr image
+
+      // Accept many possible fields; but DO NOT generate QR from URL.
       const visualizerUrl = data.visualizerUrl || data.visualizadorUrl || data.url || data.visualizador || null;
-      // accept qrcode image or data URL or fallback to null
-      const qrCandidate = data.qrUrl || data.qrcode || data.qr || data.qr_image || data.qrcode_image || null;
+      // qrCandidate must be an actual image (data: or image url). If server only provided a plain URL, we DO NOT generate it here.
+      const qrCandidate = data.qr || data.qrcode || data.qrUrl || data.qrcode_image || null;
+
       showVisualizerOverlay({ visualizerUrl, qrUrl: qrCandidate, showIframe: data.showIframe });
     });
 
@@ -558,27 +547,17 @@
     socket.on('show_qr_on_viewer', (data) => {
       console.log('socket show_qr_on_viewer ->', data);
       if(!data) return;
-      // ensure it's for our session
       if(data.session && data.session !== session) return;
       const visualizerUrl = data.visualizadorUrl || data.visualizerUrl || data.url || data.visualizador || null;
-      const qrCandidate = data.qrUrl || data.qrcode || data.qr || data.qr_image || data.qrcode_image || null;
+      const qrCandidate = data.qr || data.qrcode || data.qrUrl || data.qrcode_image || null;
       showVisualizerOverlay({ visualizerUrl, qrUrl: qrCandidate, showIframe: data.showIframe });
     });
 
     socket.on('show_qr', (data) => {
       console.log('socket show_qr ->', data);
       if(!data) return;
-      const visualizerUrl = data.visualizadorUrl || data.url || data.visualizerUrl || null;
-      const qrCandidate = data.qrUrl || data.qrcode || data.qr || data.qr_image || null;
-      showVisualizerOverlay({ visualizerUrl, qrUrl: qrCandidate, showIframe: data.showIframe });
-    });
-
-    // bonus: allow direct event 'viewer_qr' (some servers may emit that)
-    socket.on('viewer_qr', (data) => {
-      console.log('socket viewer_qr ->', data);
-      if(!data) return;
       if(data.session && data.session !== session) return;
-      const visualizerUrl = data.visualizerUrl || data.url || null;
+      const visualizerUrl = data.visualizadorUrl || data.url || data.visualizerUrl || null;
       const qrCandidate = data.qr || data.qrcode || data.qrUrl || null;
       showVisualizerOverlay({ visualizerUrl, qrUrl: qrCandidate, showIframe: data.showIframe });
     });
@@ -589,12 +568,14 @@
       if(data && data.session && data.session !== session) return;
       hideVisualizerOverlay();
       photos = []; currentPhotoIndex = 0; currentPhotoData = null;
+      pendingVisualizerUrl = null; currentVisualizerUrl = null;
     });
     socket.on('reset_session', (data) => {
       console.log('reset_session ->', data);
       if(data && data.session && data.session !== session) return;
       hideVisualizerOverlay();
       photos = []; currentPhotoIndex = 0; currentPhotoData = null;
+      pendingVisualizerUrl = null; currentVisualizerUrl = null;
     });
 
     // keyboard escape hides preview if shown (but not visualizer when locked)
