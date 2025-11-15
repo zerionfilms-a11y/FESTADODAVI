@@ -40,7 +40,8 @@
     #startBtn .label{ pointer-events:none }
 
     /* Video & canvas */
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5;transform:scaleX(-1)}
+    /* NOTE: video transform default is no mirror (scaleX(1)) - updated in script */
+    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5;transform:scaleX(1)}
     #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:6}
     #progress{position:fixed;left:50%;transform:translateX(-50%);top:18px;padding:8px 12px;border-radius:10px;background:rgba(0,0,0,0.55);font-weight:700;z-index:200}
     #countdown{position:fixed;left:50%;transform:translateX(-50%);top:28%;font-size:120px;font-weight:900;text-shadow:0 0 20px #000;color:#fff;z-index:201}
@@ -226,7 +227,8 @@
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         videoEl.srcObject = stream;
         videoEl.style.display = 'block';
-        videoEl.style.transform = 'scaleX(-1)';
+        // <-- ALTERAÇÃO SOLICITADA: tirar o espelhamento (colocar ao contrário do que tava)
+        videoEl.style.transform = 'scaleX(1)';
         await videoEl.play().catch(()=>{});
         await new Promise(r=>setTimeout(r,100));
       }catch(err){
@@ -256,10 +258,16 @@
       canvasEl.width = targetW; canvasEl.height = targetH;
       const ctx = canvasEl.getContext('2d');
       ctx.clearRect(0,0,targetW,targetH);
-      ctx.save();
-      ctx.translate(targetW,0); ctx.scale(-1,1);
-      ctx.drawImage(videoEl, 0, 0, targetW, targetH);
-      ctx.restore();
+      // <-- ALTERAÇÃO SOLICITADA: desenhar direto (sem espelhar)
+      try {
+        ctx.drawImage(videoEl, 0, 0, targetW, targetH);
+      } catch(e) {
+        // fallback (não deve acontecer normalmente)
+        ctx.save();
+        ctx.translate(targetW,0); ctx.scale(-1,1);
+        ctx.drawImage(videoEl, 0, 0, targetW, targetH);
+        ctx.restore();
+      }
       return canvasEl.toDataURL('image/jpeg', quality);
     }
 
@@ -435,46 +443,42 @@
     }
 
     /* ---------- Visualizer lock flow (novo) ---------- */
-    // helper to draw QR (uses server-supplied image if available, otherwise qrserver API)
+    // helper to draw QR (ONLY if server provided an image URL) — no local generation/fallback
     function drawQrOnCanvas(canvas, url){
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      if(!url){ // nothing to draw
+
+      // if server didn't provide an explicit image URL, DO NOT generate QR locally.
+      if(!url || !/\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(url)){
         ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-        ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.fillText('QR', 10, 20);
+        ctx.fillStyle = '#fff'; ctx.font = '14px Arial';
+        const text = 'Aguardando QR do operador...';
+        // wrap text if necessary
+        const lines = [];
+        let remaining = text;
+        while(remaining.length > 25){
+          lines.push(remaining.slice(0,25));
+          remaining = remaining.slice(25);
+        }
+        lines.push(remaining);
+        lines.forEach((ln,i)=> ctx.fillText(ln, 8, 24 + i*18));
         return;
       }
-      // if url looks like an image (ends with png/jpg) try to load it directly
-      const isImage = /\.(png|jpe?g|gif|svg)(\?|$)/i.test(url);
+
+      // load provided image (server should send an image URL if it wants the cell to display it)
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
-        // center-fit
         ctx.clearRect(0,0,canvas.width,canvas.height);
         const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
         const w = img.width * scale, h = img.height * scale;
         ctx.drawImage(img, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
       };
       img.onerror = () => {
-        // fallback: generate QR using qrserver API image
-        const gen = new Image();
-        gen.crossOrigin = 'anonymous';
-        gen.onload = () => {
-          ctx.clearRect(0,0,canvas.width,canvas.height);
-          const scale = Math.min(canvas.width / gen.width, canvas.height / gen.height);
-          const w = gen.width * scale, h = gen.height * scale;
-          ctx.drawImage(gen, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
-        };
-        gen.onerror = () => {
-          // last resort: write the URL text
-          ctx.clearRect(0,0,canvas.width,canvas.height);
-          ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-          ctx.fillStyle = '#fff'; ctx.font = '12px Arial'; ctx.fillText(url, 6, 20);
-        };
-        // use qrserver to generate QR image from the URL
-        gen.src = 'https://api.qrserver.com/v1/create-qr-code/?size=' + canvas.width + 'x' + canvas.height + '&data=' + encodeURIComponent(url);
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle = '#fff'; ctx.font = '13px Arial';
+        ctx.fillText('Falha ao carregar imagem do QR (CORS ou URL inválida).', 8, 20);
       };
-      // try loading original url (may be an image of a QR or the visualizador link — if not image, img.onerror will fallback)
       img.src = url;
     }
 
@@ -493,11 +497,15 @@
       } else {
         vizIframe.style.display = 'none';
         vizIframe.src = 'about:blank';
-        vizQR.style.display = 'flex';
-        // prefer explicit qrUrl if provided, otherwise use visualizerUrl
-        const source = qrUrl || visualizerUrl || null;
-        // draw to canvas (with fallback to qrserver)
-        drawQrOnCanvas(vizQrCanvas, source);
+        // if server provided an image file URL for qrUrl, draw it; otherwise show placeholder text (no local QR gen)
+        if (qrUrl && /\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(qrUrl)) {
+          vizQR.style.display = 'flex';
+          drawQrOnCanvas(vizQrCanvas, qrUrl);
+        } else {
+          // hide qr area visually by greying placeholder (we still keep canvas but it will show message)
+          vizQR.style.display = 'flex';
+          drawQrOnCanvas(vizQrCanvas, null);
+        }
       }
 
       // disable camera start while visualizer locked
@@ -562,16 +570,17 @@
       // ensure it's for our session
       if(data.session && data.session !== session) return;
       const url = data.visualizadorUrl || data.visualizerUrl || data.url || data.visualizador;
-      const qr = data.qrUrl || data.qrcode || data.qr || url;
+      const qr = data.qrUrl || data.qrcode || data.qr || null; // do NOT fallback to url here
       // only show when server tells us (this prevents "ansiedade")
-      showVisualizerOverlay({ visualizerUrl: url, qrUrl: qr || url, showIframe: data.showIframe });
+      showVisualizerOverlay({ visualizerUrl: url, qrUrl: qr, showIframe: data.showIframe });
     });
 
     socket.on('show_qr', (data) => {
       if(!data) return;
       const visualizadorUrl = data.visualizadorUrl || data.url || data.visualizerUrl;
       if(!visualizadorUrl) return;
-      showVisualizerOverlay({ visualizerUrl: visualizadorUrl, qrUrl: visualizadorUrl });
+      // don't auto-generate QR from visualizadorUrl - require qr image
+      showVisualizerOverlay({ visualizerUrl: visualizadorUrl, qrUrl: data.qrUrl || data.qrcode || data.qr || null, showIframe: data.showIframe });
     });
 
     // finalize/reset session — unlock cell
