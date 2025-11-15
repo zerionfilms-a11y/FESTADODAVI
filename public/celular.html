@@ -40,8 +40,11 @@
     #startBtn .label{ pointer-events:none }
 
     /* Video & canvas */
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5;transform:scaleX(-1)}
-    #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:6}
+    #videoWrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:5;overflow:hidden}
+    /* NOTE: no mirror transform here (scaleX(1)) — câmera NÃO está espelhada */
+    #videoEl{width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(1)}
+    #canvasEl{display:none;position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:6}
+
     #progress{position:fixed;left:50%;transform:translateX(-50%);top:18px;padding:8px 12px;border-radius:10px;background:rgba(0,0,0,0.55);font-weight:700;z-index:200}
     #countdown{position:fixed;left:50%;transform:translateX(-50%);top:28%;font-size:120px;font-weight:900;text-shadow:0 0 20px #000;color:#fff;z-index:201}
     #msg{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;padding:8px 12px;border-radius:10px;background:rgba(0,0,0,0.55);z-index:200}
@@ -72,11 +75,36 @@
 
     /* debug */
     #debugInfo{position:fixed;left:12px;bottom:12px;font-size:11px;color:#ccc;background:rgba(0,0,0,0.35);padding:6px 8px;border-radius:6px;z-index:999}
+
+    /* SAFE AREA overlay (new) */
+    #safeOverlay{position:fixed;inset:0;pointer-events:none;z-index:900;display:flex;align-items:center;justify-content:center}
+    /* dim outside area */
+    #safeOverlay .mask{
+      position:absolute;inset:0;background:rgba(0,0,0,0.45);
+      -webkit-backdrop-filter: blur(2px);backdrop-filter: blur(2px);
+    }
+    /* safe rect centered */
+    #safeRect{
+      position:relative;width:62%; /* relative to viewport width */
+      aspect-ratio: 3/4; /* portrait crop (w:h = 3:4) - adjust if you want different */
+      border: 3px dashed rgba(255,255,255,0.9);
+      border-radius:10px;
+      box-shadow:0 0 0 9999px rgba(0,0,0,0.45);
+      background:transparent;
+      pointer-events:none;
+    }
+    /* label */
+    #safeLabel{position:absolute;top:-34px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.5);padding:6px 10px;border-radius:8px;font-weight:700}
+
+    /* toggle button */
+    #safeToggle{position:fixed;right:12px;top:12px;z-index:1001;padding:8px 10px;border-radius:8px;border:0;background:rgba(255,255,255,0.06);color:#fff;font-weight:700}
+
     @media (max-width:480px){
       #startBtn{font-size:18px}
       #countdown{font-size:72px; top:24%}
       #vizContainer{height:58vh}
       #vizQR{width:220px;height:220px}
+      #safeRect{width:78%}
     }
   </style>
 </head>
@@ -98,12 +126,23 @@
   </div>
 
   <!-- camera and canvas -->
-  <video id="videoEl" autoplay playsinline muted></video>
-  <canvas id="canvasEl"></canvas>
+  <div id="videoWrap" class="hidden" aria-hidden="true">
+    <video id="videoEl" autoplay playsinline muted></video>
+    <canvas id="canvasEl"></canvas>
+  </div>
 
   <div id="progress" class="hidden" aria-hidden="true"></div>
   <div id="countdown" class="hidden" aria-hidden="true"></div>
   <div id="msg" class="hidden" aria-hidden="true"></div>
+
+  <!-- SAFE AREA overlay -->
+  <div id="safeOverlay" class="hidden" aria-hidden="true">
+    <div class="mask"></div>
+    <div id="safeRect">
+      <div id="safeLabel">Área segura — não corte cabeças</div>
+    </div>
+  </div>
+  <button id="safeToggle" title="Mostrar/ocultar guia de enquadramento" style="display:none">Guia: ON</button>
 
   <!-- preview -->
   <div id="previewScreen" class="hidden" aria-hidden="true">
@@ -148,6 +187,7 @@
     const COUNTDOWN_SECONDS = 5;
     const MAX_SEND_WIDTH = 1280; // resize before sending to reduce upload time
     const SEND_QUALITY = 0.78; // jpeg quality for faster transfers
+    const SAFE_ASPECT = 3/4; // aspect ratio of safe area (w/h)
 
     /* ---------- Socket ---------- */
     const socket = io(SERVER_URL, {
@@ -163,6 +203,7 @@
     const startBtn = document.getElementById('startBtn');
     const welcomeBg = document.getElementById('welcomeBg');
 
+    const videoWrap = document.getElementById('videoWrap');
     const videoEl = document.getElementById('videoEl');
     const canvasEl = document.getElementById('canvasEl');
     const progressEl = document.getElementById('progress');
@@ -183,6 +224,10 @@
     const thankScreen = document.getElementById('thankScreen');
     const debugInfo = document.getElementById('debugInfo');
 
+    const safeOverlay = document.getElementById('safeOverlay');
+    const safeRect = document.getElementById('safeRect');
+    const safeToggle = document.getElementById('safeToggle');
+
     /* ---------- State ---------- */
     const params = new URLSearchParams(location.search);
     const session = params.get('session') || 'cabine-fixa';
@@ -193,6 +238,7 @@
     let isCapturing = false;
     let visualizerLocked = false;
     let currentVisualizerUrl = null; // stored so clicking canvas opens the link
+    let safeGuideOn = true;
 
     /* debug */
     setInterval(() => {
@@ -209,7 +255,17 @@
     function showScreen(screenEl){
       [enterFs, welcomeScreen, previewScreen, thankScreen].forEach(s => s && s.classList.add('hidden'));
       progressEl.classList.add('hidden'); countdownEl.classList.add('hidden'); msgEl.classList.add('hidden');
+      safeOverlay.classList.add('hidden');
       if(screenEl === welcomeScreen || screenEl === enterFs) stopCamera();
+      if(screenEl === null) {
+        // show camera area
+        videoWrap.classList.remove('hidden');
+        if (safeGuideOn) safeOverlay.classList.remove('hidden');
+        safeToggle.style.display = 'block';
+      } else {
+        videoWrap.classList.add('hidden');
+        safeToggle.style.display = 'none';
+      }
       if(screenEl) screenEl.classList.remove('hidden');
     }
     function showProgress(text){ progressEl.textContent = text; progressEl.classList.remove('hidden'); }
@@ -226,9 +282,10 @@
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         videoEl.srcObject = stream;
         videoEl.style.display = 'block';
-        videoEl.style.transform = 'scaleX(-1)';
         await videoEl.play().catch(()=>{});
         await new Promise(r=>setTimeout(r,100));
+        // adjust safeRect size to viewport (responsive)
+        adjustSafeRect();
       }catch(err){
         console.error('startCamera', err);
         alert('Não foi possível acessar a câmera frontal. Verifique permissões.');
@@ -244,23 +301,82 @@
       videoEl.style.display = 'none';
     }
 
-    // grab and compress/rescale frame for faster transfer
-    function grabFrameDataURL(quality=SEND_QUALITY, maxWidth=MAX_SEND_WIDTH){
-      const vw = videoEl.videoWidth || 1280;
-      const vh = videoEl.videoHeight || 720;
-      let targetW = vw, targetH = vh;
-      if (vw > maxWidth) {
-        targetW = maxWidth;
-        targetH = Math.round((vh * maxWidth) / vw);
+    // adjust safeRect to viewport and maintain aspect ratio
+    function adjustSafeRect(){
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      // desired width as percentage of viewport width (kept in CSS); compute real pixel size:
+      const style = getComputedStyle(safeRect);
+      const rectWidthPct = parseFloat(style.width) || 62; // fallback
+      const rectWidthPx = Math.round((rectWidthPct/100) * vw);
+      const rectHeightPx = Math.round(rectWidthPx / SAFE_ASPECT);
+      // if height > viewport, scale down to fit
+      let finalW = rectWidthPx, finalH = rectHeightPx;
+      if (finalH > (vh * 0.92)) {
+        finalH = Math.round(vh * 0.92);
+        finalW = Math.round(finalH * SAFE_ASPECT);
       }
-      canvasEl.width = targetW; canvasEl.height = targetH;
+      safeRect.style.width = finalW + 'px';
+      safeRect.style.height = finalH + 'px';
+    }
+
+    window.addEventListener('resize', () => {
+      adjustSafeRect();
+    });
+
+    // grab and compress/rescale frame for faster transfer
+    // NOTE: now crops to the safeRect region (if visible). No mirroring is applied — sending "non-mirrored" image.
+    function grabFrameDataURL(quality=SEND_QUALITY, maxWidth=MAX_SEND_WIDTH){
+      const vw = videoEl.videoWidth || videoEl.clientWidth || 1280;
+      const vh = videoEl.videoHeight || videoEl.clientHeight || 720;
+
+      // compute source crop rect in video coordinate space
+      let sx = 0, sy = 0, sw = vw, sh = vh;
+
+      if (!safeOverlay.classList.contains('hidden')) {
+        const safeBox = safeRect.getBoundingClientRect();
+        const videoBox = videoEl.getBoundingClientRect();
+
+        const relLeft = Math.max(0, safeBox.left - videoBox.left);
+        const relTop = Math.max(0, safeBox.top - videoBox.top);
+        const relW = Math.min(safeBox.width, videoBox.width);
+        const relH = Math.min(safeBox.height, videoBox.height);
+
+        const pxPerCssX = (videoEl.videoWidth || vw) / videoBox.width;
+        const pxPerCssY = (videoEl.videoHeight || vh) / videoBox.height;
+
+        sx = Math.round(relLeft * pxPerCssX);
+        sy = Math.round(relTop * pxPerCssY);
+        sw = Math.round(relW * pxPerCssX);
+        sh = Math.round(relH * pxPerCssY);
+
+        sx = Math.max(0, Math.min(sx, vw-1));
+        sy = Math.max(0, Math.min(sy, vh-1));
+        sw = Math.max(1, Math.min(sw, vw - sx));
+        sh = Math.max(1, Math.min(sh, vh - sy));
+      } else {
+        sx = 0; sy = 0; sw = vw; sh = vh;
+      }
+
+      canvasEl.width = sw;
+      canvasEl.height = sh;
       const ctx = canvasEl.getContext('2d');
-      ctx.clearRect(0,0,targetW,targetH);
-      ctx.save();
-      ctx.translate(targetW,0); ctx.scale(-1,1);
-      ctx.drawImage(videoEl, 0, 0, targetW, targetH);
-      ctx.restore();
-      return canvasEl.toDataURL('image/jpeg', quality);
+      ctx.clearRect(0,0,sw,sh);
+      // draw without mirroring
+      ctx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, sw, sh);
+
+      if (sw > maxWidth) {
+        const scale = maxWidth / sw;
+        const tw = Math.round(sw * scale);
+        const th = Math.round(sh * scale);
+        const tmp = document.createElement('canvas');
+        tmp.width = tw; tmp.height = th;
+        const tctx = tmp.getContext('2d');
+        tctx.drawImage(canvasEl, 0, 0, sw, sh, 0, 0, tw, th);
+        return tmp.toDataURL('image/jpeg', quality);
+      } else {
+        return canvasEl.toDataURL('image/jpeg', quality);
+      }
     }
 
     /* ---------- Capture flow (collect 3 photos, then send once) ---------- */
@@ -294,37 +410,29 @@
           if (decision === 'continuar') {
             photos.push(currentPhotoData);
             currentPhotoIndex++;
-            // small feedback
             showMsg(`Foto ${currentPhotoIndex} salva. ${currentPhotoIndex < MAX_PHOTOS ? 'Posicione-se para a próxima.' : 'Preparando para enviar...'} `);
             await new Promise(r=>setTimeout(r,600));
             hideMsg();
           } else {
-            // refazer -> loop repeats without increment
             showMsg('Refaça a foto...');
             await new Promise(r=>setTimeout(r,500));
             hideMsg();
           }
         }
 
-        // finished capturing (either completed 3 or locked). Send the collected photos as a batch.
         if (photos.length > 0) {
           showProgress('Enviando fotos ao operador...');
           showMsg('Aguardando processamento no operador — espere o QR.');
           stopCamera();
-          // send once (socket preferred)
           try {
-            // try socket path with ack
             if (socket && socket.connected) {
               socket.timeout(15000).emit('photos_from_cell', { session, photos }, (err, ack) => {
-                // we don't force-show QR here; server will emit show_qr_on_viewer when ready
                 hideProgress();
-                // ack may contain viewerId; show a short msg
                 if (ack && ack.viewerId) {
                   showMsg('Fotos recebidas pelo servidor. Aguardando montagem do visualizador...');
                 }
               });
             } else {
-              // fallback to HTTP
               const url = new URL('/upload_photos', SERVER_URL);
               fetch(url.toString(), {
                 method: 'POST',
@@ -349,7 +457,6 @@
           }
         }
 
-        // show thank you screen while waiting for operator/server to produce visualizador
         showScreen(thankScreen);
       }catch(err){
         console.error('runCaptureSequence error', err);
@@ -372,109 +479,42 @@
       });
     }
 
-    /* ---------- Send photos to server (socket ack + retry + HTTP fallback) ----------
-       NOTE: removed client-side emission of photos_ready with a prebuilt visualizador URL.
-       Server/index are responsible for creating the visualizador and notifying the cellphone
-       via 'show_qr_on_viewer' or 'visualizer_ready' events. This avoids premature QR display.
+    /* ---------- Visualizer lock flow (server-driven) ----------
+       IMPORTANT: this client will NOT generate QR locally. It only displays what the server sends.
+       If server sends a QR image URL or a visualizer URL, we display it. Otherwise we show a waiting message.
     */
-    function sendPhotosToServerWithRetry(attempt=1, maxAttempts=5){
-      return new Promise((resolve, reject) => {
-        if(!photos || photos.length === 0) return resolve({ ok:false, reason:'no-photos' });
-        showProgress('Enviando fotos...');
-        const payload = { session, photos, ts:new Date().toISOString() };
-
-        function tryHttpFallback(){
-          const url = new URL('/upload_photos', SERVER_URL);
-          fetch(url.toString(), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          }).then(res => res.json()).then(json => {
-            hideProgress();
-            resolve({ ok:true, via:'http', resp:json });
-          }).catch(err => {
-            hideProgress();
-            console.warn('HTTP fallback failed', err);
-            reject(err);
-          });
-        }
-
-        if(socket && socket.connected){
-          try{
-            socket.timeout(10000).emit('photos_from_cell', payload, (err, ack) => {
-              if(err){
-                console.warn('socket emit timeout/err', err);
-                if(attempt < maxAttempts){
-                  setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1200 * attempt);
-                } else {
-                  tryHttpFallback();
-                }
-              } else {
-                // IMPORTANT: do NOT emit 'photos_ready' locally here; server will emit photos_ready/show_qr_on_viewer when processing is done.
-                hideProgress();
-                resolve({ ok:true, via:'socket', ack });
-              }
-            });
-          }catch(e){
-            console.warn('socket emit exception', e);
-            if(attempt < maxAttempts){
-              setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1200 * attempt);
-            } else {
-              tryHttpFallback();
-            }
-          }
-        } else {
-          if(attempt < maxAttempts){
-            socket.connect();
-            setTimeout(()=> sendPhotosToServerWithRetry(attempt+1,maxAttempts).then(resolve).catch(reject), 1500);
-          } else {
-            tryHttpFallback();
-          }
-        }
-      });
-    }
-
-    /* ---------- Visualizer lock flow (novo) ---------- */
-    // helper to draw QR (uses server-supplied image if available, otherwise qrserver API)
     function drawQrOnCanvas(canvas, url){
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0,0,canvas.width,canvas.height);
-      if(!url){ // nothing to draw
+      if(!url){
+        // do NOT generate QR here — just show waiting message
         ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-        ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.fillText('QR', 10, 20);
+        ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('Aguardando QR do operador', canvas.width/2, canvas.height/2);
         return;
       }
-      // if url looks like an image (ends with png/jpg) try to load it directly
+      // if server provided an image URL we try to load it
       const isImage = /\.(png|jpe?g|gif|svg)(\?|$)/i.test(url);
+      if (!isImage) {
+        // If server sent a non-image URL, show the URL text (but do not generate QR here)
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle = '#fff'; ctx.font = '12px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('Aguardando QR do operador', canvas.width/2, canvas.height/2);
+        return;
+      }
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
-        // center-fit
         ctx.clearRect(0,0,canvas.width,canvas.height);
         const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
         const w = img.width * scale, h = img.height * scale;
         ctx.drawImage(img, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
       };
       img.onerror = () => {
-        // fallback: generate QR using qrserver API image
-        const gen = new Image();
-        gen.crossOrigin = 'anonymous';
-        gen.onload = () => {
-          ctx.clearRect(0,0,canvas.width,canvas.height);
-          const scale = Math.min(canvas.width / gen.width, canvas.height / gen.height);
-          const w = gen.width * scale, h = gen.height * scale;
-          ctx.drawImage(gen, (canvas.width - w)/2, (canvas.height - h)/2, w, h);
-        };
-        gen.onerror = () => {
-          // last resort: write the URL text
-          ctx.clearRect(0,0,canvas.width,canvas.height);
-          ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
-          ctx.fillStyle = '#fff'; ctx.font = '12px Arial'; ctx.fillText(url, 6, 20);
-        };
-        // use qrserver to generate QR image from the URL
-        gen.src = 'https://api.qrserver.com/v1/create-qr-code/?size=' + canvas.width + 'x' + canvas.height + '&data=' + encodeURIComponent(url);
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle = '#fff'; ctx.font = '14px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('Não foi possível carregar QR', canvas.width/2, canvas.height/2);
       };
-      // try loading original url (may be an image of a QR or the visualizador link — if not image, img.onerror will fallback)
       img.src = url;
     }
 
@@ -484,8 +524,6 @@
       visualizerOverlay.style.display = 'flex';
       visualizerOverlay.setAttribute('aria-hidden','false');
       currentVisualizerUrl = visualizerUrl || qrUrl || null;
-
-      // decide whether to show iframe or QR. by default show QR centered.
       if(showIframe && visualizerUrl){
         vizIframe.style.display = 'block';
         vizIframe.src = visualizerUrl;
@@ -494,13 +532,10 @@
         vizIframe.style.display = 'none';
         vizIframe.src = 'about:blank';
         vizQR.style.display = 'flex';
-        // prefer explicit qrUrl if provided, otherwise use visualizerUrl
+        // ONLY display server-provided URL/image; do NOT attempt to generate a QR locally.
         const source = qrUrl || visualizerUrl || null;
-        // draw to canvas (with fallback to qrserver)
         drawQrOnCanvas(vizQrCanvas, source);
       }
-
-      // disable camera start while visualizer locked
       enterFsBtn.disabled = true;
       startBtn.disabled = true;
       hideMsg();
@@ -526,11 +561,23 @@
     });
 
     startBtn.addEventListener('click', async () => {
-      if(visualizerLocked) return; // bloqueado
+      if(visualizerLocked) return;
       try { document.getElementById('inicio').currentTime = 0; document.getElementById('inicio').play().catch(()=>{}); } catch(e){}
       showScreen(null); // hide overlays -> camera
       currentPhotoIndex = 0; photos = []; currentPhotoData = null;
       await runCaptureSequence();
+    });
+
+    // toggle safe guide
+    safeToggle.addEventListener('click', () => {
+      safeGuideOn = !safeGuideOn;
+      if (safeGuideOn) {
+        safeOverlay.classList.remove('hidden');
+        safeToggle.textContent = 'Guia: ON';
+      } else {
+        safeOverlay.classList.add('hidden');
+        safeToggle.textContent = 'Guia: OFF';
+      }
     });
 
     // clicking QR opens visualizer in new tab (if currentVisualizerUrl set)
@@ -559,11 +606,9 @@
     // server may instruct show_qr_on_viewer (index uses this)
     socket.on('show_qr_on_viewer', (data) => {
       if(!data) return;
-      // ensure it's for our session
       if(data.session && data.session !== session) return;
       const url = data.visualizadorUrl || data.visualizerUrl || data.url || data.visualizador;
       const qr = data.qrUrl || data.qrcode || data.qr || url;
-      // only show when server tells us (this prevents "ansiedade")
       showVisualizerOverlay({ visualizerUrl: url, qrUrl: qr || url, showIframe: data.showIframe });
     });
 
