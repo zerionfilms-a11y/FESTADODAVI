@@ -40,7 +40,8 @@
     #startBtn .label{ pointer-events:none }
 
     /* Video & canvas */
-    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5;transform:scaleX(-1)}
+    /* espelhamento invertido aplicado apenas aqui: scaleX(1) (antes -1) */
+    #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5;transform:scaleX(1)}
     #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:6}
     #progress{position:fixed;left:50%;transform:translateX(-50%);top:18px;padding:8px 12px;border-radius:10px;background:rgba(0,0,0,0.55);font-weight:700;z-index:200}
     #countdown{position:fixed;left:50%;transform:translateX(-50%);top:28%;font-size:120px;font-weight:900;text-shadow:0 0 20px #000;color:#fff;z-index:201}
@@ -226,7 +227,8 @@
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         videoEl.srcObject = stream;
         videoEl.style.display = 'block';
-        videoEl.style.transform = 'scaleX(-1)';
+        // espelhamento invertido aqui: agora scaleX(1) (antes era -1)
+        videoEl.style.transform = 'scaleX(1)';
         await videoEl.play().catch(()=>{});
         await new Promise(r=>setTimeout(r,100));
       }catch(err){
