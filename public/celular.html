@@ -144,7 +144,7 @@
 
   <script>
     /* ---------- Config ---------- */
-    const SERVER_URL = "https://festadodavi.onrender.com";
+    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
     const MAX_PHOTOS = 3;
     const COUNTDOWN_SECONDS = 5;
     const MAX_SEND_WIDTH = 1280; // resize before sending to reduce upload time
@@ -197,7 +197,7 @@
 
     /* debug */
     setInterval(() => {
-      debugInfo.textContent = `Sessão: ${session} | Socket: ${socket.connected ? '🟢' : '🔴'} | Fotos: ${photos.length}/${MAX_PHOTOS} | Capturando: ${isCapturing ? 'SIM' : 'NÃO'} | VizLocked: ${visualizerLocked ? 'SIM' : 'NÃO'}`;
+      debugInfo.textContent = Sessão: ${session} | Socket: ${socket.connected ? '🟢' : '🔴'} | Fotos: ${photos.length}/${MAX_PHOTOS} | Capturando: ${isCapturing ? 'SIM' : 'NÃO'} | VizLocked: ${visualizerLocked ? 'SIM' : 'NÃO'};
     }, 700);
 
     /* ---------- Helpers ---------- */
@@ -268,7 +268,7 @@
     /* ---------- Capture flow (collect 3 photos, then send once) ---------- */
     async function captureSinglePhotoFlow(){
       isCapturing = true;
-      showProgress(`${currentPhotoIndex+1}/${MAX_PHOTOS}`);
+      showProgress(${currentPhotoIndex+1}/${MAX_PHOTOS});
       if(!stream) await startCamera();
       videoEl.style.display = 'block';
 
@@ -297,7 +297,7 @@
             photos.push(currentPhotoData);
             currentPhotoIndex++;
             // small feedback
-            showMsg(`Foto ${currentPhotoIndex} salva. ${currentPhotoIndex < MAX_PHOTOS ? 'Posicione-se para a próxima.' : 'Preparando para enviar...'}`);
+            showMsg(Foto ${currentPhotoIndex} salva. ${currentPhotoIndex < MAX_PHOTOS ? 'Posicione-se para a próxima.' : 'Preparando para enviar...'} );
             await new Promise(r=>setTimeout(r,600));
             hideMsg();
           } else {
