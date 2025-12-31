@@ -119,7 +119,7 @@
   // -----------------------
   // CONFIG
   // -----------------------
-  const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
+  const SERVER_URL = "https://festadodavi-production-0591.up.railway.app/";
   const FIXED_SESSION = "cabine-fixa";
   const IMGBB_KEY = "fc52605669365cdf28ea379d10f2a341"; // se estiver vazio, servidor fará upload
   const STORIES_TEMPLATE = "storiesdavi.png";
@@ -287,7 +287,7 @@
             processPendingViewer(viewerId).catch(e => log('❌ processPendingViewer error: ' + e));
           }
         } else {
-          // Nothing to do; maybe payload only had visualizadorUrl (rare). If there's a visualizadorUrl ensure we don't show until we have story montages locally if possible.
+          // Nothing to do; maybe payload only had visualizadorUrl (rare). If there's a visualizadorUrl ensure we don't show until we have montages locally if possible.
           if (payload.visualizadorUrl) {
             // Wait a tick to see if we have montages; if not, show (but this should be rare)
             setTimeout(() => {
