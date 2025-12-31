@@ -125,6 +125,7 @@
   const STORIES_TEMPLATE = "storiesdavi.png";
   const PRINT_TEMPLATE = "imprimirdavi.png";
   const FRAME_OVERLAY = "moldura.png";
+  const FRAME_OVERLAY_PRINT = "moldura2.png";
   const MAX_WAIT_MS_FOR_BATCH = 1400;
   const UPLOAD_TIMEOUT_MS = 20000;
 
@@ -425,7 +426,7 @@
     if (p.timer) clearTimeout(p.timer);
     p.timer = setTimeout(() => {
       const take = p.photos.splice(0,3);
-      const vid = p.viewerId;
+      const vid = p.p.viewerId;
       p.timer = null;
       if (take && take.length) processPhotosAndUpload(take, vid).catch(e => log('❌ processPhotosAndUpload error: ' + e));
     }, MAX_WAIT_MS_FOR_BATCH);
@@ -641,9 +642,42 @@
               log(`⚠️ Foto ${r.i+1} falhou ao carregar para print`);
             }
           });
-          try { currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95); log('✅ print montage dataURL gerado'); } catch(e){ log('⚠️ toDataURL print failed: ' + e); currentPrintMontageDataUrl = null; }
-          if (currentPrintMontageDataUrl) printBtn.disabled = false;
-          resolve(currentPrintMontageDataUrl);
+
+          // apply frame overlay PRINT (moldura2.png)
+          const frame = new Image();
+          frame.crossOrigin = 'anonymous';
+          frame.onload = () => {
+            try {
+              ctx.drawImage(frame, 0, 0, printCanvas.width, printCanvas.height);
+              log('✅ Moldura aplicada sobre print (moldura2.png)');
+            } catch(e) {
+              log('⚠️ Erro ao desenhar moldura print: ' + e);
+            }
+
+            try {
+              currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
+              log('✅ print montage dataURL gerado');
+            } catch(e){
+              log('⚠️ toDataURL print failed: ' + e);
+              currentPrintMontageDataUrl = null;
+            }
+
+            if (currentPrintMontageDataUrl) printBtn.disabled = false;
+            resolve(currentPrintMontageDataUrl);
+          };
+
+          frame.onerror = () => {
+            log('⚠️ Moldura de print não encontrada (moldura2.png). Continuando sem moldura.');
+            try {
+              currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
+            } catch(e){
+              currentPrintMontageDataUrl = null;
+            }
+            if (currentPrintMontageDataUrl) printBtn.disabled = false;
+            resolve(currentPrintMontageDataUrl);
+          };
+
+          frame.src = FRAME_OVERLAY_PRINT;
         };
         bg.onerror = () => {
           log('❌ Erro ao carregar background print (verifique PRINT_TEMPLATE path)');
