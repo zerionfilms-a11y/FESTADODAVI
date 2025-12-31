@@ -622,124 +622,102 @@
     });
   }
 
-  function drawPrint(photos){
-    return new Promise((resolve) => {
-      try {
-        const ctx = printCanvas.getContext('2d');
-        ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
+function drawPrint(photos){
+  return new Promise((resolve) => {
+    try {
+      const ctx = printCanvas.getContext('2d');
+      ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
 
-        // Garantir que temos sempre 3 entradas locais para desenhar (evita faltar uma foto quando chamada com 1-2)
-        const photosLocal = (Array.isArray(photos) ? photos.slice(0,3) : []).slice(0,3);
-        while (photosLocal.length < 3) {
-          // duplica a última ou a primeira se faltar
-          if (photosLocal.length) photosLocal.push(photosLocal[photosLocal.length - 1]);
-          else if (Array.isArray(photos) && photos.length) photosLocal.push(photos[0]);
-          else photosLocal.push(''); // ficará como erro de carregamento
+      const bg = new Image();
+      bg.crossOrigin = 'anonymous';
+
+      bg.onload = async () => {
+        try {
+          ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
+        } catch(e){
+          log('⚠️ draw bg print error: ' + e);
         }
 
-        const bg = new Image();
-        bg.crossOrigin = 'anonymous';
-        bg.onload = async () => {
-          try { ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height); } catch(e){ log('⚠️ draw bg print error: ' + e); }
+        // load all photos (EXATAMENTE igual stories)
+        const loaders = photos.slice(0,3).map((p, i) => new Promise((res) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => res({ ok:true, img, i });
+          img.onerror = () => res({ ok:false, img:null, i });
+          img.src = p;
+        }));
 
-          const loaders = photosLocal.map((p, i) => new Promise((res) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => res({ ok:true, img, i });
-            img.onerror = () => res({ ok:false, img:null, i });
-            img.src = p;
-          }));
-          const results = await Promise.all(loaders);
-          results.forEach(r => {
-            if (r.ok && r.img) {
-              const c = PRINT_COORDS[r.i] || PRINT_COORDS[0];
-              try {
-                drawImageCover(ctx, r.img, c.x, c.y, c.w, c.h);
-                log(`✅ Foto ${r.i+1} posicionada no print: ${c.x},${c.y} ${c.w}x${c.h}`);
-              } catch(e){ log('⚠️ drawImageCover print error: ' + e); }
-            } else {
-              log(`⚠️ Foto ${r.i+1} falhou ao carregar para print`);
-            }
-          });
+        const results = await Promise.all(loaders);
 
-          // apply frame overlay PRINT (moldura2.png)
-          const frame = new Image();
-          frame.crossOrigin = 'anonymous';
-          frame.onload = () => {
+        results.forEach(r => {
+          if (r.ok && r.img) {
+            const c = PRINT_COORDS[r.i] || PRINT_COORDS[0];
             try {
-              ctx.drawImage(frame, 0, 0, printCanvas.width, printCanvas.height);
-              log('✅ Moldura aplicada sobre print (moldura2.png)');
-            } catch(e) {
-              log('⚠️ Erro ao desenhar moldura print: ' + e);
+              drawImageCover(ctx, r.img, c.x, c.y, c.w, c.h);
+              log(`✅ Foto ${r.i+1} posicionada no print`);
+            } catch(e){
+              log('⚠️ drawImageCover print error: ' + e);
+            }
+          } else {
+            log(`⚠️ Foto ${r.i+1} falhou ao carregar para print`);
+          }
+        });
+
+        // apply frame overlay (IGUAL stories)
+        const frame = new Image();
+        frame.crossOrigin = 'anonymous';
+
+        frame.onload = () => {
+          try {
+            ctx.drawImage(frame, 0, 0, printCanvas.width, printCanvas.height);
+            log('✅ Moldura aplicada sobre print (moldura2.png)');
+          } catch(e){
+            log('⚠️ Erro ao desenhar moldura print: ' + e);
+          }
+
+          requestAnimationFrame(() => {
+            try {
+              currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
+              log('✅ print montage dataURL gerado');
+            } catch(e){
+              log('⚠️ toDataURL print failed: ' + e);
+              currentPrintMontageDataUrl = null;
             }
 
-            // 🔴 GARANTE QUE TODAS AS FOTOS FORAM REALMENTE DESENHADAS ANTES DO toDataURL
-            requestAnimationFrame(() => {
-              try {
-                currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
-                log('✅ print montage dataURL gerado');
-              } catch(e){
-                log('⚠️ toDataURL print failed: ' + e);
-                currentPrintMontageDataUrl = null;
-              }
-
-              if (currentPrintMontageDataUrl) printBtn.disabled = false;
-              resolve(currentPrintMontageDataUrl);
-            });
-          };
-
-          frame.onerror = () => {
-            log('⚠️ Moldura de print não encontrada (moldura2.png). Continuando sem moldura.');
-            requestAnimationFrame(() => {
-              try {
-                currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
-                log('✅ print montage dataURL gerado (sem moldura)');
-              } catch(e){
-                log('⚠️ toDataURL print failed (no frame): ' + e);
-                currentPrintMontageDataUrl = null;
-              }
-              if (currentPrintMontageDataUrl) printBtn.disabled = false;
-              resolve(currentPrintMontageDataUrl);
-            });
-          };
-
-          frame.src = FRAME_OVERLAY_PRINT;
+            if (currentPrintMontageDataUrl) printBtn.disabled = false;
+            resolve(currentPrintMontageDataUrl);
+          });
         };
-        bg.onerror = () => {
-          log('❌ Erro ao carregar background print (verifique PRINT_TEMPLATE path)');
-          // fall back: blank bg and still try to place images
-          const ctx2 = printCanvas.getContext('2d');
-          ctx2.fillStyle = '#000';
-          ctx2.fillRect(0,0,printCanvas.width,printCanvas.height);
-          (async () => {
-            const loaders = photosLocal.map((p, i) => new Promise((res) => {
-              const img = new Image();
-              img.crossOrigin = 'anonymous';
-              img.onload = () => res({ ok:true, img, i });
-              img.onerror = () => res({ ok:false, img:null, i });
-              img.src = p;
-            }));
-            const results = await Promise.all(loaders);
-            results.forEach(r => {
-              if (r.ok && r.img) {
-                const c = PRINT_COORDS[r.i] || PRINT_COORDS[0];
-                try { drawImageCover(ctx2, r.img, c.x, c.y, c.w, c.h); } catch(e){}
-              }
-            });
-            requestAnimationFrame(() => {
-              try { currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95); log('✅ print montage dataURL gerado (bg fail)'); } catch(e){ currentPrintMontageDataUrl = null; }
-              if (currentPrintMontageDataUrl) printBtn.disabled = false;
-              resolve(currentPrintMontageDataUrl);
-            });
-          })();
+
+        frame.onerror = () => {
+          log('⚠️ Moldura print não encontrada (moldura2.png)');
+          requestAnimationFrame(() => {
+            try {
+              currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
+            } catch(e){
+              currentPrintMontageDataUrl = null;
+            }
+            if (currentPrintMontageDataUrl) printBtn.disabled = false;
+            resolve(currentPrintMontageDataUrl);
+          });
         };
-        bg.src = PRINT_TEMPLATE;
-      } catch(e){
-        log('❌ drawPrint fatal error: ' + e);
+
+        frame.src = FRAME_OVERLAY_PRINT;
+      };
+
+      bg.onerror = () => {
+        log('❌ Erro ao carregar background print');
         resolve(null);
-      }
-    });
-  }
+      };
+
+      bg.src = PRINT_TEMPLATE;
+
+    } catch(e){
+      log('❌ drawPrint fatal error: ' + e);
+      resolve(null);
+    }
+  });
+}
 
   // -----------------------
   // PROCESS PHOTOS / PUBLISH VISUALIZADOR (manual flow / operator click)
