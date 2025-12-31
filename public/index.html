@@ -429,7 +429,7 @@
     if (p.timer) clearTimeout(p.timer);
     p.timer = setTimeout(() => {
       const take = p.photos.splice(0,3);
-      const vid = p.viewerId; // <<< corrigi aqui (antes estava p.p.viewerId por engano)
+      const vid = p.p.viewerId; // <<< corrigi aqui (antes estava p.p.viewerId por engano)
       p.timer = null;
       if (take && take.length) processPhotosAndUpload(take, vid).catch(e => log('❌ processPhotosAndUpload error: ' + e));
     }, MAX_WAIT_MS_FOR_BATCH);
@@ -625,186 +625,190 @@
     });
   }
 
- // -----------------------
-// drawPrint (versão robusta, mesma lógica do stories)
-// -----------------------
-function drawPrint(photos){
-  // increment token so we can detect newer concurrent calls
-  printDrawCounter++;
-  const myToken = printDrawCounter;
+  // -----------------------
+  // drawPrint (versão completa, robusta e auto-correção)
+  // Substituir a função inteira por este bloco
+  // -----------------------
+  function drawPrint(photos){
+    printDrawCounter++;
+    const myToken = printDrawCounter;
 
-  return new Promise((resolve) => {
-    try {
-      // create offscreen canvas to compose atomically
-      const off = document.createElement('canvas');
-      off.width = printCanvas.width;
-      off.height = printCanvas.height;
-      const octx = off.getContext('2d');
+    return new Promise(async (resolve) => {
+      try {
+        const off = document.createElement('canvas');
+        off.width = printCanvas.width;
+        off.height = printCanvas.height;
+        const octx = off.getContext('2d');
 
-      const bg = new Image();
-      bg.crossOrigin = 'anonymous';
+        // loader seguro que retorna { ok, img, url, width, height }
+        function loadImageSafe(url){
+          return new Promise((res) => {
+            if (!url) return res({ ok:false, img:null, url: url || null });
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => res({ ok:true, img, url, width: img.width, height: img.height });
+            img.onerror = () => res({ ok:false, img:null, url });
+            img.src = url;
+          });
+        }
 
-      // helper to create loaders safely: avoids setting img.src when p is falsy
-      const makeLoaders = (photosArr) => {
-        const requested = Array.isArray(photosArr) ? photosArr.slice(0,3) : [];
-        return [0,1,2].map(i => new Promise((res) => {
-          const p = requested[i];
-          if (!p) return res({ ok:false, img:null, i });
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => res({ ok:true, img, i });
-          img.onerror = () => res({ ok:false, img:null, i });
-          img.src = p;
-        }));
-      };
+        // prepara array com exatamente 3 entradas (null quando faltar)
+        const incoming = Array.isArray(photos) ? photos.slice(0,3) : [];
+        while (incoming.length < 3) incoming.push(null);
+        log('🔎 drawPrint incoming: ' + JSON.stringify(incoming.map(x => (x ? (typeof x === 'string' ? x.substring(0,120) : '[object]') : null))));
 
-      bg.onload = async () => {
-        try { octx.drawImage(bg, 0, 0, off.width, off.height); } catch(e){ log('⚠️ draw bg print error (offscreen): ' + e); }
+        // tenta carregar as entradas originais
+        const loadResults = await Promise.all(incoming.map(u => loadImageSafe(u)));
+        loadResults.forEach((r,i) => log(`🔁 firstLoad idx=${i} ok=${r.ok} url=${r.url? r.url.substring(0,120):'null'} dims=${r.width||'-'}x${r.height||'-'}`));
 
-        // load images into offscreen (safely)
-        const loaders = makeLoaders(photos);
-        const results = await Promise.all(loaders);
+        // cria array final de Image objects (ou null)
+        const finalImgs = [null, null, null];
+        for (let i = 0; i < 3; i++){
+          if (loadResults[i] && loadResults[i].ok) finalImgs[i] = loadResults[i].img;
+        }
 
-        results.forEach(r => {
-          if (r.ok && r.img) {
-            const c = PRINT_COORDS[r.i] || PRINT_COORDS[0];
-            try {
-              drawImageCover(octx, r.img, c.x, c.y, c.w, c.h);
-              log(`✅ Foto ${r.i+1} posicionada no print (offscreen): ${c.x},${c.y} ${c.w}x${c.h}`);
-            } catch(e){ log('⚠️ drawImageCover print error (offscreen): ' + e); }
+        // encontra referência (primeira válida)
+        let referenceUrl = null;
+        for (let i=0;i<3;i++) if (loadResults[i] && loadResults[i].ok) { referenceUrl = loadResults[i].url; break; }
+        if (!referenceUrl && Array.isArray(photos) && photos.length) referenceUrl = photos.find(p => !!p) || null;
+
+        // substitui índices inválidos por fallback (vizinho esquerdo, direito, ou reference)
+        for (let i=0;i<3;i++){
+          if (finalImgs[i]) continue;
+          let foundUrl = null;
+          for (let j = i-1; j >= 0; j--) if (loadResults[j] && loadResults[j].ok) { foundUrl = loadResults[j].url; break; }
+          if (!foundUrl) for (let j = i+1; j < 3; j++) if (loadResults[j] && loadResults[j].ok) { foundUrl = loadResults[j].url; break; }
+          if (!foundUrl) foundUrl = referenceUrl;
+          if (foundUrl) {
+            const r = await loadImageSafe(foundUrl);
+            if (r.ok) {
+              finalImgs[i] = r.img;
+              log(`🔁 substitute idx=${i} using fallback url (ok)`);
+            } else {
+              log(`⚠️ substitute idx=${i} fallback failed`);
+            }
           } else {
-            log(`⚠️ Foto ${r.i+1} ausente ou falhou ao carregar para print (offscreen)`);
+            log(`⚠️ substitute idx=${i} no fallback available`);
           }
-        });
+        }
 
-        // frame overlay on offscreen
-        const frame = new Image();
-        frame.crossOrigin = 'anonymous';
-        frame.onload = () => {
+        finalImgs.forEach((img,i) => log(`🔍 finalImgs[${i}] => ${img ? ('ok '+(img.width||'?')+'x'+(img.height||'?')) : 'MISSING'}`));
+
+        // função para renderizar tentativa (drawPhotosOnTopOfFrame = false => bg->photos->frame)
+        async function renderAttempt(drawPhotosOnTopOfFrame = false){
+          octx.clearRect(0,0,off.width,off.height);
+
+          // draw background (ou preto)
+          const bgRes = await loadImageSafe(PRINT_TEMPLATE);
+          if (bgRes.ok) {
+            try { octx.drawImage(bgRes.img, 0, 0, off.width, off.height); log('ℹ️ bg drawn'); } 
+            catch(e){ log('⚠️ bg draw failed: '+ e); octx.fillStyle='#000'; octx.fillRect(0,0,off.width,off.height); }
+          } else {
+            log('⚠️ bg not found -> black bg');
+            octx.fillStyle = '#000'; octx.fillRect(0,0,off.width,off.height);
+          }
+
+          // Se frame deve ficar abaixo das fotos (opção drawPhotosOnTopOfFrame === true),
+          // então desenhamos frame antes das fotos para depois redesenhar fotos por cima.
+          let frameImg = null;
+          if (drawPhotosOnTopOfFrame) {
+            const f = await loadImageSafe(FRAME_OVERLAY_PRINT);
+            if (f.ok) {
+              frameImg = f.img;
+              try { octx.drawImage(frameImg, 0, 0, off.width, off.height); log('ℹ️ frame drawn BEFORE photos (to be overpainted)'); } catch(e){ log('⚠️ frame-before draw failed: '+e); frameImg = null; }
+            } else {
+              log('⚠️ frame not found (before)');
+            }
+          }
+
+          // desenha as fotos na ordem dos PRINT_COORDS
+          for (let i=0;i<3;i++){
+            const img = finalImgs[i];
+            if (!img) { log(`⚠️ skip draw idx=${i} (no img)`); continue; }
+            const c = PRINT_COORDS[i] || PRINT_COORDS[0];
+            try {
+              octx.save();
+              octx.imageSmoothingEnabled = true;
+              octx.globalCompositeOperation = 'source-over';
+              octx.globalAlpha = 1.0;
+              drawImageCover(octx, img, c.x, c.y, c.w, c.h);
+              octx.restore();
+              log(`✅ drawImageCover idx=${i} at ${c.x},${c.y} ${c.w}x${c.h}`);
+            } catch(e){
+              log('❌ drawImageCover error idx='+i+' -> '+(e.message||e));
+            }
+          }
+
+          // se drawPhotosOnTopOfFrame == false, desenhamos frame agora (por cima das fotos)
+          if (!drawPhotosOnTopOfFrame) {
+            const f2 = await loadImageSafe(FRAME_OVERLAY_PRINT);
+            if (f2.ok) {
+              try { octx.drawImage(f2.img, 0, 0, off.width, off.height); log('ℹ️ frame drawn AFTER photos (overlay)'); } catch(e){ log('⚠️ frame-after draw failed: '+e); }
+            } else {
+              log('⚠️ frame not found (after)');
+            }
+          }
+
+          return off.toDataURL('image/jpeg', 0.95);
+        }
+
+        // chama primeira tentativa: bg -> photos -> frame (frame sobre photos)
+        await renderAttempt(false);
+
+        // verifica se o meio tem conteúdo útil
+        function checkMiddleHasContent(){
           try {
-            octx.drawImage(frame, 0, 0, off.width, off.height);
-            log('✅ Moldura aplicada sobre print (offscreen, moldura2.png)');
+            const c = PRINT_COORDS[1];
+            const sampleX = Math.floor(c.x + c.w/2);
+            const sampleY = Math.floor(c.y + c.h/2);
+            const px = octx.getImageData(sampleX, sampleY, 1, 1).data;
+            log(`🔬 middle sample rgba=${px[0]},${px[1]},${px[2]},${px[3]}`);
+            if (px[3] === 0) return false;
+            if (px[0] === 255 && px[1] === 255 && px[2] === 255) return false;
+            return true;
           } catch(e){
-            log('⚠️ Erro ao desenhar moldura print (offscreen): ' + e);
+            log('⚠️ checkMiddleHasContent error: '+ (e.message||e));
+            return true; // fail-safe para não bloquear
           }
+        }
 
-          // now atomically paint offscreen to visible canvas and export
-          requestAnimationFrame(() => {
-            try {
-              if (myToken === printDrawCounter) {
-                const ctx = printCanvas.getContext('2d');
-                ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
-                ctx.drawImage(off, 0, 0);
-              } else {
-                log('ℹ️ drawPrint: skipping visible paint because a newer draw started');
-              }
+        let middleOk = checkMiddleHasContent();
+        if (!middleOk) {
+          log('⚠️ Middle seems covered/blank. Redrawing with photos ON TOP of frame.');
+          // segunda tentativa: desenha frame primeiro (já feito internamente) e redesenha fotos por cima
+          await renderAttempt(true);
+          middleOk = checkMiddleHasContent();
+          log('ℹ️ After re-draw, middleOk=' + middleOk);
+        } else {
+          log('✅ Middle sample OK (first pass)');
+        }
 
-              const dataUrl = off.toDataURL('image/jpeg', 0.95);
-              if (myToken === printDrawCounter) {
-                currentPrintMontageDataUrl = dataUrl;
-                printBtn.disabled = false;
-              }
-              log('✅ print montage dataURL gerado (offscreen)');
-              resolve(dataUrl);
-            } catch(e){
-              log('⚠️ drawPrint export failed: ' + e);
-              resolve(null);
+        // pinta o canvas visível se o token ainda for atual
+        requestAnimationFrame(() => {
+          try {
+            if (myToken === printDrawCounter) {
+              const ctx = printCanvas.getContext('2d');
+              ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
+              ctx.drawImage(off, 0, 0);
+              currentPrintMontageDataUrl = off.toDataURL('image/jpeg', 0.95);
+              printBtn.disabled = false;
+              log('✅ final paint to visible canvas done. middleOk=' + middleOk);
+            } else {
+              log('ℹ️ drawPrint aborted paint (stale token)');
             }
-          });
-        };
-
-        frame.onerror = () => {
-          log('⚠️ Moldura de print não encontrada (moldura2.png). Continuando sem moldura (offscreen).');
-          requestAnimationFrame(() => {
-            try {
-              if (myToken === printDrawCounter) {
-                const ctx = printCanvas.getContext('2d');
-                ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
-                ctx.drawImage(off, 0, 0);
-              }
-              const dataUrl = off.toDataURL('image/jpeg', 0.95);
-              if (myToken === printDrawCounter) {
-                currentPrintMontageDataUrl = dataUrl;
-                printBtn.disabled = false;
-              }
-              log('✅ print montage dataURL gerado (offscreen, no-frame)');
-              resolve(dataUrl);
-            } catch(e){
-              log('⚠️ drawPrint (no-frame) export failed: ' + e);
-              resolve(null);
-            }
-          });
-        };
-
-        frame.src = FRAME_OVERLAY_PRINT;
-      }; // bg.onload
-
-      // bg fallback - if bg fails, compose on black background and still proceed
-      bg.onerror = async () => {
-        log('❌ Erro ao carregar background print (offscreen). Usando fundo preto.');
-        octx.fillStyle = '#000';
-        octx.fillRect(0,0,off.width,off.height);
-
-        const loaders = makeLoaders(photos);
-        const results = await Promise.all(loaders);
-        results.forEach(r => {
-          if (r.ok && r.img) {
-            const c = PRINT_COORDS[r.i] || PRINT_COORDS[0];
-            try { drawImageCover(octx, r.img, c.x, c.y, c.w, c.h); } catch(e){}
-          } else {
-            log(`⚠️ Foto ${r.i+1} ausente ou falhou ao carregar para print (bg fallback)`);
+            resolve(currentPrintMontageDataUrl);
+          } catch(e){
+            log('❌ final paint failed: ' + (e.message||e));
+            resolve(null);
           }
         });
 
-        const frame = new Image();
-        frame.crossOrigin = 'anonymous';
-        frame.onload = () => {
-          try { octx.drawImage(frame, 0, 0, off.width, off.height); } catch(e){}
-          requestAnimationFrame(() => {
-            try {
-              if (myToken === printDrawCounter) {
-                const ctx = printCanvas.getContext('2d');
-                ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
-                ctx.drawImage(off, 0, 0);
-              }
-              const dataUrl = off.toDataURL('image/jpeg', 0.95);
-              if (myToken === printDrawCounter) {
-                currentPrintMontageDataUrl = dataUrl;
-                printBtn.disabled = false;
-              }
-              resolve(dataUrl);
-            } catch(e){ resolve(null); }
-          });
-        };
-        frame.onerror = () => {
-          requestAnimationFrame(() => {
-            try {
-              if (myToken === printDrawCounter) {
-                const ctx = printCanvas.getContext('2d');
-                ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
-                ctx.drawImage(off, 0, 0);
-              }
-              const dataUrl = off.toDataURL('image/jpeg', 0.95);
-              if (myToken === printDrawCounter) {
-                currentPrintMontageDataUrl = dataUrl;
-                printBtn.disabled = false;
-              }
-              resolve(dataUrl);
-            } catch(e){ resolve(null); }
-          });
-        };
-        frame.src = FRAME_OVERLAY_PRINT;
-      }; // bg.onerror
-
-      // start loading background (this triggers the flow)
-      bg.src = PRINT_TEMPLATE;
-
-    } catch(e){
-      log('❌ drawPrint fatal error: ' + e);
-      resolve(null);
-    }
-  });
-}
+      } catch(e){
+        log('❌ drawPrint fatal error: ' + (e.message||e));
+        resolve(null);
+      }
+    });
+  }
 
   // -----------------------
   // PROCESS PHOTOS / PUBLISH VISUALIZADOR (manual flow / operator click)
