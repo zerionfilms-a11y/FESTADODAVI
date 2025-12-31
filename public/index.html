@@ -160,6 +160,9 @@
   let currentPrintMontageDataUrl = null;
   let currentBoomerangUrl = null;
 
+  // token to avoid race overwrites on print canvas
+  let printDrawCounter = 0;
+
   // pendingVisualizers: quando server envia fotos antes das montagens, guardamos o payload aqui e processamos depois
   const pendingVisualizers = {}; // viewerId => { session, uploadedPhotos, payload }
 
@@ -622,102 +625,197 @@
     });
   }
 
-function drawPrint(photos){
-  return new Promise((resolve) => {
-    try {
-      const ctx = printCanvas.getContext('2d');
-      ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
+  // -----------------------
+  // drawPrint (ATÔMICO: monta em offscreen e atualiza o canvas visível no final)
+  // -----------------------
+  function drawPrint(photos){
+    // increment token so we can detect newer concurrent calls
+    printDrawCounter++;
+    const myToken = printDrawCounter;
 
-      const bg = new Image();
-      bg.crossOrigin = 'anonymous';
-
-      bg.onload = async () => {
-        try {
-          ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height);
-        } catch(e){
-          log('⚠️ draw bg print error: ' + e);
+    return new Promise((resolve) => {
+      try {
+        // prepare photosLocal (up to 3)
+        const photosLocal = (Array.isArray(photos) ? photos.slice(0,3) : []).slice(0,3);
+        while (photosLocal.length < 3) {
+          if (photosLocal.length) photosLocal.push(photosLocal[photosLocal.length - 1]);
+          else if (Array.isArray(photos) && photos.length) photosLocal.push(photos[0]);
+          else photosLocal.push('');
         }
 
-        // load all photos (EXATAMENTE igual stories)
-        const loaders = photos.slice(0,3).map((p, i) => new Promise((res) => {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => res({ ok:true, img, i });
-          img.onerror = () => res({ ok:false, img:null, i });
-          img.src = p;
-        }));
+        // create offscreen canvas to compose atomically
+        const off = document.createElement('canvas');
+        off.width = printCanvas.width;
+        off.height = printCanvas.height;
+        const octx = off.getContext('2d');
 
-        const results = await Promise.all(loaders);
+        const bg = new Image();
+        bg.crossOrigin = 'anonymous';
+        bg.onload = async () => {
+          try { octx.drawImage(bg, 0, 0, off.width, off.height); } catch(e){ log('⚠️ draw bg print error (offscreen): ' + e); }
 
-        results.forEach(r => {
-          if (r.ok && r.img) {
-            const c = PRINT_COORDS[r.i] || PRINT_COORDS[0];
-            try {
-              drawImageCover(ctx, r.img, c.x, c.y, c.w, c.h);
-              log(`✅ Foto ${r.i+1} posicionada no print`);
-            } catch(e){
-              log('⚠️ drawImageCover print error: ' + e);
+          // load images into offscreen
+          const loaders = photosLocal.map((p, i) => new Promise((res) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => res({ ok:true, img, i });
+            img.onerror = () => res({ ok:false, img:null, i });
+            img.src = p;
+          }));
+
+          const results = await Promise.all(loaders);
+          results.forEach(r => {
+            if (r.ok && r.img) {
+              const c = PRINT_COORDS[r.i] || PRINT_COORDS[0];
+              try {
+                drawImageCover(octx, r.img, c.x, c.y, c.w, c.h);
+                log(`✅ Foto ${r.i+1} posicionada no print (offscreen): ${c.x},${c.y} ${c.w}x${c.h}`);
+              } catch(e){ log('⚠️ drawImageCover print error (offscreen): ' + e); }
+            } else {
+              log(`⚠️ Foto ${r.i+1} falhou ao carregar para print (offscreen)`);
             }
-          } else {
-            log(`⚠️ Foto ${r.i+1} falhou ao carregar para print`);
-          }
-        });
-
-        // apply frame overlay (IGUAL stories)
-        const frame = new Image();
-        frame.crossOrigin = 'anonymous';
-
-        frame.onload = () => {
-          try {
-            ctx.drawImage(frame, 0, 0, printCanvas.width, printCanvas.height);
-            log('✅ Moldura aplicada sobre print (moldura2.png)');
-          } catch(e){
-            log('⚠️ Erro ao desenhar moldura print: ' + e);
-          }
-
-          requestAnimationFrame(() => {
-            try {
-              currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
-              log('✅ print montage dataURL gerado');
-            } catch(e){
-              log('⚠️ toDataURL print failed: ' + e);
-              currentPrintMontageDataUrl = null;
-            }
-
-            if (currentPrintMontageDataUrl) printBtn.disabled = false;
-            resolve(currentPrintMontageDataUrl);
           });
+
+          // frame overlay on offscreen
+          const frame = new Image();
+          frame.crossOrigin = 'anonymous';
+          frame.onload = () => {
+            try {
+              octx.drawImage(frame, 0, 0, off.width, off.height);
+              log('✅ Moldura aplicada sobre print (offscreen, moldura2.png)');
+            } catch(e){
+              log('⚠️ Erro ao desenhar moldura print (offscreen): ' + e);
+            }
+
+            // now atomically paint offscreen to visible canvas and export
+            requestAnimationFrame(() => {
+              try {
+                // only update visible canvas if this is the most recent call
+                if (myToken === printDrawCounter) {
+                  const ctx = printCanvas.getContext('2d');
+                  ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
+                  ctx.drawImage(off, 0, 0);
+                } else {
+                  // newer draw started meanwhile; skip painting visible to avoid race
+                  log('ℹ️ drawPrint: skipping visible paint because a newer draw started');
+                }
+
+                // Always generate dataURL from offscreen (fast), resolve with it.
+                const dataUrl = off.toDataURL('image/jpeg', 0.95);
+                // set currentPrintMontageDataUrl only if this is the latest draw,
+                // otherwise we still resolve so callers get their composed data.
+                if (myToken === printDrawCounter) {
+                  currentPrintMontageDataUrl = dataUrl;
+                  printBtn.disabled = false;
+                } else {
+                  // don't override visible-state variable with stale one; but it's safe to keep it as data artifact
+                }
+                log('✅ print montage dataURL gerado (offscreen)');
+                resolve(dataUrl);
+              } catch(e){
+                log('⚠️ drawPrint export failed: ' + e);
+                resolve(null);
+              }
+            });
+          };
+
+          frame.onerror = () => {
+            log('⚠️ Moldura de print não encontrada (moldura2.png). Continuando sem moldura (offscreen).');
+            requestAnimationFrame(() => {
+              try {
+                if (myToken === printDrawCounter) {
+                  const ctx = printCanvas.getContext('2d');
+                  ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
+                  ctx.drawImage(off, 0, 0);
+                } else {
+                  log('ℹ️ drawPrint (no-frame): skipping visible paint because a newer draw started');
+                }
+                const dataUrl = off.toDataURL('image/jpeg', 0.95);
+                if (myToken === printDrawCounter) {
+                  currentPrintMontageDataUrl = dataUrl;
+                  printBtn.disabled = false;
+                }
+                log('✅ print montage dataURL gerado (offscreen, no-frame)');
+                resolve(dataUrl);
+              } catch(e){
+                log('⚠️ drawPrint (no-frame) export failed: ' + e);
+                resolve(null);
+              }
+            });
+          };
+
+          frame.src = FRAME_OVERLAY_PRINT;
         };
 
-        frame.onerror = () => {
-          log('⚠️ Moldura print não encontrada (moldura2.png)');
-          requestAnimationFrame(() => {
-            try {
-              currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
-            } catch(e){
-              currentPrintMontageDataUrl = null;
+        // bg fallback - if bg fails, compose on black background and still proceed
+        bg.onerror = async () => {
+          log('❌ Erro ao carregar background print (offscreen). Usando fundo preto.');
+          octx.fillStyle = '#000';
+          octx.fillRect(0,0,off.width,off.height);
+
+          const loaders = photosLocal.map((p, i) => new Promise((res) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => res({ ok:true, img, i });
+            img.onerror = () => res({ ok:false, img:null, i });
+            img.src = p;
+          }));
+          const results = await Promise.all(loaders);
+          results.forEach(r => {
+            if (r.ok && r.img) {
+              const c = PRINT_COORDS[r.i] || PRINT_COORDS[0];
+              try { drawImageCover(octx, r.img, c.x, c.y, c.w, c.h); } catch(e){}
             }
-            if (currentPrintMontageDataUrl) printBtn.disabled = false;
-            resolve(currentPrintMontageDataUrl);
           });
+
+          const frame = new Image();
+          frame.crossOrigin = 'anonymous';
+          frame.onload = () => {
+            try { octx.drawImage(frame, 0, 0, off.width, off.height); } catch(e){}
+            requestAnimationFrame(() => {
+              try {
+                if (myToken === printDrawCounter) {
+                  const ctx = printCanvas.getContext('2d');
+                  ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
+                  ctx.drawImage(off, 0, 0);
+                }
+                const dataUrl = off.toDataURL('image/jpeg', 0.95);
+                if (myToken === printDrawCounter) {
+                  currentPrintMontageDataUrl = dataUrl;
+                  printBtn.disabled = false;
+                }
+                resolve(dataUrl);
+              } catch(e){ resolve(null); }
+            });
+          };
+          frame.onerror = () => {
+            requestAnimationFrame(() => {
+              try {
+                if (myToken === printDrawCounter) {
+                  const ctx = printCanvas.getContext('2d');
+                  ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
+                  ctx.drawImage(off, 0, 0);
+                }
+                const dataUrl = off.toDataURL('image/jpeg', 0.95);
+                if (myToken === printDrawCounter) {
+                  currentPrintMontageDataUrl = dataUrl;
+                  printBtn.disabled = false;
+                }
+                resolve(dataUrl);
+              } catch(e){ resolve(null); }
+            });
+          };
+          frame.src = FRAME_OVERLAY_PRINT;
         };
 
-        frame.src = FRAME_OVERLAY_PRINT;
-      };
+        bg.src = PRINT_TEMPLATE;
 
-      bg.onerror = () => {
-        log('❌ Erro ao carregar background print');
+      } catch(e){
+        log('❌ drawPrint fatal error: ' + e);
         resolve(null);
-      };
-
-      bg.src = PRINT_TEMPLATE;
-
-    } catch(e){
-      log('❌ drawPrint fatal error: ' + e);
-      resolve(null);
-    }
-  });
-}
+      }
+    });
+  }
 
   // -----------------------
   // PROCESS PHOTOS / PUBLISH VISUALIZADOR (manual flow / operator click)
