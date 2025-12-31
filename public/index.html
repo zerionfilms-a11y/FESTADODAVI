@@ -564,19 +564,25 @@
               ctx.drawImage(frame, 0, 0, storiesCanvas.width, storiesCanvas.height);
               log('✅ Moldura aplicada sobre stories (moldura.png)');
             } catch(e) { log('⚠️ Erro ao desenhar moldura: ' + e); }
-            try {
-              currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95);
-              log('✅ stories montage dataURL gerado');
-            } catch(e){ log('⚠️ toDataURL stories failed: ' + e); currentStoriesMontageDataUrl = null; }
-            resolve(currentStoriesMontageDataUrl);
+
+            // garante flush do canvas antes do toDataURL
+            requestAnimationFrame(() => {
+              try {
+                currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95);
+                log('✅ stories montage dataURL gerado');
+              } catch(e){ log('⚠️ toDataURL stories failed: ' + e); currentStoriesMontageDataUrl = null; }
+              resolve(currentStoriesMontageDataUrl);
+            });
           };
           frame.onerror = () => {
-            try {
-              currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95);
-              log('⚠️ Moldura não encontrada (moldura.png). Continuing without frame.');
-              log('✅ stories montage dataURL gerado (sem moldura)');
-            } catch(e){ log('⚠️ toDataURL stories failed (no frame): ' + e); currentStoriesMontageDataUrl = null; }
-            resolve(currentStoriesMontageDataUrl);
+            log('⚠️ Moldura não encontrada (moldura.png). Continuing without frame.');
+            requestAnimationFrame(() => {
+              try {
+                currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95);
+                log('✅ stories montage dataURL gerado (sem moldura)');
+              } catch(e){ log('⚠️ toDataURL stories failed (no frame): ' + e); currentStoriesMontageDataUrl = null; }
+              resolve(currentStoriesMontageDataUrl);
+            });
           };
           frame.src = FRAME_OVERLAY;
         };
@@ -602,8 +608,10 @@
                 try { drawImageCover(ctx2, r.img, c.x, c.y, c.w, c.h); } catch(e){}
               }
             });
-            try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); log('✅ stories montage dataURL gerado (bg fail)'); } catch(e){ currentStoriesMontageDataUrl = null; }
-            resolve(currentStoriesMontageDataUrl);
+            requestAnimationFrame(() => {
+              try { currentStoriesMontageDataUrl = storiesCanvas.toDataURL('image/jpeg', 0.95); log('✅ stories montage dataURL gerado (bg fail)'); } catch(e){ currentStoriesMontageDataUrl = null; }
+              resolve(currentStoriesMontageDataUrl);
+            });
           })();
         };
         bg.src = STORIES_TEMPLATE;
@@ -665,27 +673,34 @@
               log('⚠️ Erro ao desenhar moldura print: ' + e);
             }
 
-            try {
-              currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
-              log('✅ print montage dataURL gerado');
-            } catch(e){
-              log('⚠️ toDataURL print failed: ' + e);
-              currentPrintMontageDataUrl = null;
-            }
+            // 🔴 GARANTE QUE TODAS AS FOTOS FORAM REALMENTE DESENHADAS ANTES DO toDataURL
+            requestAnimationFrame(() => {
+              try {
+                currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
+                log('✅ print montage dataURL gerado');
+              } catch(e){
+                log('⚠️ toDataURL print failed: ' + e);
+                currentPrintMontageDataUrl = null;
+              }
 
-            if (currentPrintMontageDataUrl) printBtn.disabled = false;
-            resolve(currentPrintMontageDataUrl);
+              if (currentPrintMontageDataUrl) printBtn.disabled = false;
+              resolve(currentPrintMontageDataUrl);
+            });
           };
 
           frame.onerror = () => {
             log('⚠️ Moldura de print não encontrada (moldura2.png). Continuando sem moldura.');
-            try {
-              currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
-            } catch(e){
-              currentPrintMontageDataUrl = null;
-            }
-            if (currentPrintMontageDataUrl) printBtn.disabled = false;
-            resolve(currentPrintMontageDataUrl);
+            requestAnimationFrame(() => {
+              try {
+                currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95);
+                log('✅ print montage dataURL gerado (sem moldura)');
+              } catch(e){
+                log('⚠️ toDataURL print failed (no frame): ' + e);
+                currentPrintMontageDataUrl = null;
+              }
+              if (currentPrintMontageDataUrl) printBtn.disabled = false;
+              resolve(currentPrintMontageDataUrl);
+            });
           };
 
           frame.src = FRAME_OVERLAY_PRINT;
@@ -711,9 +726,11 @@
                 try { drawImageCover(ctx2, r.img, c.x, c.y, c.w, c.h); } catch(e){}
               }
             });
-            try { currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95); log('✅ print montage dataURL gerado (bg fail)'); } catch(e){ currentPrintMontageDataUrl = null; }
-            if (currentPrintMontageDataUrl) printBtn.disabled = false;
-            resolve(currentPrintMontageDataUrl);
+            requestAnimationFrame(() => {
+              try { currentPrintMontageDataUrl = printCanvas.toDataURL('image/jpeg', 0.95); log('✅ print montage dataURL gerado (bg fail)'); } catch(e){ currentPrintMontageDataUrl = null; }
+              if (currentPrintMontageDataUrl) printBtn.disabled = false;
+              resolve(currentPrintMontageDataUrl);
+            });
           })();
         };
         bg.src = PRINT_TEMPLATE;
