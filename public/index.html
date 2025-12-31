@@ -429,7 +429,7 @@
     if (p.timer) clearTimeout(p.timer);
     p.timer = setTimeout(() => {
       const take = p.photos.splice(0,3);
-      const vid = p.p.viewerId; // <<< corrigi aqui (antes estava p.p.viewerId por engano)
+      const vid = p.viewerId;
       p.timer = null;
       if (take && take.length) processPhotosAndUpload(take, vid).catch(e => log('❌ processPhotosAndUpload error: ' + e));
     }, MAX_WAIT_MS_FOR_BATCH);
@@ -626,12 +626,14 @@
   }
 
   // -----------------------
-  // drawPrint (versão completa, robusta e auto-correção)
-  // Substituir a função inteira por este bloco
+  // drawPrint (versão final: processa moldura2 para tornar branco -> transparente e desenha por cima)
   // -----------------------
   function drawPrint(photos){
     printDrawCounter++;
     const myToken = printDrawCounter;
+
+    // cache do resultado do processamento da moldura para evitar recalcular várias vezes
+    if (!window._processedFrameCache) window._processedFrameCache = { url: null, canvas: null };
 
     return new Promise(async (resolve) => {
       try {
@@ -640,7 +642,6 @@
         off.height = printCanvas.height;
         const octx = off.getContext('2d');
 
-        // loader seguro que retorna { ok, img, url, width, height }
         function loadImageSafe(url){
           return new Promise((res) => {
             if (!url) return res({ ok:false, img:null, url: url || null });
@@ -652,27 +653,70 @@
           });
         }
 
-        // prepara array com exatamente 3 entradas (null quando faltar)
+        // transforma pixels quase-brancos do frame em transparentes e retorna um canvas
+        async function getProcessedFrameCanvas(frameUrl) {
+          try {
+            // se já tivermos cache e mesma URL, retorna
+            if (window._processedFrameCache.url === frameUrl && window._processedFrameCache.canvas) {
+              return window._processedFrameCache.canvas;
+            }
+            const r = await loadImageSafe(frameUrl);
+            if (!r.ok || !r.img) return null;
+
+            // cria canvas temporário com mesma dimensão do offscreen final (assim já escala)
+            const temp = document.createElement('canvas');
+            temp.width = off.width;
+            temp.height = off.height;
+            const tctx = temp.getContext('2d');
+
+            // desenha frame no temp (scale)
+            try { tctx.drawImage(r.img, 0, 0, temp.width, temp.height); } catch(e){ return null; }
+
+            // pega dados e torna quase-branco transparente
+            try {
+              const data = tctx.getImageData(0, 0, temp.width, temp.height);
+              const pix = data.data;
+              // threshold (0-255) - ajusta se necessário
+              const TH = 250;
+              for (let i = 0; i < pix.length; i += 4) {
+                const rC = pix[i], gC = pix[i+1], bC = pix[i+2];
+                // se muito claro (quase branco) tornamos transparente
+                if (rC >= TH && gC >= TH && bC >= TH) {
+                  pix[i+3] = 0;
+                }
+              }
+              tctx.putImageData(data, 0, 0);
+              // guarda em cache
+              window._processedFrameCache.url = frameUrl;
+              window._processedFrameCache.canvas = temp;
+              log('🔧 Frame processado: branco -> transparente (cache salvo)');
+              return temp;
+            } catch(e){
+              log('⚠️ Falha ao processar pixels do frame: ' + (e.message||e));
+              return temp; // fallback: retorna temp sem alteração
+            }
+          } catch(e){
+            log('⚠️ Erro getProcessedFrameCanvas: ' + (e.message||e));
+            return null;
+          }
+        }
+
+        // prepara fotos (até 3)
         const incoming = Array.isArray(photos) ? photos.slice(0,3) : [];
         while (incoming.length < 3) incoming.push(null);
         log('🔎 drawPrint incoming: ' + JSON.stringify(incoming.map(x => (x ? (typeof x === 'string' ? x.substring(0,120) : '[object]') : null))));
 
-        // tenta carregar as entradas originais
         const loadResults = await Promise.all(incoming.map(u => loadImageSafe(u)));
         loadResults.forEach((r,i) => log(`🔁 firstLoad idx=${i} ok=${r.ok} url=${r.url? r.url.substring(0,120):'null'} dims=${r.width||'-'}x${r.height||'-'}`));
 
-        // cria array final de Image objects (ou null)
         const finalImgs = [null, null, null];
-        for (let i = 0; i < 3; i++){
-          if (loadResults[i] && loadResults[i].ok) finalImgs[i] = loadResults[i].img;
-        }
+        for (let i = 0; i < 3; i++) if (loadResults[i] && loadResults[i].ok) finalImgs[i] = loadResults[i].img;
 
-        // encontra referência (primeira válida)
         let referenceUrl = null;
         for (let i=0;i<3;i++) if (loadResults[i] && loadResults[i].ok) { referenceUrl = loadResults[i].url; break; }
         if (!referenceUrl && Array.isArray(photos) && photos.length) referenceUrl = photos.find(p => !!p) || null;
 
-        // substitui índices inválidos por fallback (vizinho esquerdo, direito, ou reference)
+        // fallback neighbors (se faltar)
         for (let i=0;i<3;i++){
           if (finalImgs[i]) continue;
           let foundUrl = null;
@@ -681,109 +725,55 @@
           if (!foundUrl) foundUrl = referenceUrl;
           if (foundUrl) {
             const r = await loadImageSafe(foundUrl);
-            if (r.ok) {
-              finalImgs[i] = r.img;
-              log(`🔁 substitute idx=${i} using fallback url (ok)`);
-            } else {
-              log(`⚠️ substitute idx=${i} fallback failed`);
-            }
-          } else {
-            log(`⚠️ substitute idx=${i} no fallback available`);
-          }
+            if (r.ok) { finalImgs[i] = r.img; log(`🔁 substitute idx=${i} ok`); }
+            else log(`⚠️ substitute idx=${i} failed`);
+          } else log(`⚠️ substitute idx=${i} no fallback`);
         }
 
         finalImgs.forEach((img,i) => log(`🔍 finalImgs[${i}] => ${img ? ('ok '+(img.width||'?')+'x'+(img.height||'?')) : 'MISSING'}`));
 
-        // função para renderizar tentativa (drawPhotosOnTopOfFrame = false => bg->photos->frame)
-        async function renderAttempt(drawPhotosOnTopOfFrame = false){
-          octx.clearRect(0,0,off.width,off.height);
-
-          // draw background (ou preto)
-          const bgRes = await loadImageSafe(PRINT_TEMPLATE);
-          if (bgRes.ok) {
-            try { octx.drawImage(bgRes.img, 0, 0, off.width, off.height); log('ℹ️ bg drawn'); } 
-            catch(e){ log('⚠️ bg draw failed: '+ e); octx.fillStyle='#000'; octx.fillRect(0,0,off.width,off.height); }
-          } else {
-            log('⚠️ bg not found -> black bg');
-            octx.fillStyle = '#000'; octx.fillRect(0,0,off.width,off.height);
-          }
-
-          // Se frame deve ficar abaixo das fotos (opção drawPhotosOnTopOfFrame === true),
-          // então desenhamos frame antes das fotos para depois redesenhar fotos por cima.
-          let frameImg = null;
-          if (drawPhotosOnTopOfFrame) {
-            const f = await loadImageSafe(FRAME_OVERLAY_PRINT);
-            if (f.ok) {
-              frameImg = f.img;
-              try { octx.drawImage(frameImg, 0, 0, off.width, off.height); log('ℹ️ frame drawn BEFORE photos (to be overpainted)'); } catch(e){ log('⚠️ frame-before draw failed: '+e); frameImg = null; }
-            } else {
-              log('⚠️ frame not found (before)');
-            }
-          }
-
-          // desenha as fotos na ordem dos PRINT_COORDS
-          for (let i=0;i<3;i++){
-            const img = finalImgs[i];
-            if (!img) { log(`⚠️ skip draw idx=${i} (no img)`); continue; }
-            const c = PRINT_COORDS[i] || PRINT_COORDS[0];
-            try {
-              octx.save();
-              octx.imageSmoothingEnabled = true;
-              octx.globalCompositeOperation = 'source-over';
-              octx.globalAlpha = 1.0;
-              drawImageCover(octx, img, c.x, c.y, c.w, c.h);
-              octx.restore();
-              log(`✅ drawImageCover idx=${i} at ${c.x},${c.y} ${c.w}x${c.h}`);
-            } catch(e){
-              log('❌ drawImageCover error idx='+i+' -> '+(e.message||e));
-            }
-          }
-
-          // se drawPhotosOnTopOfFrame == false, desenhamos frame agora (por cima das fotos)
-          if (!drawPhotosOnTopOfFrame) {
-            const f2 = await loadImageSafe(FRAME_OVERLAY_PRINT);
-            if (f2.ok) {
-              try { octx.drawImage(f2.img, 0, 0, off.width, off.height); log('ℹ️ frame drawn AFTER photos (overlay)'); } catch(e){ log('⚠️ frame-after draw failed: '+e); }
-            } else {
-              log('⚠️ frame not found (after)');
-            }
-          }
-
-          return off.toDataURL('image/jpeg', 0.95);
-        }
-
-        // chama primeira tentativa: bg -> photos -> frame (frame sobre photos)
-        await renderAttempt(false);
-
-        // verifica se o meio tem conteúdo útil
-        function checkMiddleHasContent(){
-          try {
-            const c = PRINT_COORDS[1];
-            const sampleX = Math.floor(c.x + c.w/2);
-            const sampleY = Math.floor(c.y + c.h/2);
-            const px = octx.getImageData(sampleX, sampleY, 1, 1).data;
-            log(`🔬 middle sample rgba=${px[0]},${px[1]},${px[2]},${px[3]}`);
-            if (px[3] === 0) return false;
-            if (px[0] === 255 && px[1] === 255 && px[2] === 255) return false;
-            return true;
-          } catch(e){
-            log('⚠️ checkMiddleHasContent error: '+ (e.message||e));
-            return true; // fail-safe para não bloquear
-          }
-        }
-
-        let middleOk = checkMiddleHasContent();
-        if (!middleOk) {
-          log('⚠️ Middle seems covered/blank. Redrawing with photos ON TOP of frame.');
-          // segunda tentativa: desenha frame primeiro (já feito internamente) e redesenha fotos por cima
-          await renderAttempt(true);
-          middleOk = checkMiddleHasContent();
-          log('ℹ️ After re-draw, middleOk=' + middleOk);
+        // desenha background
+        const bgRes = await loadImageSafe(PRINT_TEMPLATE);
+        if (bgRes.ok) {
+          try { octx.drawImage(bgRes.img, 0, 0, off.width, off.height); log('ℹ️ bg drawn'); }
+          catch(e){ log('⚠️ bg draw failed: ' + e); octx.fillStyle='#000'; octx.fillRect(0,0,off.width,off.height); }
         } else {
-          log('✅ Middle sample OK (first pass)');
+          log('⚠️ bg not found -> black bg');
+          octx.fillStyle = '#000'; octx.fillRect(0,0,off.width,off.height);
         }
 
-        // pinta o canvas visível se o token ainda for atual
+        // desenha as fotos
+        for (let i=0;i<3;i++){
+          const img = finalImgs[i];
+          if (!img) { log(`⚠️ skip draw idx=${i} (no img)`); continue; }
+          const c = PRINT_COORDS[i] || PRINT_COORDS[0];
+          try {
+            drawImageCover(octx, img, c.x, c.y, c.w, c.h);
+            log(`✅ drawImageCover idx=${i} at ${c.x},${c.y} ${c.w}x${c.h}`);
+          } catch(e){
+            log('❌ drawImageCover error idx='+i+' -> '+(e.message||e));
+          }
+        }
+
+        // processa frame para tornar branco -> transparente e desenha POR CIMA das fotos
+        const processedFrameCanvas = await getProcessedFrameCanvas(FRAME_OVERLAY_PRINT);
+        if (processedFrameCanvas) {
+          try {
+            octx.drawImage(processedFrameCanvas, 0, 0, off.width, off.height);
+            log('✅ frame (processado) desenhado POR CIMA das fotos');
+          } catch(e){
+            log('⚠️ erro ao desenhar frame processado: ' + (e.message||e));
+          }
+        } else {
+          // fallback: tenta desenhar normalmente o frame original
+          const fOrig = await loadImageSafe(FRAME_OVERLAY_PRINT);
+          if (fOrig.ok) {
+            try { octx.drawImage(fOrig.img, 0, 0, off.width, off.height); log('✅ frame desenhado (orig fallback)'); }
+            catch(e){ log('⚠️ frame draw fallback failed: ' + (e.message||e)); }
+          } else log('⚠️ frame não encontrada (nenhum frame desenhado)');
+        }
+
+        // snapshot e pinta canvas visível
         requestAnimationFrame(() => {
           try {
             if (myToken === printDrawCounter) {
@@ -792,7 +782,7 @@
               ctx.drawImage(off, 0, 0);
               currentPrintMontageDataUrl = off.toDataURL('image/jpeg', 0.95);
               printBtn.disabled = false;
-              log('✅ final paint to visible canvas done. middleOk=' + middleOk);
+              log('✅ final paint to visible canvas done (frame on top)');
             } else {
               log('ℹ️ drawPrint aborted paint (stale token)');
             }
