@@ -407,7 +407,7 @@
   }
 
   // -----------------------
-  // PENDING BATCH MANAGEMENT (unchanged)
+  // PENDING BATCH MANAGEMENT (unchanged, typo fix applied)
   // -----------------------
   function appendToPendingAndMaybeProcess(session, photosArray, viewerId) {
     if (!pendingBySession[session]) pendingBySession[session] = { photos: [], timer: null, viewerId: viewerId || null };
@@ -426,7 +426,7 @@
     if (p.timer) clearTimeout(p.timer);
     p.timer = setTimeout(() => {
       const take = p.photos.splice(0,3);
-      const vid = p.p.viewerId;
+      const vid = p.viewerId; // <<< corrigi aqui (antes estava p.p.viewerId por engano)
       p.timer = null;
       if (take && take.length) processPhotosAndUpload(take, vid).catch(e => log('❌ processPhotosAndUpload error: ' + e));
     }, MAX_WAIT_MS_FOR_BATCH);
@@ -619,11 +619,22 @@
       try {
         const ctx = printCanvas.getContext('2d');
         ctx.clearRect(0,0,printCanvas.width,printCanvas.height);
+
+        // Garantir que temos sempre 3 entradas locais para desenhar (evita faltar uma foto quando chamada com 1-2)
+        const photosLocal = (Array.isArray(photos) ? photos.slice(0,3) : []).slice(0,3);
+        while (photosLocal.length < 3) {
+          // duplica a última ou a primeira se faltar
+          if (photosLocal.length) photosLocal.push(photosLocal[photosLocal.length - 1]);
+          else if (Array.isArray(photos) && photos.length) photosLocal.push(photos[0]);
+          else photosLocal.push(''); // ficará como erro de carregamento
+        }
+
         const bg = new Image();
         bg.crossOrigin = 'anonymous';
         bg.onload = async () => {
           try { ctx.drawImage(bg, 0, 0, printCanvas.width, printCanvas.height); } catch(e){ log('⚠️ draw bg print error: ' + e); }
-          const loaders = photos.slice(0,3).map((p, i) => new Promise((res) => {
+
+          const loaders = photosLocal.map((p, i) => new Promise((res) => {
             const img = new Image();
             img.crossOrigin = 'anonymous';
             img.onload = () => res({ ok:true, img, i });
@@ -686,7 +697,7 @@
           ctx2.fillStyle = '#000';
           ctx2.fillRect(0,0,printCanvas.width,printCanvas.height);
           (async () => {
-            const loaders = photos.slice(0,3).map((p, i) => new Promise((res) => {
+            const loaders = photosLocal.map((p, i) => new Promise((res) => {
               const img = new Image();
               img.crossOrigin = 'anonymous';
               img.onload = () => res({ ok:true, img, i });
