@@ -22,7 +22,8 @@
 
     /* WELCOME SCREEN (with a real IMG as background) */
     #welcomeScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#111;padding:0;overflow:hidden}
-    #welcomeBg{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:1}
+    /* ensure background image doesn't block clicks on top elements */
+    #welcomeBg{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:1;pointer-events:none}
     /* Start button absolute on top of image using your coords mapping (4000x2250) */
     #startBtn {
       position:absolute;
@@ -36,11 +37,11 @@
       color:#fff;font-weight:800;font-size:22px;letter-spacing:0.6px;
       text-transform:uppercase;
       z-index:50;
+      -webkit-tap-highlight-color: transparent;
     }
     #startBtn .label{ pointer-events:none }
 
     /* Video & canvas */
-    /* espelhamento invertido aplicado apenas aqui: scaleX(1) (antes -1) */
     #videoEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:5;transform:scaleX(-1)}
     #canvasEl{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;display:none;z-index:6}
     #progress{position:fixed;left:50%;transform:translateX(-50%);top:18px;padding:8px 12px;border-radius:10px;background:rgba(0,0,0,0.55);font-weight:700;z-index:200}
@@ -144,7 +145,7 @@
 
   <script>
     /* ---------- Config ---------- */
-    const SERVER_URL = "https://festadodavi-production-0591.up.railway.app";
+    const SERVER_URL = "https://festadodavi.onrender.com";
     const MAX_PHOTOS = 3;
     const COUNTDOWN_SECONDS = 5;
     const MAX_SEND_WIDTH = 1280; // resize before sending to reduce upload time
@@ -197,7 +198,7 @@
 
     /* debug */
     setInterval(() => {
-      debugInfo.textContent = Sessão: ${session} | Socket: ${socket.connected ? '🟢' : '🔴'} | Fotos: ${photos.length}/${MAX_PHOTOS} | Capturando: ${isCapturing ? 'SIM' : 'NÃO'} | VizLocked: ${visualizerLocked ? 'SIM' : 'NÃO'};
+      debugInfo.textContent = `Sessão: ${session} | Socket: ${socket.connected ? '🟢' : '🔴'} | Fotos: ${photos.length}/${MAX_PHOTOS} | Capturando: ${isCapturing ? 'SIM' : 'NÃO'} | VizLocked: ${visualizerLocked ? 'SIM' : 'NÃO'}`;
     }, 700);
 
     /* ---------- Helpers ---------- */
@@ -227,8 +228,8 @@
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         videoEl.srcObject = stream;
         videoEl.style.display = 'block';
-        // espelhamento invertido aqui: agora scaleX(1) (antes era -1)
-        videoEl.style.transform = 'scaleX(1)';
+        // deixar o vídeo espelhado para combinar com o preview (canvas também espelha ao capturar)
+        videoEl.style.transform = 'scaleX(-1)';
         await videoEl.play().catch(()=>{});
         await new Promise(r=>setTimeout(r,100));
       }catch(err){
@@ -268,7 +269,7 @@
     /* ---------- Capture flow (collect 3 photos, then send once) ---------- */
     async function captureSinglePhotoFlow(){
       isCapturing = true;
-      showProgress(${currentPhotoIndex+1}/${MAX_PHOTOS});
+      showProgress(`${currentPhotoIndex+1}/${MAX_PHOTOS}`);
       if(!stream) await startCamera();
       videoEl.style.display = 'block';
 
@@ -297,7 +298,7 @@
             photos.push(currentPhotoData);
             currentPhotoIndex++;
             // small feedback
-            showMsg(Foto ${currentPhotoIndex} salva. ${currentPhotoIndex < MAX_PHOTOS ? 'Posicione-se para a próxima.' : 'Preparando para enviar...'} );
+            showMsg(`Foto ${currentPhotoIndex} salva. ${currentPhotoIndex < MAX_PHOTOS ? 'Posicione-se para a próxima.' : 'Preparando para enviar...'}`);
             await new Promise(r=>setTimeout(r,600));
             hideMsg();
           } else {
@@ -521,27 +522,35 @@
     }
 
     /* ---------- Events wiring ---------- */
-    enterFsBtn.addEventListener('click', async () => {
-      try { await document.documentElement.requestFullscreen(); } catch(e){ console.warn('fullscreen failed', e); }
-      if(!visualizerLocked) showScreen(welcomeScreen);
-      if(socket && socket.connected) socket.emit('cell_entered_fullscreen', { session });
-    });
+    function attachUIEvents(){
+      try{
+        enterFsBtn.addEventListener('click', async () => {
+          try { await document.documentElement.requestFullscreen(); } catch(e){ console.warn('fullscreen failed', e); }
+          if(!visualizerLocked) showScreen(welcomeScreen);
+          if(socket && socket.connected) socket.emit('cell_entered_fullscreen', { session });
+        });
+        // also handle touchstart for some mobile browsers
+        enterFsBtn.addEventListener('touchstart', (e)=>{ e.preventDefault(); enterFsBtn.click(); });
 
-    startBtn.addEventListener('click', async () => {
-      if(visualizerLocked) return; // bloqueado
-      try { document.getElementById('inicio').currentTime = 0; document.getElementById('inicio').play().catch(()=>{}); } catch(e){}
-      showScreen(null); // hide overlays -> camera
-      currentPhotoIndex = 0; photos = []; currentPhotoData = null;
-      await runCaptureSequence();
-    });
+        startBtn.addEventListener('click', async () => {
+          if(visualizerLocked) return; // bloqueado
+          try { document.getElementById('inicio').currentTime = 0; document.getElementById('inicio').play().catch(()=>{}); } catch(e){}
+          showScreen(null); // hide overlays -> camera
+          currentPhotoIndex = 0; photos = []; currentPhotoData = null;
+          await runCaptureSequence();
+        });
+        startBtn.addEventListener('touchstart', (e)=>{ e.preventDefault(); startBtn.click(); });
 
-    // clicking QR opens visualizer in new tab (if currentVisualizerUrl set)
-    vizQR.addEventListener('click', (ev) => {
-      if(!currentVisualizerUrl) return;
-      try {
-        window.open(currentVisualizerUrl, '_blank', 'noopener');
-      } catch(e){}
-    });
+        vizQR.addEventListener('click', (ev) => {
+          if(!currentVisualizerUrl) return;
+          try { window.open(currentVisualizerUrl, '_blank', 'noopener'); } catch(e){}
+        });
+
+        // preview buttons already wired in showPreviewAndAwaitDecision (they're added per preview)
+      }catch(e){ console.error('attachUIEvents', e); }
+    }
+
+    attachUIEvents();
 
     // socket basic events
     socket.on('connect', () => {
@@ -550,6 +559,11 @@
       hideMsg();
     });
     socket.on('disconnect', () => { console.log('socket disconnected'); });
+
+    // DEBUG: log ANY incoming socket event (temporary — remove se quiser)
+    socket.onAny((event, ...args) => {
+      console.log('[celular] socket event received:', event, ...args);
+    });
 
     // server instructs show visualizer and lock the cell UI
     socket.on('visualizer_ready', (data) => {
